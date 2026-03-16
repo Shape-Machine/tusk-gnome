@@ -341,16 +341,19 @@ class SqlEditor(Gtk.Box):
                         GLib.idle_add(self.show_message, msg)
                 db.commit()
         except Exception as e:
-            import psycopg as _pg
-            if isinstance(e, _pg.Error) and hasattr(e, 'diag'):
-                parts = [e.diag.message_primary or str(e)]
-                if e.diag.message_detail:
-                    parts.append(f'Detail: {e.diag.message_detail}')
-                if e.diag.message_hint:
-                    parts.append(f'Hint: {e.diag.message_hint}')
-                GLib.idle_add(self.show_error, '\n'.join(parts))
-            else:
-                GLib.idle_add(self.show_error, str(e))
+            try:
+                import psycopg as _pg
+                if isinstance(e, _pg.Error) and hasattr(e, 'diag'):
+                    parts = [e.diag.message_primary or str(e)]
+                    if e.diag.message_detail:
+                        parts.append(f'Detail: {e.diag.message_detail}')
+                    if e.diag.message_hint:
+                        parts.append(f'Hint: {e.diag.message_hint}')
+                    GLib.idle_add(self.show_error, '\n'.join(parts))
+                    return
+            except ImportError:
+                pass
+            GLib.idle_add(self.show_error, str(e))
 
     # ── Result display ────────────────────────────────────────────────────────
 
