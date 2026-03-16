@@ -307,6 +307,8 @@ class TablePanel(Gtk.Box):
             self._view_stack.set_visible_child_name('schema')
 
     def load(self, conn, schema, table, item_type='table'):
+        self._current_schema = schema
+        self._current_table = table
         self._set_tabs_for_type(item_type)
         self._spinner.start()
         self._outer.set_visible_child_name('loading')
@@ -400,8 +402,12 @@ class TablePanel(Gtk.Box):
             self._definition_buffer.set_text(definition)
 
         # Data tab — rebuild with dynamic columns
+        table_name = (
+            f'{self._current_schema}.{self._current_table}'
+            if definition is None else None
+        )
         if data_rows:
-            self._data_scroll.set_child(make_column_view(data_cols, data_rows))
+            self._data_scroll.set_child(make_column_view(data_cols, data_rows, table_name=table_name))
         else:
             empty = Adw.StatusPage(title='No data')
             empty.set_vexpand(True)
