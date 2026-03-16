@@ -26,6 +26,7 @@ class DbBrowser(Gtk.Box):
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.set_vexpand(True)
+        self._load_gen = 0
         self._build_ui()
 
     def _build_ui(self):
@@ -78,12 +79,14 @@ class DbBrowser(Gtk.Box):
         self._store.clear()
 
     def load(self, conn):
+        self._load_gen += 1
+        gen = self._load_gen
         self._store.clear()
         self._loading_bar.set_visible(True)
         self._loading_spinner.start()
-        threading.Thread(target=self._fetch_schema, args=(conn,), daemon=True).start()
+        threading.Thread(target=self._fetch_schema, args=(conn, gen), daemon=True).start()
 
-    def _fetch_schema(self, conn):
+    def _fetch_schema(self, conn, gen):
         try:
             import psycopg
             from tunnel import open_tunnel
@@ -116,12 +119,14 @@ class DbBrowser(Gtk.Box):
                 else:
                     schema_items[schema]['views'].append(table)
 
-            GLib.idle_add(self._populate, conn, schema_items)
+            GLib.idle_add(self._populate, conn, schema_items, gen)
 
         except Exception as e:
-            GLib.idle_add(self._show_error, str(e))
+            GLib.idle_add(self._show_error, str(e), gen)
 
-    def _populate(self, conn, schema_items):
+    def _populate(self, conn, schema_items, gen):
+        if gen != self._load_gen:
+            return
         self._loading_spinner.stop()
         self._loading_bar.set_visible(False)
         self._store.clear()
@@ -161,7 +166,9 @@ class DbBrowser(Gtk.Box):
 
         self._tree.expand_all()
 
-    def _show_error(self, error_msg):
+    def _show_error(self, error_msg, gen):
+        if gen != self._load_gen:
+            return
         self._loading_spinner.stop()
         self._loading_bar.set_visible(False)
         self._store.clear()
