@@ -330,11 +330,9 @@ class TuskWindow(Adw.ApplicationWindow):
 
     def _on_connection_updated(self, _dlg, conn, old_row):
         self._store.update(conn)
-        index = old_row.get_index()
-        self._conn_list.remove(old_row)
-        new_row = self._add_connection_row(conn)
-        self._conn_list.remove(new_row)
-        self._conn_list.insert(new_row, index)
+        old_row._conn = conn
+        old_row.set_title(conn['name'])
+        old_row.set_subtitle(f"{conn['host']}:{conn['port']}/{conn['database']}")
         if self._active_conn_id == conn['id']:
             self._set_active_conn(conn)
             self._browser.clear()
