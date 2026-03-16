@@ -95,19 +95,25 @@ if [[ $DO_FLATPAK == 1 ]]; then
     log "Building Flatpak"
     FLATPAK_REPO="$ROOT/_flatpak_repo"
     FLATPAK_BUILD="$ROOT/_flatpak_build"
+    # Keep manifest alongside original so relative "path": "../.." resolves correctly
+    FLATPAK_MANIFEST="$ROOT/packaging/flatpak/_tmp_$APP_ID.json"
     rm -rf "$FLATPAK_BUILD"
+
+    # Substitute @VERSION@ in manifest
+    sed "s/@VERSION@/$VERSION/g" "$ROOT/packaging/flatpak/$APP_ID.json" > "$FLATPAK_MANIFEST"
 
     flatpak-builder \
         --force-clean \
         --repo="$FLATPAK_REPO" \
         "$FLATPAK_BUILD" \
-        "$ROOT/packaging/flatpak/$APP_ID.json"
+        "$FLATPAK_MANIFEST"
 
     flatpak build-bundle \
         "$FLATPAK_REPO" \
         "$DIST/$APP_ID-$VERSION.flatpak" \
         "$APP_ID"
 
+    rm -f "$FLATPAK_MANIFEST"
     ok "Flatpak → $DIST/$APP_ID-$VERSION.flatpak"
 else
     skip "Flatpak"
