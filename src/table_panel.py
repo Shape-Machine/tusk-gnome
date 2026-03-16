@@ -241,18 +241,37 @@ class TablePanel(Gtk.Box):
         self._data_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         self._data_scroll.set_vexpand(True)
 
-        self._data_limit_bar = Gtk.Label()
-        self._data_limit_bar.add_css_class('caption')
-        self._data_limit_bar.add_css_class('dim-label')
-        self._data_limit_bar.set_xalign(0)
-        self._data_limit_bar.set_margin_start(10)
-        self._data_limit_bar.set_margin_top(4)
-        self._data_limit_bar.set_margin_bottom(4)
-        self._data_limit_bar.set_visible(False)
+        self._data_nav_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self._data_nav_bar.set_margin_start(6)
+        self._data_nav_bar.set_margin_end(6)
+        self._data_nav_bar.set_margin_top(2)
+        self._data_nav_bar.set_margin_bottom(2)
+        self._data_nav_bar.set_visible(False)
+
+        self._data_prev_btn = Gtk.Button(icon_name='go-previous-symbolic')
+        self._data_prev_btn.add_css_class('flat')
+        self._data_prev_btn.set_tooltip_text('Previous page')
+        self._data_prev_btn.connect('clicked', lambda _: self._change_data_page(-1))
+        self._data_prev_btn.set_sensitive(False)
+
+        self._data_page_label = Gtk.Label()
+        self._data_page_label.add_css_class('caption')
+        self._data_page_label.add_css_class('dim-label')
+        self._data_page_label.set_hexpand(True)
+
+        self._data_next_btn = Gtk.Button(icon_name='go-next-symbolic')
+        self._data_next_btn.add_css_class('flat')
+        self._data_next_btn.set_tooltip_text('Next page')
+        self._data_next_btn.connect('clicked', lambda _: self._change_data_page(1))
+        self._data_next_btn.set_sensitive(False)
+
+        self._data_nav_bar.append(self._data_prev_btn)
+        self._data_nav_bar.append(self._data_page_label)
+        self._data_nav_bar.append(self._data_next_btn)
 
         data_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         data_box.append(self._data_scroll)
-        data_box.append(self._data_limit_bar)
+        data_box.append(self._data_nav_bar)
         self._page_data = self._view_stack.add_titled_with_icon(
             data_box, 'data', 'Data', 'x-office-spreadsheet-symbolic'
         )
@@ -307,8 +326,11 @@ class TablePanel(Gtk.Box):
             self._view_stack.set_visible_child_name('schema')
 
     def load(self, conn, schema, table, item_type='table'):
+        self._conn = conn
         self._current_schema = schema
         self._current_table = table
+        self._item_type = item_type
+        self._data_page = 0
         self._set_tabs_for_type(item_type)
         self._spinner.start()
         self._outer.set_visible_child_name('loading')
@@ -362,11 +384,11 @@ class TablePanel(Gtk.Box):
                     triggers_rows = cur.fetchall()
 
                     cur.execute(
-                        sql.SQL('SELECT * FROM {}.{} LIMIT %s').format(
+                        sql.SQL('SELECT * FROM {}.{} LIMIT %s OFFSET %s').format(
                             sql.Identifier(schema),
                             sql.Identifier(table),
                         ),
-                        [ROW_LIMIT],
+                        [ROW_LIMIT, 0],
                     )
                     data_cols = [d.name for d in cur.description]
                     data_rows = cur.fetchall()
@@ -401,23 +423,81 @@ class TablePanel(Gtk.Box):
         if definition is not None:
             self._definition_buffer.set_text(definition)
 
-        # Data tab — rebuild with dynamic columns
+        self._populate_data(data_cols, data_rows, 0)
+        self._outer.set_visible_child_name('tabs')
+
+    def _populate_data(self, cols, rows, page):
+        self._data_page = page
         table_name = (
             f'{self._current_schema}.{self._current_table}'
-            if definition is None else None
+            if self._item_type == 'table' else None
         )
-        if data_rows:
-            self._data_scroll.set_child(make_column_view(data_cols, data_rows, table_name=table_name))
+        if rows:
+            self._data_scroll.set_child(make_column_view(cols, rows, table_name=table_name))
         else:
             empty = Adw.StatusPage(title='No data')
             empty.set_vexpand(True)
             self._data_scroll.set_child(empty)
-        if len(data_rows) >= ROW_LIMIT:
-            self._data_limit_bar.set_label(f'Showing first {ROW_LIMIT} rows — results may be truncated')
-            self._data_limit_bar.set_visible(True)
+
+        offset = page * ROW_LIMIT
+        has_more = len(rows) >= ROW_LIMIT
+        if rows:
+            row_start = offset + 1
+            row_end = offset + len(rows)
+            label = f'Rows {row_start}–{row_end}'
+            if has_more:
+                label += f' (page {page + 1})'
+            self._data_page_label.set_label(label)
         else:
-            self._data_limit_bar.set_visible(False)
-        self._outer.set_visible_child_name('tabs')
+            self._data_page_label.set_label('')
+
+        self._data_prev_btn.set_sensitive(page > 0)
+        self._data_next_btn.set_sensitive(has_more)
+        self._data_nav_bar.set_visible(bool(rows) or page > 0)
+
+    def _change_data_page(self, delta):
+        page = self._data_page + delta
+        self._data_prev_btn.set_sensitive(False)
+        self._data_next_btn.set_sensitive(False)
+        threading.Thread(
+            target=self._fetch_data_page,
+            args=(self._conn, self._current_schema, self._current_table, page),
+            daemon=True,
+        ).start()
+
+    def _fetch_data_page(self, conn, schema, table, page):
+        try:
+            import psycopg
+            from psycopg import sql
+            from tunnel import open_tunnel
+
+            with open_tunnel(conn) as (host, port), psycopg.connect(
+                host=host,
+                port=port,
+                dbname=conn['database'],
+                user=conn['username'],
+                password=conn['password'],
+                connect_timeout=10,
+            ) as db:
+                with db.cursor() as cur:
+                    cur.execute(
+                        sql.SQL('SELECT * FROM {}.{} LIMIT %s OFFSET %s').format(
+                            sql.Identifier(schema),
+                            sql.Identifier(table),
+                        ),
+                        [ROW_LIMIT, page * ROW_LIMIT],
+                    )
+                    cols = [d.name for d in cur.description]
+                    rows = cur.fetchall()
+
+            GLib.idle_add(self._populate_data, cols, rows, page)
+        except Exception as e:
+            GLib.idle_add(self._show_data_page_error, str(e))
+
+    def _show_data_page_error(self, error_msg):
+        self._data_page_label.set_label(f'Error: {error_msg}')
+        self._data_prev_btn.set_sensitive(self._data_page > 0)
+        self._data_next_btn.set_sensitive(False)
 
     def _show_error(self, error_msg):
         self._spinner.stop()
