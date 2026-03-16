@@ -27,7 +27,7 @@ chmod +x Tusk-*.AppImage && ./Tusk-*.AppImage
 
 **Debian / Ubuntu:**
 ```bash
-sudo dpkg -i tusk-gnome-*.deb
+sudo apt install ./tusk-gnome-*.deb
 ```
 
 **Fedora / RHEL:**
