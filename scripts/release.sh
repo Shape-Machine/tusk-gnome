@@ -67,11 +67,14 @@ for f in "$ROOT"/src/*.py; do
     cp "$f" "$STAGING/usr/local/share/tusk-gnome/"
 done
 
+# Vendor psycopg (not in most distro repos) into the package
+pip3 install --quiet --target="$STAGING/usr/local/share/tusk-gnome/vendor" "psycopg[binary]"
+
 # Launcher script
 mkdir -p "$STAGING/usr/local/bin"
 cat > "$STAGING/usr/local/bin/tusk" <<LAUNCHER
 #!/bin/bash
-export PYTHONPATH="/usr/local/share/tusk-gnome:\$PYTHONPATH"
+export PYTHONPATH="/usr/local/share/tusk-gnome/vendor:/usr/local/share/tusk-gnome:\$PYTHONPATH"
 exec python3 /usr/local/share/tusk-gnome/main.py "\$@"
 LAUNCHER
 chmod +x "$STAGING/usr/local/bin/tusk"
@@ -166,7 +169,6 @@ if [[ $DO_DEB == 1 ]]; then
         --depends "python3-gi" \
         --depends "gir1.2-gtk-4.0" \
         --depends "gir1.2-adw-1" \
-        --depends "python3-psycopg2 | python3-psycopg" \
         --depends "python3-keyring" \
         --depends "python3-paramiko" \
         --package "$DIST/tusk-gnome-$VERSION.deb" \
