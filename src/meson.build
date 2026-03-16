@@ -29,6 +29,7 @@ tusk_sources = [
   'window.py',
   'connection_dialog.py',
   'connections.py',
+  'data_grid.py',
   'db_browser.py',
   'table_panel.py',
   'sql_editor.py',
