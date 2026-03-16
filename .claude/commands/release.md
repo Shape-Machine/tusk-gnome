@@ -4,8 +4,9 @@ Usage: /release <version> [options]
 
 Steps:
 1. Confirm the version with the user before proceeding
-2. Run `./scripts/release.sh $ARGUMENTS` from the project root
-3. Update the three download badge URLs in README.md to point to the new version's artifacts:
+2. Run `PATH="$HOME/bin:$PATH" ./scripts/release.sh $ARGUMENTS` from the project root — run ALL package types including Flatpak, never pass --skip-flatpak
+3. Update the four download badge URLs in README.md to point to the new version's artifacts:
+   - Flatpak: `xyz.shapemachine.tusk-gnome-{version}.flatpak`
    - AppImage: `Tusk-{version}-x86_64.AppImage`
    - .deb: `tusk-gnome-{version}.deb`
    - .rpm: `tusk-gnome-{version}.rpm`
