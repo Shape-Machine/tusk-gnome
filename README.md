@@ -5,11 +5,36 @@
 <h1 align="center">Tusk</h1>
 <p align="center">A minimal, clean PostgreSQL client for GNOME.</p>
 
+<p align="center">
+  <a href="https://github.com/Shape-Machine/tusk-gnome/releases/latest/download/Tusk-2026.03.16-01-x86_64.AppImage"><img src="https://img.shields.io/badge/Download-AppImage-blue?style=for-the-badge&logo=linux" alt="Download AppImage"/></a>
+  <a href="https://github.com/Shape-Machine/tusk-gnome/releases/latest/download/tusk-gnome-2026.03.16-01.deb"><img src="https://img.shields.io/badge/Download-.deb-orange?style=for-the-badge&logo=debian" alt="Download .deb"/></a>
+  <a href="https://github.com/Shape-Machine/tusk-gnome/releases/latest/download/tusk-gnome-2026.03.16-01.rpm"><img src="https://img.shields.io/badge/Download-.rpm-red?style=for-the-badge&logo=fedora" alt="Download .rpm"/></a>
+</p>
+
 ---
 
 Tusk aims to be the best native PostgreSQL GUI on the GNOME desktop — fast, focused, and out of the way.
 
 See [docs/features.md](docs/features.md) for a full feature overview.
+
+## Install
+
+**AppImage** — works on any Linux distro:
+```bash
+chmod +x Tusk-*.AppImage && ./Tusk-*.AppImage
+```
+
+**Debian / Ubuntu:**
+```bash
+sudo dpkg -i tusk-gnome-*.deb
+```
+
+**Fedora / RHEL:**
+```bash
+sudo rpm -i tusk-gnome-*.rpm
+```
+
+→ [All releases](https://github.com/Shape-Machine/tusk-gnome/releases)
 
 ## Dev setup
 
