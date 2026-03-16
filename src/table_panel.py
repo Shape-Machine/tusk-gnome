@@ -7,6 +7,7 @@ gi.require_version('Adw', '1')
 
 from gi.repository import Gtk, Adw, GLib, Pango
 
+import prefs
 from data_grid import make_column_view
 
 try:
@@ -41,7 +42,7 @@ def _apply_scheme(buf, dark):
     if scheme:
         buf.set_style_scheme(scheme)
 
-ROW_LIMIT = 500
+_PAGE_SIZES = [100, 500, 1000]
 
 _SCHEMA_SQL = """
     SELECT column_name, data_type,
@@ -265,9 +266,19 @@ class TablePanel(Gtk.Box):
         self._data_next_btn.connect('clicked', lambda _: self._change_data_page(1))
         self._data_next_btn.set_sensitive(False)
 
+        saved_size = prefs.get('table_page_size', 500)
+        saved_idx = _PAGE_SIZES.index(saved_size) if saved_size in _PAGE_SIZES else 1
+        self._page_size_drop = Gtk.DropDown(
+            model=Gtk.StringList.new([str(s) for s in _PAGE_SIZES])
+        )
+        self._page_size_drop.set_selected(saved_idx)
+        self._page_size_drop.set_tooltip_text('Rows per page')
+        self._page_size_drop.connect('notify::selected', self._on_page_size_changed)
+
         self._data_nav_bar.append(self._data_prev_btn)
         self._data_nav_bar.append(self._data_page_label)
         self._data_nav_bar.append(self._data_next_btn)
+        self._data_nav_bar.append(self._page_size_drop)
 
         data_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         data_box.append(self._data_scroll)
@@ -324,6 +335,21 @@ class TablePanel(Gtk.Box):
             self._view_stack.set_visible_child_name('schema')
         if self._view_stack.get_visible_child_name() == 'definition' and is_table:
             self._view_stack.set_visible_child_name('schema')
+
+    @property
+    def _page_size(self):
+        return _PAGE_SIZES[self._page_size_drop.get_selected()]
+
+    def _on_page_size_changed(self, _drop, _param):
+        prefs.put('table_page_size', self._page_size)
+        if hasattr(self, '_conn'):
+            self._data_prev_btn.set_sensitive(False)
+            self._data_next_btn.set_sensitive(False)
+            threading.Thread(
+                target=self._fetch_data_page,
+                args=(self._conn, self._current_schema, self._current_table, 0),
+                daemon=True,
+            ).start()
 
     def load(self, conn, schema, table, item_type='table'):
         self._conn = conn
@@ -388,7 +414,7 @@ class TablePanel(Gtk.Box):
                             sql.Identifier(schema),
                             sql.Identifier(table),
                         ),
-                        [ROW_LIMIT, 0],
+                        [self._page_size, 0],
                     )
                     data_cols = [d.name for d in cur.description]
                     data_rows = cur.fetchall()
@@ -439,8 +465,8 @@ class TablePanel(Gtk.Box):
             empty.set_vexpand(True)
             self._data_scroll.set_child(empty)
 
-        offset = page * ROW_LIMIT
-        has_more = len(rows) >= ROW_LIMIT
+        offset = page * self._page_size
+        has_more = len(rows) >= self._page_size
         if rows:
             row_start = offset + 1
             row_end = offset + len(rows)
@@ -485,7 +511,7 @@ class TablePanel(Gtk.Box):
                             sql.Identifier(schema),
                             sql.Identifier(table),
                         ),
-                        [ROW_LIMIT, page * ROW_LIMIT],
+                        [self._page_size, page * self._page_size],
                     )
                     cols = [d.name for d in cur.description]
                     rows = cur.fetchall()
