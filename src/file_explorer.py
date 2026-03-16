@@ -188,11 +188,15 @@ class FileExplorer(Gtk.Box):
         name = entry.get_text().strip()
         if not name:
             return
+        if '/' in name:
+            self._show_create_error('Invalid Name', "Name cannot contain '/'.")
+            return
         if kind == 'folder':
             path = os.path.join(self._current_dir, name)
             try:
                 os.makedirs(path, exist_ok=True)
                 self._refresh()
+                self._select_path(path)
             except OSError as e:
                 self._show_create_error('Could Not Create Folder', str(e))
         else:
@@ -202,9 +206,20 @@ class FileExplorer(Gtk.Box):
             try:
                 open(path, 'a').close()
                 self._refresh()
+                self._select_path(path)
                 self.emit('file-activated', path)
             except OSError as e:
                 self._show_create_error('Could Not Create File', str(e))
+
+    def _select_path(self, path):
+        it = self._store.get_iter_first()
+        while it:
+            if self._store.get_value(it, COL_PATH) == path:
+                tree_path = self._store.get_path(it)
+                self._tree.get_selection().select_path(tree_path)
+                self._tree.scroll_to_cell(tree_path, None, False, 0, 0)
+                return
+            it = self._store.iter_next(it)
 
     def _show_create_error(self, heading, body):
         dialog = Adw.MessageDialog(
