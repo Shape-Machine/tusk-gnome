@@ -5,7 +5,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Gtk, Adw, GObject
+from gi.repository import Gtk, Adw, GObject, Gio, Gdk
 
 import prefs
 
@@ -106,6 +106,31 @@ class FileExplorer(Gtk.Box):
         self._list_stack.add_named(scroll, 'list')
         self._list_stack.add_named(self._error_label, 'error')
         self.append(self._list_stack)
+
+        # ── Context menu ──────────────────────────────────────────────────────
+        self._ctx_path = None
+        self._ctx_is_dir = False
+
+        menu = Gio.Menu()
+        menu.append('Rename', 'ctx.rename')
+        menu.append('Delete', 'ctx.delete')
+
+        ag = Gio.SimpleActionGroup()
+        rename_action = Gio.SimpleAction.new('rename', None)
+        rename_action.connect('activate', lambda *_: self._prompt_rename())
+        ag.add_action(rename_action)
+        delete_action = Gio.SimpleAction.new('delete', None)
+        delete_action.connect('activate', lambda *_: self._confirm_delete())
+        ag.add_action(delete_action)
+        self._tree.insert_action_group('ctx', ag)
+
+        self._context_popover = Gtk.PopoverMenu(menu_model=menu)
+        self._context_popover.set_has_arrow(False)
+        self._context_popover.set_parent(self._tree)
+
+        right_click = Gtk.GestureClick(button=3)
+        right_click.connect('pressed', self._on_right_click)
+        self._tree.add_controller(right_click)
 
     def _can_select(self, _sel, model, path, _current):
         it = model.get_iter(path)
@@ -223,6 +248,117 @@ class FileExplorer(Gtk.Box):
                 self._tree.scroll_to_cell(tree_path, None, False, 0, 0)
                 return
             it = self._store.iter_next(it)
+
+    def _on_right_click(self, _gesture, _n, x, y):
+        result = self._tree.get_path_at_pos(int(x), int(y))
+        if not result:
+            return
+        tree_path, _col, _cx, _cy = result
+        self._tree.get_selection().select_path(tree_path)
+        it = self._store.get_iter(tree_path)
+        self._ctx_path = self._store.get_value(it, COL_PATH)
+        self._ctx_is_dir = self._store.get_value(it, COL_IS_DIR)
+        rect = Gdk.Rectangle()
+        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
+        self._context_popover.set_pointing_to(rect)
+        self._context_popover.popup()
+
+    def _prompt_rename(self):
+        if not self._ctx_path:
+            return
+        old_name = os.path.basename(self._ctx_path)
+        kind = 'folder' if self._ctx_is_dir else 'file'
+        stem = old_name[:-4] if (not self._ctx_is_dir and old_name.endswith('.sql')) else old_name
+
+        entry = Gtk.Entry()
+        entry.set_text(stem)
+        entry.select_region(0, -1)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.set_margin_top(8)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        box.set_margin_bottom(4)
+        box.append(entry)
+
+        dialog = Adw.MessageDialog(
+            transient_for=self.get_root(),
+            heading='Rename Folder' if kind == 'folder' else 'Rename File',
+        )
+        dialog.set_extra_child(box)
+        dialog.add_response('cancel', 'Cancel')
+        dialog.add_response('rename', 'Rename')
+        dialog.set_response_appearance('rename', Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response('rename')
+        dialog.connect('response', self._on_rename_response, entry, kind)
+        entry.connect('activate', lambda _: dialog.response('rename'))
+        dialog.present()
+        entry.grab_focus()
+
+    def _on_rename_response(self, dialog, response, entry, kind):
+        dialog.close()
+        if response != 'rename':
+            return
+        name = entry.get_text().strip()
+        if not name:
+            return
+        if '/' in name:
+            self._show_create_error('Invalid Name', "Name cannot contain '/'.")
+            return
+        if name.startswith('.'):
+            self._show_create_error('Invalid Name', "Name cannot start with '.'.")
+            return
+        if kind == 'file' and not name.endswith('.sql'):
+            name += '.sql'
+        new_path = os.path.join(os.path.dirname(self._ctx_path), name)
+        try:
+            os.rename(self._ctx_path, new_path)
+            self._refresh()
+            self._select_path(new_path)
+        except OSError as e:
+            self._show_create_error('Could Not Rename', str(e))
+
+    def _confirm_delete(self):
+        if not self._ctx_path:
+            return
+        name = os.path.basename(self._ctx_path)
+        if self._ctx_is_dir:
+            try:
+                if os.listdir(self._ctx_path):
+                    self._show_create_error(
+                        'Folder Not Empty',
+                        f'"{name}" cannot be deleted because it is not empty.',
+                    )
+                    return
+            except OSError as e:
+                self._show_create_error('Could Not Delete', str(e))
+                return
+
+        dialog = Adw.MessageDialog(
+            transient_for=self.get_root(),
+            heading='Delete Folder?' if self._ctx_is_dir else 'Delete File?',
+            body=f'"{name}" will be permanently deleted.',
+        )
+        dialog.add_response('cancel', 'Cancel')
+        dialog.add_response('delete', 'Delete')
+        dialog.set_response_appearance('delete', Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response('cancel')
+        dialog.set_close_response('cancel')
+        dialog.connect('response', self._on_delete_response)
+        dialog.present()
+
+    def _on_delete_response(self, dialog, response):
+        dialog.close()
+        if response != 'delete':
+            return
+        try:
+            if self._ctx_is_dir:
+                os.rmdir(self._ctx_path)
+            else:
+                os.unlink(self._ctx_path)
+            self._refresh()
+        except OSError as e:
+            self._show_create_error('Could Not Delete', str(e))
 
     def _show_create_error(self, heading, body):
         dialog = Adw.MessageDialog(
