@@ -471,6 +471,7 @@ class TuskWindow(Adw.ApplicationWindow):
             self._active_conn_label.set_label(f'Connected: {conn["name"]}')
             self._active_conn_label.set_visible(True)
         else:
+            self._active_conn_label.set_label('')
             self._active_conn_label.set_visible(False)
 
         # Update all open SQL editors
