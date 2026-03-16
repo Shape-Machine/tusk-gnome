@@ -57,6 +57,7 @@ class TuskApplication(Adw.Application):
             version=config.VERSION,
             website='https://...',
             issue_url='https://.../issues',
-            comments='A minimal PostgreSQL client for GNOME'
+            comments='A minimal PostgreSQL client for GNOME',
+            copyright='© 2026 Shape Machine',
         )
         dialog.present(win)
