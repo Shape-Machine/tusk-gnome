@@ -38,15 +38,20 @@ def _to_json(columns, rows):
     )
 
 
+def _quote_ident(name):
+    return '"' + name.replace('"', '""') + '"'
+
+
 def _to_insert_sql(columns, rows, table_name):
-    cols = ', '.join(columns)
+    quoted_table = '.'.join(_quote_ident(p) for p in table_name.split('.'))
+    cols = ', '.join(_quote_ident(c) for c in columns)
     lines = []
     for row in rows:
         vals = ', '.join(
             f"'{row.get(i).replace(chr(39), chr(39) * 2)}'"
             for i in range(len(columns))
         )
-        lines.append(f'INSERT INTO {table_name} ({cols}) VALUES ({vals});')
+        lines.append(f'INSERT INTO {quoted_table} ({cols}) VALUES ({vals});')
     return '\n'.join(lines)
 
 
