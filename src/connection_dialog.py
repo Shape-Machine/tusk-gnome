@@ -166,7 +166,7 @@ class ConnectionDialog(Adw.Window):
             action=Gtk.FileChooserAction.OPEN,
         )
         dialog.connect('response', self._on_key_chosen)
-        dialog.show()
+        dialog.present()
 
     def _on_key_chosen(self, dialog, response):
         if response == Gtk.ResponseType.ACCEPT:
