@@ -5,6 +5,7 @@ gi.require_version('Adw', '1')
 
 from gi.repository import Adw, Gio
 
+import config
 from window import TuskWindow
 
 
@@ -51,8 +52,11 @@ class TuskApplication(Adw.Application):
     def _show_about(self, win):
         dialog = Adw.AboutDialog(
             application_name='Tusk',
-            application_icon='io.tusk.Tusk',
-            developer_name='Shape Machine',
-            version='0.1.0',
+            application_icon=config.APP_ID,
+            developer_name='Sri Rang',
+            version=config.VERSION,
+            website='https://...',
+            issue_url='https://.../issues',
+            comments='A minimal PostgreSQL client for GNOME'
         )
         dialog.present(win)
