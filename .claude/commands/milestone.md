@@ -1,4 +1,4 @@
-Show GitHub issues for a milestone.
+Show GitHub issues for a milestone, with open issues grouped by implementation affinity.
 
 Usage: /milestone [milestone-title]
 
@@ -12,11 +12,19 @@ Steps:
 
 2. **Fetch issues** for the resolved milestone:
    ```
-   gh issue list --milestone "<title>" --state all --json number,title,state,labels,assignees --limit 100
+   gh issue list --milestone "<title>" --state all --json number,title,state,labels,body --limit 100
    ```
 
-3. **Display** a clean summary grouped by state:
+3. **Display** a clean summary:
    - Show the milestone title and due date as a header
-   - Group into **Open** and **Closed** sections
+
+   **Open issues — grouped by implementation affinity:**
+   Analyse the open issues and group them by which ones can be implemented together in a single branch (same files, same subsystem, or tightly related behaviour). For each group:
+   - Give the group a short name (e.g. "Empty states", "Loading indicators", "Connection dialog")
+   - List the issues: `#number  title  [labels]`
+   - Suggest a `/issue` invocation: e.g. `/issue 17 18 20`
+
+   **Closed issues** — flat list:
    - For each issue show: `#number  title  [labels]`
-   - Show counts: X open, Y closed, Z total
+
+   Show counts: X open, Y closed, Z total
