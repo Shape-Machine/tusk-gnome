@@ -1,0 +1,9 @@
+#!@PYTHON@
+import os
+import sys
+
+pkgdatadir = '@pkgdatadir@'
+sys.path.insert(1, pkgdatadir)
+
+import main
+main.main()
