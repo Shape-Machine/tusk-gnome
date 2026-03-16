@@ -76,6 +76,9 @@ class DbBrowser(Gtk.Box):
         self.append(scroll)
 
     def clear(self):
+        self._load_gen += 1
+        self._loading_spinner.stop()
+        self._loading_bar.set_visible(False)
         self._store.clear()
 
     def load(self, conn):
