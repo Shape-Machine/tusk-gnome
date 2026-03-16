@@ -2,7 +2,7 @@
 Name=Tusk
 Comment=PostgreSQL Client for GNOME
 Exec=tusk
-Icon=io.tusk.Tusk
+Icon=xyz.shapemachine.tusk-gnome
 Terminal=false
 Type=Application
 Categories=GTK;GNOME;Utility;Database;

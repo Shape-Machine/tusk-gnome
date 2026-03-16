@@ -259,7 +259,7 @@ class TuskWindow(Adw.ApplicationWindow):
         empty = Adw.StatusPage()
         empty.set_title('Nothing Open')
         empty.set_description('Select a table from the browser or open a .sql file')
-        empty.set_icon_name('io.tusk.Tusk')
+        empty.set_icon_name('xyz.shapemachine.tusk-gnome')
         self._main_stack.add_named(empty, 'empty')
 
         tabs_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)

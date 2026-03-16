@@ -6,7 +6,7 @@ import keyring
 
 CONFIG_DIR = os.path.join(os.path.expanduser('~'), '.config', 'tusk')
 CONNECTIONS_FILE = os.path.join(CONFIG_DIR, 'connections.json')
-KEYRING_SERVICE = 'io.tusk.Tusk'
+KEYRING_SERVICE = 'xyz.shapemachine.tusk-gnome'
 
 
 def _ssh_key(conn_id):

@@ -1,14 +1,14 @@
 install_data(
-  'io.tusk.Tusk.desktop',
+  'xyz.shapemachine.tusk-gnome.desktop',
   install_dir: get_option('datadir') / 'applications',
 )
 
 install_data(
-  'io.tusk.Tusk.gschema.xml',
+  'xyz.shapemachine.tusk-gnome.gschema.xml',
   install_dir: get_option('datadir') / 'glib-2.0' / 'schemas',
 )
 
 install_data(
-  'icons/hicolor/scalable/apps/io.tusk.Tusk.svg',
+  'icons/hicolor/scalable/apps/xyz.shapemachine.tusk-gnome.svg',
   install_dir: get_option('datadir') / 'icons' / 'hicolor' / 'scalable' / 'apps',
 )
