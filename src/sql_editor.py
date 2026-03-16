@@ -62,6 +62,7 @@ class SqlEditor(Gtk.Box):
         self._modified = False
         self._connection = None
         self._autosave_timer = 0
+        self._dark_handler_id = 0
         self._build_ui()
         self._load_file()
         self.connect('destroy', self._on_destroy)
@@ -70,8 +71,8 @@ class SqlEditor(Gtk.Box):
         if _HAS_SOURCE:
             style_mgr = Adw.StyleManager.get_default()
             _apply_scheme(self._buffer, style_mgr.get_dark())
-            style_mgr.connect('notify::dark',
-                              lambda m, _: _apply_scheme(self._buffer, m.get_dark()))
+            self._dark_handler_id = style_mgr.connect(
+                'notify::dark', lambda m, _: _apply_scheme(self._buffer, m.get_dark()))
 
     def _build_ui(self):
         # ── Toolbar ───────────────────────────────────────────────────────────
@@ -208,6 +209,9 @@ class SqlEditor(Gtk.Box):
             GLib.source_remove(self._autosave_timer)
             self._autosave_timer = 0
             self._do_save()
+        if self._dark_handler_id:
+            Adw.StyleManager.get_default().disconnect(self._dark_handler_id)
+            self._dark_handler_id = 0
 
     def _save_now(self):
         if self._autosave_timer:
