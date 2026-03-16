@@ -85,6 +85,7 @@ def make_column_view(columns, rows, table_name=None):
     col_view.set_hexpand(True)
 
     _right_clicked_cell = [None]
+    _cell_clicked = [False]
 
     for i, name in enumerate(columns):
         factory = Gtk.SignalListItemFactory()
@@ -97,6 +98,7 @@ def make_column_view(columns, rows, table_name=None):
             cell_gesture = Gtk.GestureClick(button=3)
             def _on_cell_rclick(_g, _n, _x, _y, lbl=label):
                 _right_clicked_cell[0] = getattr(lbl, '_raw_value', None)
+                _cell_clicked[0] = True
             cell_gesture.connect('pressed', _on_cell_rclick)
             label.add_controller(cell_gesture)
             list_item.set_child(label)
@@ -146,6 +148,7 @@ def make_column_view(columns, rows, table_name=None):
         _copy_to_clipboard('' if v is None else str(v))
 
     cell_action = make_action('cell', lambda *_: _copy_cell())
+    cell_action.set_enabled(False)
     sel_csv  = make_action('sel-csv',  lambda *_: _copy_to_clipboard(_to_csv(columns, get_selected_rows())))
     sel_json = make_action('sel-json', lambda *_: _copy_to_clipboard(_to_json(columns, get_selected_rows())))
     all_csv  = make_action('all-csv',  lambda *_: _copy_to_clipboard(_to_csv(columns, get_all_rows())))
@@ -196,6 +199,8 @@ def make_column_view(columns, rows, table_name=None):
     popover.set_parent(col_view)
 
     def on_right_click(_gesture, _n, x, y):
+        cell_action.set_enabled(_cell_clicked[0])
+        _cell_clicked[0] = False
         rect = Gdk.Rectangle()
         rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
         popover.set_pointing_to(rect)
