@@ -3,7 +3,7 @@ pkgdatadir = get_option('prefix') / get_option('datadir') / meson.project_name()
 conf = configuration_data()
 conf.set('PYTHON', py.full_path())
 conf.set('VERSION', meson.project_version())
-conf.set('APP_ID', 'io.tusk.Tusk')
+conf.set('APP_ID', 'xyz.shapemachine.tusk-gnome')
 conf.set('pkgdatadir', pkgdatadir)
 
 configure_file(

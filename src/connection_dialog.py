@@ -9,6 +9,8 @@ gi.require_version('Adw', '1')
 
 from gi.repository import Gtk, Adw, GObject, GLib
 
+from connections import KEYRING_SERVICE
+
 
 class ConnectionDialog(Adw.Window):
     __gsignals__ = {
@@ -98,7 +100,7 @@ class ConnectionDialog(Adw.Window):
         self._database_row.set_text(conn['database'] if conn else 'postgres')
         self._username_row.set_text(conn['username'] if conn else 'postgres')
 
-        db_password = (keyring.get_password('io.tusk.Tusk', conn['id']) if conn else '') or ''
+        db_password = (keyring.get_password(KEYRING_SERVICE, conn['id']) if conn else '') or ''
         self._password_row.set_text(db_password)
 
         ssh_enabled = conn.get('ssh_enabled', False) if conn else False
@@ -110,7 +112,7 @@ class ConnectionDialog(Adw.Window):
         self._ssh_key_row.set_text(conn.get('ssh_key_path', '') if conn else '')
 
         ssh_passphrase = (
-            keyring.get_password('io.tusk.Tusk', f"{conn['id']}:ssh") if conn else ''
+            keyring.get_password(KEYRING_SERVICE, f"{conn['id']}:ssh") if conn else ''
         ) or ''
         self._ssh_passphrase_row.set_text(ssh_passphrase)
 

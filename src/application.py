@@ -11,9 +11,9 @@ from window import TuskWindow
 
 class TuskApplication(Adw.Application):
     def __init__(self):
-        super().__init__(application_id='io.tusk.Tusk')
+        super().__init__(application_id='xyz.shapemachine.tusk-gnome')
         self.connect('activate', self._on_activate)
-        self.set_resource_base_path('/io/tusk/Tusk')
+        self.set_resource_base_path('/xyz/shapemachine/tusk-gnome')
         self._register_accels()
 
     def _register_accels(self):

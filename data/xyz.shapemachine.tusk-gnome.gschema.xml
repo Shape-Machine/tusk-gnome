@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
-  <schema id="io.tusk.Tusk" path="/io/tusk/Tusk/">
+  <schema id="xyz.shapemachine.tusk-gnome" path="/xyz/shapemachine/tusk-gnome/">
     <key name="window-width" type="i">
       <default>1100</default>
       <summary>Window width</summary>
