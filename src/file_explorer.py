@@ -191,6 +191,9 @@ class FileExplorer(Gtk.Box):
         if '/' in name:
             self._show_create_error('Invalid Name', "Name cannot contain '/'.")
             return
+        if name.startswith('.'):
+            self._show_create_error('Invalid Name', "Name cannot start with '.'.")
+            return
         if kind == 'folder':
             path = os.path.join(self._current_dir, name)
             try:
