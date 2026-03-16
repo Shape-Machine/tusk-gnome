@@ -7,6 +7,7 @@ gi.require_version('Adw', '1')
 
 from gi.repository import Gtk, Adw, Gio, GLib, GObject
 
+import prefs
 from connections import ConnectionStore
 from connection_dialog import ConnectionDialog
 from db_browser import DbBrowser
@@ -100,10 +101,12 @@ class TuskWindow(Adw.ApplicationWindow):
 
         # Vertical pane: DB browser (top) + file explorer (bottom)
         sidebar_paned = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
-        sidebar_paned.set_position(320)
+        sidebar_paned.set_position(prefs.get('sidebar_pane_pos', 320))
         sidebar_paned.set_vexpand(True)
         sidebar_paned.set_shrink_start_child(False)
         sidebar_paned.set_shrink_end_child(False)
+        sidebar_paned.connect('notify::position',
+                              lambda p, _: prefs.put('sidebar_pane_pos', p.get_position()))
 
         self._browser = DbBrowser()
         self._browser.connect('table-selected', self._on_table_selected)

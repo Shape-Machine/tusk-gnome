@@ -1,6 +1,8 @@
 import os
 import threading
 
+import prefs
+
 import gi
 
 gi.require_version('Gtk', '4.0')
@@ -133,9 +135,6 @@ class SqlEditor(Gtk.Box):
         editor_scroll.set_child(self._editor)
 
         # ── Results pane ──────────────────────────────────────────────────────
-        self._results_revealer = Gtk.Revealer()
-        self._results_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_UP)
-
         results_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
 
         results_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -175,15 +174,22 @@ class SqlEditor(Gtk.Box):
 
         self._results_scroll = Gtk.ScrolledWindow()
         self._results_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        self._results_scroll.set_max_content_height(280)
-        self._results_scroll.set_propagate_natural_height(True)
+        self._results_scroll.set_vexpand(True)
         self._results_stack.add_named(self._results_scroll, 'grid')
 
         results_box.append(self._results_stack)
-        self._results_revealer.set_child(results_box)
 
-        self.append(editor_scroll)
-        self.append(self._results_revealer)
+        self._paned = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
+        self._paned.set_vexpand(True)
+        self._paned.set_shrink_start_child(False)
+        self._paned.set_shrink_end_child(False)
+        self._paned.set_start_child(editor_scroll)
+        self._paned.set_end_child(results_box)
+        self._paned.set_position(prefs.get('sql_pane_pos', 400))
+        self._paned.connect('notify::position',
+                            lambda p, _: prefs.put('sql_pane_pos', p.get_position()))
+
+        self.append(self._paned)
 
     # ── File I/O ──────────────────────────────────────────────────────────────
 
@@ -267,7 +273,6 @@ class SqlEditor(Gtk.Box):
         self._run_btn.set_sensitive(False)
         self._results_meta.set_label('')
         self._results_spinner.start()
-        self._results_revealer.set_reveal_child(True)
         self._results_stack.set_visible_child_name('message')
         self._results_message.set_label('Running…')
         self._results_message.remove_css_class('error')
@@ -331,7 +336,6 @@ class SqlEditor(Gtk.Box):
 
         self._results_scroll.set_child(tree)
         self._results_stack.set_visible_child_name('grid')
-        self._results_revealer.set_reveal_child(True)
 
     def show_message(self, text):
         self._results_spinner.stop()
@@ -339,7 +343,6 @@ class SqlEditor(Gtk.Box):
         self._results_message.set_label(text)
         self._results_message.remove_css_class('error')
         self._results_stack.set_visible_child_name('message')
-        self._results_revealer.set_reveal_child(True)
 
     def show_error(self, text):
         self._results_spinner.stop()
@@ -347,4 +350,3 @@ class SqlEditor(Gtk.Box):
         self._results_message.set_label(text)
         self._results_message.add_css_class('error')
         self._results_stack.set_visible_child_name('message')
-        self._results_revealer.set_reveal_child(True)
