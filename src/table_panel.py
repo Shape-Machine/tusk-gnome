@@ -5,7 +5,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Gtk, Adw, GLib, Pango, Gdk
+from gi.repository import Gtk, Adw, GLib, Pango
 
 import prefs
 from data_grid import make_column_view
@@ -298,10 +298,6 @@ class TablePanel(Gtk.Box):
         switcher_bar.append(self._switcher)
         switcher_bar.append(self._refresh_btn)
 
-        key_ctrl = Gtk.EventControllerKey()
-        key_ctrl.connect('key-pressed', self._on_key_pressed)
-        self.add_controller(key_ctrl)
-
         tabs_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         tabs_box.append(switcher_bar)
         tabs_box.append(Gtk.Separator())
@@ -368,13 +364,6 @@ class TablePanel(Gtk.Box):
 
     def _on_refresh(self):
         self.load(self._conn, self._current_schema, self._current_table, self._item_type)
-
-    def _on_key_pressed(self, _ctrl, keyval, _code, state):
-        if state & Gdk.ModifierType.CONTROL_MASK and keyval == Gdk.KEY_r:
-            if self._refresh_btn.get_sensitive():
-                self._on_refresh()
-            return True
-        return False
 
     def load(self, conn, schema, table, item_type='table'):
         self._conn = conn
