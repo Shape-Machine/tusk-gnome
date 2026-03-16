@@ -137,6 +137,7 @@ _DDL_SQL = """
 class TablePanel(Gtk.Box):
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        self._load_gen = 0
         self._build_ui()
 
     def _build_ui(self):
@@ -363,7 +364,8 @@ class TablePanel(Gtk.Box):
             ).start()
 
     def _on_refresh(self):
-        self.load(self._conn, self._current_schema, self._current_table, self._item_type)
+        if self._refresh_btn.get_sensitive():
+            self.load(self._conn, self._current_schema, self._current_table, self._item_type)
 
     def load(self, conn, schema, table, item_type='table'):
         self._conn = conn
@@ -371,17 +373,18 @@ class TablePanel(Gtk.Box):
         self._current_table = table
         self._item_type = item_type
         self._data_page = 0
+        self._load_gen += 1
         self._refresh_btn.set_sensitive(False)
         self._set_tabs_for_type(item_type)
         self._spinner.start()
         self._outer.set_visible_child_name('loading')
         threading.Thread(
             target=self._fetch_all,
-            args=(conn, schema, table, item_type),
+            args=(conn, schema, table, item_type, self._load_gen),
             daemon=True,
         ).start()
 
-    def _fetch_all(self, conn, schema, table, item_type):
+    def _fetch_all(self, conn, schema, table, item_type, gen):
         try:
             import psycopg
             from psycopg import sql
@@ -437,10 +440,10 @@ class TablePanel(Gtk.Box):
             GLib.idle_add(
                 self._populate,
                 schema_rows, keys_rows, relations_rows, triggers_rows,
-                indexes_rows, ddl, definition, data_cols, data_rows,
+                indexes_rows, ddl, definition, data_cols, data_rows, gen,
             )
         except Exception as e:
-            GLib.idle_add(self._show_error, str(e))
+            GLib.idle_add(self._show_error, str(e), gen)
 
     def _fill_tree(self, stack, tree, rows):
         store = tree.get_model()
@@ -450,7 +453,9 @@ class TablePanel(Gtk.Box):
         stack.set_visible_child_name('tree' if rows else 'empty')
 
     def _populate(self, schema_rows, keys_rows, relations_rows, triggers_rows,
-                  indexes_rows, ddl, definition, data_cols, data_rows):
+                  indexes_rows, ddl, definition, data_cols, data_rows, gen):
+        if gen != self._load_gen:
+            return
         self._spinner.stop()
         self._refresh_btn.set_sensitive(True)
 
@@ -545,7 +550,9 @@ class TablePanel(Gtk.Box):
         self._data_prev_btn.set_sensitive(self._data_page > 0)
         self._data_next_btn.set_sensitive(False)
 
-    def _show_error(self, error_msg):
+    def _show_error(self, error_msg, gen):
+        if gen != self._load_gen:
+            return
         self._spinner.stop()
         self._refresh_btn.set_sensitive(True)
         self._error_page.set_title('Failed to Load Table')
