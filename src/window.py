@@ -203,6 +203,12 @@ class TuskWindow(Adw.ApplicationWindow):
         self._conn_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self._conn_list.connect('row-activated', self._on_connection_activated)
 
+        placeholder = Adw.StatusPage()
+        placeholder.set_title('No connections')
+        placeholder.set_description('Click + to add your first connection')
+        placeholder.set_icon_name('network-server-symbolic')
+        self._conn_list.set_placeholder(placeholder)
+
         conn_scroll = Gtk.ScrolledWindow()
         conn_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         conn_scroll.set_propagate_natural_height(True)
@@ -304,6 +310,7 @@ class TuskWindow(Adw.ApplicationWindow):
         menu_btn.set_menu_model(menu)
         menu_btn.add_css_class('flat')
         menu_btn.set_valign(Gtk.Align.CENTER)
+        menu_btn.set_tooltip_text('Connection options')
         row.add_suffix(menu_btn)
 
         ag = Gio.SimpleActionGroup()
