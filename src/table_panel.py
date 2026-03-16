@@ -5,7 +5,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Gtk, Adw, GLib, Pango
+from gi.repository import Gtk, Adw, GLib, Pango, Gdk
 
 import prefs
 from data_grid import make_column_view
@@ -287,8 +287,23 @@ class TablePanel(Gtk.Box):
             data_box, 'data', 'Data', 'x-office-spreadsheet-symbolic'
         )
 
+        self._refresh_btn = Gtk.Button(icon_name='view-refresh-symbolic')
+        self._refresh_btn.add_css_class('flat')
+        self._refresh_btn.set_tooltip_text('Refresh  Ctrl+R')
+        self._refresh_btn.set_sensitive(False)
+        self._refresh_btn.connect('clicked', lambda _: self._on_refresh())
+
+        switcher_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        self._switcher.set_hexpand(True)
+        switcher_bar.append(self._switcher)
+        switcher_bar.append(self._refresh_btn)
+
+        key_ctrl = Gtk.EventControllerKey()
+        key_ctrl.connect('key-pressed', self._on_key_pressed)
+        self.add_controller(key_ctrl)
+
         tabs_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        tabs_box.append(self._switcher)
+        tabs_box.append(switcher_bar)
         tabs_box.append(Gtk.Separator())
         tabs_box.append(self._view_stack)
         self._outer.add_named(tabs_box, 'tabs')
@@ -351,12 +366,23 @@ class TablePanel(Gtk.Box):
                 daemon=True,
             ).start()
 
+    def _on_refresh(self):
+        self.load(self._conn, self._current_schema, self._current_table, self._item_type)
+
+    def _on_key_pressed(self, _ctrl, keyval, _code, state):
+        if state & Gdk.ModifierType.CONTROL_MASK and keyval == Gdk.KEY_r:
+            if self._refresh_btn.get_sensitive():
+                self._on_refresh()
+            return True
+        return False
+
     def load(self, conn, schema, table, item_type='table'):
         self._conn = conn
         self._current_schema = schema
         self._current_table = table
         self._item_type = item_type
         self._data_page = 0
+        self._refresh_btn.set_sensitive(False)
         self._set_tabs_for_type(item_type)
         self._spinner.start()
         self._outer.set_visible_child_name('loading')
@@ -437,6 +463,7 @@ class TablePanel(Gtk.Box):
     def _populate(self, schema_rows, keys_rows, relations_rows, triggers_rows,
                   indexes_rows, ddl, definition, data_cols, data_rows):
         self._spinner.stop()
+        self._refresh_btn.set_sensitive(True)
 
         self._fill_tree(self._schema_stack, self._schema_tree, schema_rows)
         self._fill_tree(self._keys_stack, self._keys_tree, keys_rows)
@@ -531,6 +558,7 @@ class TablePanel(Gtk.Box):
 
     def _show_error(self, error_msg):
         self._spinner.stop()
+        self._refresh_btn.set_sensitive(True)
         self._error_page.set_title('Failed to Load Table')
         self._error_page.set_description(error_msg)
         self._error_page.set_icon_name('dialog-error-symbolic')
