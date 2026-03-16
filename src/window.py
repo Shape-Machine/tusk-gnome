@@ -8,7 +8,7 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, Gio, GLib, GObject, Gdk
 
 import prefs
-from connections import ConnectionStore
+from connections import ConnectionStore, KeyringUnavailableError
 from connection_dialog import ConnectionDialog
 from db_browser import DbBrowser
 from file_explorer import FileExplorer
@@ -323,8 +323,23 @@ class TuskWindow(Adw.ApplicationWindow):
         dlg.connect('connection-saved', self._on_connection_added)
         dlg.present()
 
+    def _show_keyring_error(self, msg):
+        dialog = Adw.MessageDialog(
+            transient_for=self,
+            heading='Secrets Service Unavailable',
+            body=f'Passwords could not be saved or retrieved. '
+                 f'Make sure a secrets service (e.g. GNOME Keyring) is running.\n\nDetail: {msg}',
+        )
+        dialog.add_response('ok', 'OK')
+        dialog.set_default_response('ok')
+        dialog.present()
+
     def _on_connection_added(self, _dlg, conn):
-        self._store.add(conn)
+        try:
+            self._store.add(conn)
+        except KeyringUnavailableError as e:
+            self._show_keyring_error(str(e))
+            return
         self._add_connection_row(conn)
 
     def _on_edit_connection(self, row):
@@ -333,7 +348,11 @@ class TuskWindow(Adw.ApplicationWindow):
         dlg.present()
 
     def _on_connection_updated(self, _dlg, conn, old_row):
-        self._store.update(conn)
+        try:
+            self._store.update(conn)
+        except KeyringUnavailableError as e:
+            self._show_keyring_error(str(e))
+            return
         old_row._conn = conn
         old_row.set_title(conn['name'])
         old_row.set_subtitle(self._conn_subtitle(conn))
@@ -360,7 +379,11 @@ class TuskWindow(Adw.ApplicationWindow):
         if response != 'delete':
             return
         conn = row._conn
-        self._store.remove(conn['id'])
+        try:
+            self._store.remove(conn['id'])
+        except KeyringUnavailableError as e:
+            self._show_keyring_error(str(e))
+            return
         self._conn_list.remove(row)
         if self._active_conn_id == conn['id']:
             self._set_active_conn(None)
@@ -374,7 +397,11 @@ class TuskWindow(Adw.ApplicationWindow):
         }
 
     def _on_connection_activated(self, _listbox, row):
-        conn = self._conn_with_password(row._conn)
+        try:
+            conn = self._conn_with_password(row._conn)
+        except KeyringUnavailableError as e:
+            self._show_keyring_error(str(e))
+            return
         self._set_active_conn(conn)
         self._browser.load(conn)
 
