@@ -3,11 +3,14 @@ PREFIX    := $(HOME)/.local
 VENV      := .venv
 PYTHON    := $(VENV)/bin/python3
 
-.PHONY: run build install uninstall clean deps lint format
+.PHONY: run build install uninstall clean deps apt-deps lint format
 
 $(VENV):
 	python3 -m venv --system-site-packages $(VENV)
 	$(PYTHON) -m ensurepip --upgrade
+
+apt-deps:
+	sudo apt install -y gir1.2-gtksource-5
 
 deps: $(VENV)
 	$(PYTHON) -m pip install psycopg[binary] keyring paramiko

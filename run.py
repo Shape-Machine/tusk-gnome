@@ -3,8 +3,12 @@
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(ROOT, 'src'))
+
+# Make GTK find our icons without needing make install
+_data = os.path.join(ROOT, 'data')
+os.environ['XDG_DATA_DIRS'] = _data + ':' + os.environ.get('XDG_DATA_DIRS', '/usr/local/share:/usr/share')
 
 from main import main
-
 sys.exit(main())

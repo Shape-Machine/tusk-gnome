@@ -21,7 +21,10 @@ tusk_sources = [
   'connection_dialog.py',
   'connections.py',
   'db_browser.py',
-  'table_view.py',
+  'table_panel.py',
+  'sql_editor.py',
+  'file_explorer.py',
+  'prefs.py',
   'tunnel.py',
 ]
 
