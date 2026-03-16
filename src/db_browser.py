@@ -117,8 +117,27 @@ class DbBrowser(Gtk.Box):
         return False
 
     def _on_search_changed(self, _entry):
-        self._filter.refilter()
-        self._tree.expand_all()
+        query = self._search_entry.get_text().strip()
+        if query:
+            if not self._saved_expansion:
+                self._saved_expansion = self._get_expanded_paths()
+            self._filter.refilter()
+            self._tree.expand_all()
+        else:
+            self._filter.refilter()
+            if self._saved_expansion is not None:
+                self._restore_expanded_paths(self._saved_expansion)
+                self._saved_expansion = None
+
+    def _get_expanded_paths(self):
+        expanded = []
+        self._tree.map_expanded_rows(lambda _tree, path: expanded.append(path.copy()))
+        return expanded
+
+    def _restore_expanded_paths(self, paths):
+        self._tree.collapse_all()
+        for path in paths:
+            self._tree.expand_row(path, False)
 
     def clear(self):
         self._load_gen += 1
@@ -131,6 +150,7 @@ class DbBrowser(Gtk.Box):
     def load(self, conn):
         self._load_gen += 1
         gen = self._load_gen
+        self._saved_expansion = None
         self._store.clear()
         self._search_entry.set_text('')
         self._loading_bar.set_visible(True)
@@ -215,6 +235,7 @@ class DbBrowser(Gtk.Box):
                     'dialog-information-symbolic', 'No views in this schema', 'info', conn, schema, ''
                 ])
 
+        self._saved_expansion = None
         self._search_entry.set_visible(True)
         self._tree.expand_all()
 
