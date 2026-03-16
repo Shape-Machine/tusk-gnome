@@ -361,7 +361,7 @@ class SqlEditor(Gtk.Box):
 
     def show_results(self, columns, rows):
         self._results_spinner.stop()
-        self._run_btn.set_sensitive(True)
+        self._run_btn.set_sensitive(self._connection is not None)
         self._results_meta.set_label(f'{len(rows)} row{"s" if len(rows) != 1 else ""}')
 
         if not rows:
@@ -375,14 +375,14 @@ class SqlEditor(Gtk.Box):
 
     def show_message(self, text):
         self._results_spinner.stop()
-        self._run_btn.set_sensitive(True)
+        self._run_btn.set_sensitive(self._connection is not None)
         self._results_message.set_label(text)
         self._results_message.remove_css_class('error')
         self._results_stack.set_visible_child_name('message')
 
     def show_error(self, text):
         self._results_spinner.stop()
-        self._run_btn.set_sensitive(True)
+        self._run_btn.set_sensitive(self._connection is not None)
         self._results_message.set_label(text)
         self._results_message.add_css_class('error')
         self._results_stack.set_visible_child_name('message')
