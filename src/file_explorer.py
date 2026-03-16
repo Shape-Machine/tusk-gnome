@@ -180,8 +180,8 @@ class FileExplorer(Gtk.Box):
             try:
                 os.makedirs(path, exist_ok=True)
                 self._refresh()
-            except OSError:
-                pass
+            except OSError as e:
+                self._show_create_error('Could Not Create Folder', str(e))
         else:
             if not name.endswith('.sql'):
                 name += '.sql'
@@ -190,5 +190,15 @@ class FileExplorer(Gtk.Box):
                 open(path, 'a').close()
                 self._refresh()
                 self.emit('file-activated', path)
-            except OSError:
-                pass
+            except OSError as e:
+                self._show_create_error('Could Not Create File', str(e))
+
+    def _show_create_error(self, heading, body):
+        dialog = Adw.MessageDialog(
+            transient_for=self.get_root(),
+            heading=heading,
+            body=body,
+        )
+        dialog.add_response('ok', 'OK')
+        dialog.set_default_response('ok')
+        dialog.present()
