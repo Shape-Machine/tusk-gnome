@@ -218,7 +218,8 @@ class SqlEditor(Gtk.Box):
         if self._autosave_timer:
             GLib.source_remove(self._autosave_timer)
             self._autosave_timer = 0
-            self._do_save()
+            if os.path.exists(self.file_path):
+                self._do_save()
         if self._save_label_timer:
             GLib.source_remove(self._save_label_timer)
             self._save_label_timer = 0
