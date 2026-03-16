@@ -25,8 +25,10 @@ class ConnectionStore:
         return []
 
     def _save(self):
-        with open(CONNECTIONS_FILE, 'w') as f:
+        tmp = CONNECTIONS_FILE + '.tmp'
+        with open(tmp, 'w') as f:
             json.dump(self._connections, f, indent=2)
+        os.replace(tmp, CONNECTIONS_FILE)
 
     def list(self):
         return list(self._connections)
