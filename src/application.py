@@ -3,7 +3,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Adw, Gio, Gtk
+from gi.repository import Adw, Gio
 
 from window import TuskWindow
 
@@ -45,7 +45,5 @@ class TuskApplication(Adw.Application):
             application_icon='io.tusk.Tusk',
             developer_name='Shape Machine',
             version='0.1.0',
-            comments='A minimal PostgreSQL client for GNOME',
-            license_type=Gtk.License.GPL_3_0,
         )
         dialog.present(win)
