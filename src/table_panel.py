@@ -7,6 +7,38 @@ gi.require_version('Adw', '1')
 
 from gi.repository import Gtk, Adw, GLib, Pango
 
+try:
+    gi.require_version('GtkSource', '5')
+    from gi.repository import GtkSource
+    _HAS_SOURCE = True
+except (ValueError, ImportError):
+    _HAS_SOURCE = False
+
+
+def _make_source_view():
+    if _HAS_SOURCE:
+        buf = GtkSource.Buffer()
+        lang = GtkSource.LanguageManager.get_default().get_language('sql')
+        if lang:
+            buf.set_language(lang)
+        view = GtkSource.View.new_with_buffer(buf)
+        view.set_show_line_numbers(True)
+        view.set_tab_width(4)
+        return buf, view
+    buf = Gtk.TextBuffer()
+    view = Gtk.TextView(buffer=buf)
+    return buf, view
+
+
+def _apply_scheme(buf, dark):
+    if not _HAS_SOURCE:
+        return
+    mgr = GtkSource.StyleSchemeManager.get_default()
+    name = 'Adwaita-dark' if dark else 'Adwaita'
+    scheme = mgr.get_scheme(name) or mgr.get_scheme('classic')
+    if scheme:
+        buf.set_style_scheme(scheme)
+
 ROW_LIMIT = 500
 
 _SCHEMA_SQL = """
@@ -167,8 +199,7 @@ class TablePanel(Gtk.Box):
         )
 
         # DDL tab (tables only)
-        self._ddl_buffer = Gtk.TextBuffer()
-        ddl_view = Gtk.TextView(buffer=self._ddl_buffer)
+        self._ddl_buffer, ddl_view = _make_source_view()
         ddl_view.set_editable(False)
         ddl_view.set_monospace(True)
         ddl_view.set_wrap_mode(Gtk.WrapMode.NONE)
@@ -181,6 +212,11 @@ class TablePanel(Gtk.Box):
         self._page_ddl = self._view_stack.add_titled_with_icon(
             ddl_scroll, 'ddl', 'DDL', 'accessories-text-editor-symbolic'
         )
+        if _HAS_SOURCE:
+            style_mgr = Adw.StyleManager.get_default()
+            _apply_scheme(self._ddl_buffer, style_mgr.get_dark())
+            style_mgr.connect('notify::dark',
+                              lambda m, _: _apply_scheme(self._ddl_buffer, m.get_dark()))
 
         # Definition tab (views only)
         self._definition_buffer = Gtk.TextBuffer()
