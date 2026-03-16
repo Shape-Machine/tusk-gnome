@@ -377,6 +377,18 @@ class TuskWindow(Adw.ApplicationWindow):
         self._browser.load(conn)
 
     def _set_active_conn(self, conn):
+        # Close all table tabs belonging to the previous connection
+        if self._active_conn_id:
+            prefix = f'table:{self._active_conn_id}:'
+            pages = self._tab_view.get_pages()
+            to_close = [
+                pages.get_item(i)
+                for i in range(pages.get_n_items())
+                if getattr(pages.get_item(i), '_tab_id', '').startswith(prefix)
+            ]
+            for page in to_close:
+                self._tab_view.close_page(page)
+
         self._active_conn_id = conn['id'] if conn else None
         self._active_conn = conn
         # Update all open SQL editors
