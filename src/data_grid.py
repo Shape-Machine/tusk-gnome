@@ -84,6 +84,8 @@ def make_column_view(columns, rows, table_name=None):
     col_view.set_show_column_separators(True)
     col_view.set_hexpand(True)
 
+    _right_clicked_cell = [None]
+
     for i, name in enumerate(columns):
         factory = Gtk.SignalListItemFactory()
 
@@ -92,10 +94,23 @@ def make_column_view(columns, rows, table_name=None):
             label.set_xalign(0)
             label.set_ellipsize(Pango.EllipsizeMode.END)
             label.set_max_width_chars(40)
+            cell_gesture = Gtk.GestureClick(button=3)
+            def _on_cell_rclick(_g, _n, _x, _y, lbl=label):
+                _right_clicked_cell[0] = getattr(lbl, '_raw_value', None)
+            cell_gesture.connect('pressed', _on_cell_rclick)
+            label.add_controller(cell_gesture)
             list_item.set_child(label)
 
         def on_bind(_factory, list_item, col_idx=i):
-            list_item.get_child().set_text(list_item.get_item().get(col_idx))
+            label = list_item.get_child()
+            raw = list_item.get_item().raw(col_idx)
+            label._raw_value = raw
+            if raw is None:
+                label.set_text('NULL')
+                label.add_css_class('dim-label')
+            else:
+                label.set_text(list_item.get_item().get(col_idx))
+                label.remove_css_class('dim-label')
 
         factory.connect('setup', on_setup)
         factory.connect('bind', on_bind)
@@ -126,6 +141,11 @@ def make_column_view(columns, rows, table_name=None):
         ag.add_action(action)
         return action
 
+    def _copy_cell():
+        v = _right_clicked_cell[0]
+        _copy_to_clipboard('' if v is None else str(v))
+
+    cell_action = make_action('cell', lambda *_: _copy_cell())
     sel_csv  = make_action('sel-csv',  lambda *_: _copy_to_clipboard(_to_csv(columns, get_selected_rows())))
     sel_json = make_action('sel-json', lambda *_: _copy_to_clipboard(_to_json(columns, get_selected_rows())))
     all_csv  = make_action('all-csv',  lambda *_: _copy_to_clipboard(_to_csv(columns, get_all_rows())))
@@ -151,6 +171,9 @@ def make_column_view(columns, rows, table_name=None):
     col_view.insert_action_group('copy', ag)
 
     # Build menu model
+    cell_section = Gio.Menu()
+    cell_section.append('Copy cell value', 'copy.cell')
+
     selected_section = Gio.Menu()
     selected_section.append('Copy selected as CSV',  'copy.sel-csv')
     selected_section.append('Copy selected as JSON', 'copy.sel-json')
@@ -164,6 +187,7 @@ def make_column_view(columns, rows, table_name=None):
         all_section.append('Copy all as INSERT SQL', 'copy.all-sql')
 
     menu = Gio.Menu()
+    menu.append_section(None, cell_section)
     menu.append_section(None, selected_section)
     menu.append_section(None, all_section)
 
