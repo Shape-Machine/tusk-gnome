@@ -414,7 +414,7 @@ class TablePanel(Gtk.Box):
                             sql.Identifier(schema),
                             sql.Identifier(table),
                         ),
-                        [self._page_size, 0],
+                        [self._page_size + 1, 0],
                     )
                     data_cols = [d.name for d in cur.description]
                     data_rows = cur.fetchall()
@@ -454,6 +454,11 @@ class TablePanel(Gtk.Box):
 
     def _populate_data(self, cols, rows, page):
         self._data_page = page
+        # The query fetched page_size + 1 rows; the extra row is a sentinel
+        # indicating there is another page — it is never displayed.
+        has_more = len(rows) > self._page_size
+        rows = rows[:self._page_size]
+
         table_name = (
             f'{self._current_schema}.{self._current_table}'
             if self._item_type == 'table' else None
@@ -466,7 +471,6 @@ class TablePanel(Gtk.Box):
             self._data_scroll.set_child(empty)
 
         offset = page * self._page_size
-        has_more = len(rows) >= self._page_size
         if rows:
             row_start = offset + 1
             row_end = offset + len(rows)
@@ -511,7 +515,7 @@ class TablePanel(Gtk.Box):
                             sql.Identifier(schema),
                             sql.Identifier(table),
                         ),
-                        [self._page_size, page * self._page_size],
+                        [self._page_size + 1, page * self._page_size],
                     )
                     cols = [d.name for d in cur.description]
                     rows = cur.fetchall()
