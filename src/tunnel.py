@@ -76,10 +76,14 @@ def open_tunnel(conn):
 
     local_port = _free_port()
     server_sock = socket.socket()
-    server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server_sock.bind(('127.0.0.1', local_port))
-    server_sock.listen(5)
-    server_sock.settimeout(1)
+    try:
+        server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server_sock.bind(('127.0.0.1', local_port))
+        server_sock.listen(5)
+        server_sock.settimeout(1)
+    except Exception:
+        server_sock.close()
+        raise
 
     stop = threading.Event()
 
