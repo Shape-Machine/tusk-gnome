@@ -1,0 +1,28 @@
+Name:           tusk-gnome
+Version:        @VERSION@
+Release:        1%{?dist}
+Summary:        PostgreSQL client for GNOME
+License:        Source Available
+URL:            https://github.com/Shape-Machine/tusk-gnome
+
+Requires:       python3
+Requires:       python3-gobject
+Requires:       gtk4
+Requires:       libadwaita
+
+%description
+A minimal, clean PostgreSQL client for the GNOME desktop.
+
+%install
+cp -r %{_builddir}/installroot/* %{buildroot}/
+
+%files
+/usr/local/bin/tusk
+/usr/local/share/tusk-gnome/
+/usr/local/share/applications/xyz.shapemachine.tusk-gnome.desktop
+/usr/local/share/icons/hicolor/scalable/apps/xyz.shapemachine.tusk-gnome.svg
+/usr/local/share/glib-2.0/schemas/xyz.shapemachine.tusk-gnome.gschema.xml
+
+%changelog
+* $(date "+%%a %%b %%d %%Y") Shape Machine <hello@shapemachine.xyz> - @VERSION@-1
+- Release @VERSION@

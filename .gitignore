@@ -3,3 +3,9 @@ __pycache__/
 *.pyc
 *.pyo
 .venv
+dist/
+_release_build/
+_release_staging/
+_flatpak_repo/
+_flatpak_build/
+_appimage/
