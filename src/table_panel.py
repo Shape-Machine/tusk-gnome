@@ -442,7 +442,12 @@ class TablePanel(Gtk.Box):
             self._definition_buffer.set_text(definition)
 
         # Data tab — rebuild with dynamic columns
-        self._data_scroll.set_child(_make_column_view(data_cols, data_rows))
+        if data_rows:
+            self._data_scroll.set_child(_make_column_view(data_cols, data_rows))
+        else:
+            empty = Adw.StatusPage(title='No Data', icon_name='x-office-spreadsheet-symbolic')
+            empty.set_vexpand(True)
+            self._data_scroll.set_child(empty)
         if len(data_rows) >= ROW_LIMIT:
             self._data_limit_bar.set_label(f'Showing first {ROW_LIMIT} rows — results may be truncated')
             self._data_limit_bar.set_visible(True)
