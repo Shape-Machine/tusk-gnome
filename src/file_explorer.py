@@ -165,6 +165,7 @@ class FileExplorer(Gtk.Box):
         dialog.set_response_appearance('create', Adw.ResponseAppearance.SUGGESTED)
         dialog.set_default_response('create')
         dialog.connect('response', self._on_create_response, entry, kind)
+        entry.connect('activate', lambda _: dialog.response('create'))
         dialog.present()
         entry.grab_focus()
 
