@@ -265,11 +265,14 @@ class FileExplorer(Gtk.Box):
         self._context_popover.popup()
 
     def _prompt_rename(self):
-        if not self._ctx_path:
+        # Snapshot at dialog-open time so a subsequent right-click can't overwrite
+        ctx_path = self._ctx_path
+        ctx_is_dir = self._ctx_is_dir
+        if not ctx_path:
             return
-        old_name = os.path.basename(self._ctx_path)
-        kind = 'folder' if self._ctx_is_dir else 'file'
-        stem = old_name[:-4] if (not self._ctx_is_dir and old_name.endswith('.sql')) else old_name
+        old_name = os.path.basename(ctx_path)
+        kind = 'folder' if ctx_is_dir else 'file'
+        stem = old_name[:-4] if (not ctx_is_dir and old_name.endswith('.sql')) else old_name
 
         entry = Gtk.Entry()
         entry.set_text(stem)
@@ -291,12 +294,12 @@ class FileExplorer(Gtk.Box):
         dialog.add_response('rename', 'Rename')
         dialog.set_response_appearance('rename', Adw.ResponseAppearance.SUGGESTED)
         dialog.set_default_response('rename')
-        dialog.connect('response', self._on_rename_response, entry, kind)
+        dialog.connect('response', self._on_rename_response, entry, kind, ctx_path)
         entry.connect('activate', lambda _: dialog.response('rename'))
         dialog.present()
         entry.grab_focus()
 
-    def _on_rename_response(self, dialog, response, entry, kind):
+    def _on_rename_response(self, dialog, response, entry, kind, ctx_path):
         dialog.close()
         if response != 'rename':
             return
@@ -311,21 +314,24 @@ class FileExplorer(Gtk.Box):
             return
         if kind == 'file' and not name.endswith('.sql'):
             name += '.sql'
-        new_path = os.path.join(os.path.dirname(self._ctx_path), name)
+        new_path = os.path.join(os.path.dirname(ctx_path), name)
         try:
-            os.rename(self._ctx_path, new_path)
+            os.rename(ctx_path, new_path)
             self._refresh()
             self._select_path(new_path)
         except OSError as e:
             self._show_create_error('Could Not Rename', str(e))
 
     def _confirm_delete(self):
-        if not self._ctx_path:
+        # Snapshot at dialog-open time so a subsequent right-click can't overwrite
+        ctx_path = self._ctx_path
+        ctx_is_dir = self._ctx_is_dir
+        if not ctx_path:
             return
-        name = os.path.basename(self._ctx_path)
-        if self._ctx_is_dir:
+        name = os.path.basename(ctx_path)
+        if ctx_is_dir:
             try:
-                if os.listdir(self._ctx_path):
+                if os.listdir(ctx_path):
                     self._show_create_error(
                         'Folder Not Empty',
                         f'"{name}" cannot be deleted because it is not empty.',
@@ -337,7 +343,7 @@ class FileExplorer(Gtk.Box):
 
         dialog = Adw.MessageDialog(
             transient_for=self.get_root(),
-            heading='Delete Folder?' if self._ctx_is_dir else 'Delete File?',
+            heading='Delete Folder?' if ctx_is_dir else 'Delete File?',
             body=f'"{name}" will be permanently deleted.',
         )
         dialog.add_response('cancel', 'Cancel')
@@ -345,19 +351,19 @@ class FileExplorer(Gtk.Box):
         dialog.set_response_appearance('delete', Adw.ResponseAppearance.DESTRUCTIVE)
         dialog.set_default_response('cancel')
         dialog.set_close_response('cancel')
-        dialog.connect('response', self._on_delete_response)
+        dialog.connect('response', self._on_delete_response, ctx_path, ctx_is_dir)
         dialog.present()
 
-    def _on_delete_response(self, dialog, response):
+    def _on_delete_response(self, dialog, response, ctx_path, ctx_is_dir):
         dialog.close()
         if response != 'delete':
             return
         try:
-            if self._ctx_is_dir:
-                os.rmdir(self._ctx_path)
+            if ctx_is_dir:
+                os.rmdir(ctx_path)
             else:
-                os.unlink(self._ctx_path)
-                self.emit('file-deleted', self._ctx_path)
+                os.unlink(ctx_path)
+                self.emit('file-deleted', ctx_path)
             self._refresh()
         except OSError as e:
             self._show_create_error('Could Not Delete', str(e))
