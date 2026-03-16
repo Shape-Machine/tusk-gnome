@@ -102,7 +102,7 @@ class SqlEditor(Gtk.Box):
         self._run_btn.add_css_class('suggested-action')
         self._run_btn.add_css_class('pill')
         self._run_btn.set_sensitive(False)
-        self._run_btn.set_tooltip_text('Run SQL  F5')
+        self._run_btn.set_tooltip_text('Run SQL  F5 / Ctrl+Enter')
         self._run_btn.connect('clicked', lambda _: self.emit('run-sql'))
 
         toolbar.append(self._modified_dot)
@@ -234,7 +234,9 @@ class SqlEditor(Gtk.Box):
         if state & Gdk.ModifierType.CONTROL_MASK and keyval == Gdk.KEY_s:
             self._save_now()
             return True
-        if keyval == Gdk.KEY_F5 and self._run_btn.get_sensitive():
+        if keyval in (Gdk.KEY_F5, Gdk.KEY_Return, Gdk.KEY_KP_Enter) and \
+                self._run_btn.get_sensitive() and \
+                (keyval == Gdk.KEY_F5 or state & Gdk.ModifierType.CONTROL_MASK):
             self.emit('run-sql')
             return True
         return False
