@@ -7,11 +7,10 @@ gi.require_version('Adw', '1')
 
 from gi.repository import Gtk, GLib, GObject
 
-# TreeStore column indices
 COL_ICON = 0
 COL_LABEL = 1
-COL_TYPE = 2    # 'schema' | 'table' | 'view' | 'loading' | 'error'
-COL_CONN = 3    # connection dict (TYPE_PYOBJECT)
+COL_TYPE = 2    # 'schema' | 'group' | 'table' | 'view' | 'loading' | 'error'
+COL_CONN = 3
 COL_SCHEMA = 4
 COL_TABLE = 5
 
@@ -20,7 +19,7 @@ class DbBrowser(Gtk.Box):
     __gsignals__ = {
         'table-selected': (
             GObject.SignalFlags.RUN_FIRST, None,
-            (GObject.TYPE_PYOBJECT, str, str),  # conn, schema, table
+            (GObject.TYPE_PYOBJECT, str, str, str),  # conn, schema, table, item_type
         )
     }
 
@@ -40,7 +39,7 @@ class DbBrowser(Gtk.Box):
 
         icon_renderer = Gtk.CellRendererPixbuf()
         text_renderer = Gtk.CellRendererText()
-        text_renderer.set_property('ellipsize', 3)  # Pango.EllipsizeMode.END
+        text_renderer.set_property('ellipsize', 3)
 
         col = Gtk.TreeViewColumn()
         col.pack_start(icon_renderer, False)
@@ -93,7 +92,11 @@ class DbBrowser(Gtk.Box):
 
             schema_items = {}
             for schema, table, ttype in rows:
-                schema_items.setdefault(schema, []).append((table, ttype))
+                schema_items.setdefault(schema, {'tables': [], 'views': []})
+                if ttype == 'BASE TABLE':
+                    schema_items[schema]['tables'].append(table)
+                else:
+                    schema_items[schema]['views'].append(table)
 
             GLib.idle_add(self._populate, conn, schema_items)
 
@@ -113,12 +116,27 @@ class DbBrowser(Gtk.Box):
             schema_it = self._store.append(None, [
                 'folder-symbolic', schema, 'schema', conn, schema, ''
             ])
-            for table, ttype in items:
-                is_table = ttype == 'BASE TABLE'
-                icon = 'x-office-spreadsheet-symbolic' if is_table else 'view-grid-symbolic'
-                item_type = 'table' if is_table else 'view'
-                self._store.append(schema_it, [
-                    icon, table, item_type, conn, schema, table
+
+            if items['tables']:
+                tables_it = self._store.append(schema_it, [
+                    'x-office-spreadsheet-symbolic', 'Tables', 'group', conn, schema, ''
+                ])
+                for table in items['tables']:
+                    self._store.append(tables_it, [
+                        'x-office-spreadsheet-symbolic', table, 'table', conn, schema, table
+                    ])
+
+            views_it = self._store.append(schema_it, [
+                'view-grid-symbolic', 'Views', 'group', conn, schema, ''
+            ])
+            if items['views']:
+                for view in items['views']:
+                    self._store.append(views_it, [
+                        'view-grid-symbolic', view, 'view', conn, schema, view
+                    ])
+            else:
+                self._store.append(views_it, [
+                    'dialog-information-symbolic', 'No views in this schema', 'info', conn, schema, ''
                 ])
 
         self._tree.expand_all()
@@ -136,4 +154,4 @@ class DbBrowser(Gtk.Box):
             conn = self._store.get_value(it, COL_CONN)
             schema = self._store.get_value(it, COL_SCHEMA)
             table = self._store.get_value(it, COL_TABLE)
-            self.emit('table-selected', conn, schema, table)
+            self.emit('table-selected', conn, schema, table, item_type)
