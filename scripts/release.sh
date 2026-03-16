@@ -1,0 +1,199 @@
+#!/usr/bin/env bash
+# Usage: ./scripts/release.sh <version> [--skip-flatpak] [--skip-appimage] [--skip-deb] [--skip-rpm] [--skip-github]
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+# ── Args ──────────────────────────────────────────────────────────────────────
+
+VERSION="${1:-}"
+if [[ -z "$VERSION" ]]; then
+    echo "Usage: $0 <version> [--skip-flatpak] [--skip-appimage] [--skip-deb] [--skip-rpm] [--skip-github]"
+    exit 1
+fi
+shift
+
+DO_FLATPAK=1 DO_APPIMAGE=1 DO_DEB=1 DO_RPM=1 DO_GITHUB=1
+for arg in "$@"; do
+    case "$arg" in
+        --skip-flatpak)  DO_FLATPAK=0  ;;
+        --skip-appimage) DO_APPIMAGE=0 ;;
+        --skip-deb)      DO_DEB=0      ;;
+        --skip-rpm)      DO_RPM=0      ;;
+        --skip-github)   DO_GITHUB=0   ;;
+    esac
+done
+
+APP_ID="xyz.shapemachine.tusk-gnome"
+DIST="$ROOT/dist/$VERSION"
+mkdir -p "$DIST"
+
+log()  { echo "▶ $*"; }
+ok()   { echo "✓ $*"; }
+skip() { echo "– $* (skipped)"; }
+
+# ── Check tools ───────────────────────────────────────────────────────────────
+
+check() {
+    command -v "$1" &>/dev/null || { echo "✗ missing: $1 — $2"; exit 1; }
+}
+
+[[ $DO_FLATPAK  == 1 ]] && check flatpak-builder "sudo apt install flatpak-builder"
+[[ $DO_APPIMAGE == 1 ]] && check appimagetool    "download from https://github.com/AppImage/appimagetool/releases"
+[[ $DO_DEB      == 1 ]] && check fpm             "sudo gem install fpm"
+[[ $DO_RPM      == 1 ]] && check fpm             "sudo gem install fpm"
+[[ $DO_GITHUB   == 1 ]] && check gh              "sudo apt install gh"
+
+# ── 1. Patch version in meson.build ──────────────────────────────────────────
+
+log "Setting version to $VERSION in meson.build"
+sed -i "s/version: '[^']*'/version: '$VERSION'/" meson.build
+ok "meson.build updated"
+
+# ── 2. Meson install into staging dir ────────────────────────────────────────
+
+STAGING="$ROOT/_release_staging"
+BUILD="$ROOT/_release_build"
+
+log "Building with Meson (prefix=/usr/local)"
+rm -rf "$BUILD" "$STAGING"
+meson setup "$BUILD" --prefix=/usr/local -Dbuildtype=release --wipe
+meson install -C "$BUILD" --destdir="$STAGING"
+ok "Meson install complete → $STAGING"
+
+# ── 3. Flatpak ────────────────────────────────────────────────────────────────
+
+if [[ $DO_FLATPAK == 1 ]]; then
+    log "Building Flatpak"
+    FLATPAK_REPO="$ROOT/_flatpak_repo"
+    FLATPAK_BUILD="$ROOT/_flatpak_build"
+    rm -rf "$FLATPAK_BUILD"
+
+    flatpak-builder \
+        --force-clean \
+        --repo="$FLATPAK_REPO" \
+        "$FLATPAK_BUILD" \
+        "$ROOT/packaging/flatpak/$APP_ID.json"
+
+    flatpak build-bundle \
+        "$FLATPAK_REPO" \
+        "$DIST/$APP_ID-$VERSION.flatpak" \
+        "$APP_ID"
+
+    ok "Flatpak → $DIST/$APP_ID-$VERSION.flatpak"
+else
+    skip "Flatpak"
+fi
+
+# ── 4. AppImage ───────────────────────────────────────────────────────────────
+
+if [[ $DO_APPIMAGE == 1 ]]; then
+    log "Building AppImage"
+    APPDIR="$ROOT/_appimage/$APP_ID.AppDir"
+    rm -rf "$ROOT/_appimage"
+    mkdir -p "$APPDIR"
+
+    # Copy installed files into AppDir
+    cp -r "$STAGING/usr/local/"* "$APPDIR/"
+
+    # AppDir metadata
+    cp "$STAGING/usr/local/share/applications/$APP_ID.desktop" "$APPDIR/$APP_ID.desktop"
+    cp "$STAGING/usr/local/share/icons/hicolor/scalable/apps/$APP_ID.svg" "$APPDIR/$APP_ID.svg"
+
+    cat > "$APPDIR/AppRun" <<'APPRUN'
+#!/bin/bash
+HERE="$(dirname "$(readlink -f "$0")")"
+export PATH="$HERE/bin:$PATH"
+export PYTHONPATH="$HERE/share/tusk-gnome:$PYTHONPATH"
+export XDG_DATA_DIRS="$HERE/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+exec "$HERE/bin/tusk" "$@"
+APPRUN
+    chmod +x "$APPDIR/AppRun"
+
+    ARCH=x86_64 appimagetool "$APPDIR" "$DIST/Tusk-$VERSION-x86_64.AppImage"
+    ok "AppImage → $DIST/Tusk-$VERSION-x86_64.AppImage"
+else
+    skip "AppImage"
+fi
+
+# ── 5. .deb ───────────────────────────────────────────────────────────────────
+
+if [[ $DO_DEB == 1 ]]; then
+    log "Building .deb"
+    fpm \
+        -s dir \
+        -t deb \
+        -n tusk-gnome \
+        -v "$VERSION" \
+        --description "PostgreSQL client for GNOME" \
+        --url "https://github.com/Shape-Machine/tusk-gnome" \
+        --maintainer "Shape Machine <hello@shapemachine.xyz>" \
+        --depends "python3" \
+        --depends "python3-gi" \
+        --depends "gir1.2-gtk-4.0" \
+        --depends "gir1.2-adw-1" \
+        --depends "python3-psycopg2 | python3-psycopg" \
+        --depends "python3-keyring" \
+        --depends "python3-paramiko" \
+        --package "$DIST/tusk-gnome-$VERSION.deb" \
+        -C "$STAGING" \
+        usr
+
+    ok ".deb → $DIST/tusk-gnome-$VERSION.deb"
+else
+    skip ".deb"
+fi
+
+# ── 6. .rpm ───────────────────────────────────────────────────────────────────
+
+if [[ $DO_RPM == 1 ]]; then
+    log "Building .rpm"
+    fpm \
+        -s dir \
+        -t rpm \
+        -n tusk-gnome \
+        -v "$VERSION" \
+        --description "PostgreSQL client for GNOME" \
+        --url "https://github.com/Shape-Machine/tusk-gnome" \
+        --maintainer "Shape Machine <hello@shapemachine.xyz>" \
+        --depends "python3" \
+        --depends "python3-gobject" \
+        --depends "gtk4" \
+        --depends "libadwaita" \
+        --package "$DIST/tusk-gnome-$VERSION.rpm" \
+        -C "$STAGING" \
+        usr
+
+    ok ".rpm → $DIST/tusk-gnome-$VERSION.rpm"
+else
+    skip ".rpm"
+fi
+
+# ── 7. GitHub release ─────────────────────────────────────────────────────────
+
+if [[ $DO_GITHUB == 1 ]]; then
+    log "Publishing GitHub release v$VERSION"
+    ASSETS=()
+    for f in "$DIST"/*; do
+        [[ -f "$f" ]] && ASSETS+=("$f")
+    done
+
+    gh release create "v$VERSION" \
+        --title "v$VERSION" \
+        --notes "Release v$VERSION" \
+        "${ASSETS[@]}"
+
+    ok "GitHub release published → https://github.com/Shape-Machine/tusk-gnome/releases/tag/v$VERSION"
+else
+    skip "GitHub release"
+fi
+
+# ── Done ──────────────────────────────────────────────────────────────────────
+
+echo ""
+echo "────────────────────────────────────────"
+echo "  Release $VERSION complete"
+echo "  Artifacts in: $DIST"
+ls -lh "$DIST"
+echo "────────────────────────────────────────"

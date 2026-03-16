@@ -1,0 +1,68 @@
+{
+  "app-id": "xyz.shapemachine.tusk-gnome",
+  "runtime": "org.gnome.Platform",
+  "runtime-version": "47",
+  "sdk": "org.gnome.Sdk",
+  "command": "tusk",
+  "finish-args": [
+    "--share=network",
+    "--socket=wayland",
+    "--socket=fallback-x11",
+    "--device=dri",
+    "--talk-name=org.freedesktop.secrets",
+    "--filesystem=home"
+  ],
+  "modules": [
+    {
+      "name": "python3-psycopg",
+      "buildsystem": "simple",
+      "build-commands": [
+        "pip3 install --no-index --find-links=. --prefix=/app 'psycopg[binary]'"
+      ],
+      "sources": [
+        {
+          "type": "shell",
+          "commands": [
+            "pip3 download --no-deps --dest=. 'psycopg[binary]'"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "python3-keyring",
+      "buildsystem": "simple",
+      "build-commands": [
+        "pip3 install --no-index --find-links=. keyring"
+      ],
+      "sources": [
+        {
+          "type": "shell",
+          "commands": ["pip3 download --no-deps --dest=. keyring"]
+        }
+      ]
+    },
+    {
+      "name": "python3-paramiko",
+      "buildsystem": "simple",
+      "build-commands": [
+        "pip3 install --no-index --find-links=. paramiko"
+      ],
+      "sources": [
+        {
+          "type": "shell",
+          "commands": ["pip3 download --no-deps --dest=. paramiko"]
+        }
+      ]
+    },
+    {
+      "name": "tusk-gnome",
+      "buildsystem": "meson",
+      "sources": [
+        {
+          "type": "dir",
+          "path": "../.."
+        }
+      ]
+    }
+  ]
+}
