@@ -244,6 +244,7 @@ class TuskWindow(Adw.ApplicationWindow):
         self._file_explorer = FileExplorer()
         self._file_explorer.connect('file-activated', self._on_file_activated)
         self._file_explorer.connect('file-deleted', self._on_file_deleted)
+        self._file_explorer.connect('file-renamed', self._on_file_renamed)
         sidebar_paned.set_end_child(self._file_explorer)
 
         sidebar.append(sidebar_paned)
@@ -527,6 +528,14 @@ class TuskWindow(Adw.ApplicationWindow):
         page = self._find_tab(tab_id)
         if page:
             self._tab_view.close_page(page)
+
+    def _on_file_renamed(self, _explorer, old_path, new_path):
+        tab_id = f'file:{old_path}'
+        page = self._find_tab(tab_id)
+        if page:
+            page._tab_id = f'file:{new_path}'
+            page.set_title(os.path.basename(new_path))
+            page.get_child().file_path = new_path
 
     def _find_tab(self, tab_id):
         pages = self._tab_view.get_pages()
