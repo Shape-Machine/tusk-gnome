@@ -218,6 +218,16 @@ class TuskWindow(Adw.ApplicationWindow):
 
         sidebar.append(Gtk.Separator())
 
+        self._active_conn_label = Gtk.Label()
+        self._active_conn_label.add_css_class('caption')
+        self._active_conn_label.add_css_class('dim-label')
+        self._active_conn_label.set_xalign(0)
+        self._active_conn_label.set_margin_start(10)
+        self._active_conn_label.set_margin_top(4)
+        self._active_conn_label.set_margin_bottom(4)
+        self._active_conn_label.set_visible(False)
+        sidebar.append(self._active_conn_label)
+
         # Vertical pane: DB browser (top) + file explorer (bottom)
         sidebar_paned = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
         sidebar_paned.set_position(prefs.get('sidebar_pane_pos', 320))
@@ -301,7 +311,16 @@ class TuskWindow(Adw.ApplicationWindow):
         row.set_activatable(True)
         row._conn = conn
 
+        dot = Gtk.Label(label='●')
+        dot.add_css_class('accent')
+        dot.set_visible(False)
+        dot.set_tooltip_text('Active connection')
+        dot.set_valign(Gtk.Align.CENTER)
+        row.add_suffix(dot)
+        row._active_dot = dot
+
         menu = Gio.Menu()
+        menu.append('Disconnect', 'row.disconnect')
         menu.append('Edit', 'row.edit')
         menu.append('Delete', 'row.delete')
 
@@ -314,6 +333,11 @@ class TuskWindow(Adw.ApplicationWindow):
         row.add_suffix(menu_btn)
 
         ag = Gio.SimpleActionGroup()
+        disconnect_action = Gio.SimpleAction.new('disconnect', None)
+        disconnect_action.set_enabled(False)
+        disconnect_action.connect('activate', lambda a, p, r=row: self._on_disconnect(r))
+        ag.add_action(disconnect_action)
+        row._disconnect_action = disconnect_action
         edit_action = Gio.SimpleAction.new('edit', None)
         edit_action.connect('activate', lambda a, p, r=row: self._on_edit_connection(r))
         ag.add_action(edit_action)
@@ -412,6 +436,11 @@ class TuskWindow(Adw.ApplicationWindow):
         self._set_active_conn(conn)
         self._browser.load(conn)
 
+    def _on_disconnect(self, row):
+        if self._active_conn_id == row._conn['id']:
+            self._set_active_conn(None)
+            self._browser.clear()
+
     def _set_active_conn(self, conn):
         # Close all table tabs belonging to the previous connection
         if self._active_conn_id:
@@ -427,6 +456,23 @@ class TuskWindow(Adw.ApplicationWindow):
 
         self._active_conn_id = conn['id'] if conn else None
         self._active_conn = conn
+
+        # Update row indicators
+        row = self._conn_list.get_first_child()
+        while row:
+            if hasattr(row, '_conn'):
+                is_active = bool(conn and row._conn['id'] == conn['id'])
+                row._active_dot.set_visible(is_active)
+                row._disconnect_action.set_enabled(is_active)
+            row = row.get_next_sibling()
+
+        # Update active connection label above DB browser
+        if conn:
+            self._active_conn_label.set_label(f'Connected: {conn["name"]}')
+            self._active_conn_label.set_visible(True)
+        else:
+            self._active_conn_label.set_visible(False)
+
         # Update all open SQL editors
         pages = self._tab_view.get_pages()
         for i in range(pages.get_n_items()):
