@@ -445,7 +445,7 @@ class TablePanel(Gtk.Box):
         if data_rows:
             self._data_scroll.set_child(_make_column_view(data_cols, data_rows))
         else:
-            empty = Adw.StatusPage(title='No Data', icon_name='x-office-spreadsheet-symbolic')
+            empty = Adw.StatusPage(title='No data')
             empty.set_vexpand(True)
             self._data_scroll.set_child(empty)
         if len(data_rows) >= ROW_LIMIT:
