@@ -26,7 +26,7 @@ def _make_column_view(columns, rows):
     for row in rows:
         store.append(_Row(['' if v is None else str(v) for v in row]))
 
-    col_view = Gtk.ColumnView(model=Gtk.NoSelection(model=store))
+    col_view = Gtk.ColumnView(model=Gtk.SingleSelection(model=store))
     col_view.set_show_row_separators(True)
     col_view.set_show_column_separators(True)
     col_view.set_hexpand(True)
