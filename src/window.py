@@ -122,6 +122,15 @@ class TuskWindow(Adw.ApplicationWindow):
         self._main_header = Adw.HeaderBar()
         self._header_label = Gtk.Label(label='Tusk')
         self._main_header.set_title_widget(self._header_label)
+
+        menu = Gio.Menu()
+        menu.append('About Tusk', 'app.about')
+
+        menu_btn = Gtk.MenuButton()
+        menu_btn.set_icon_name('open-menu-symbolic')
+        menu_btn.set_menu_model(menu)
+        self._main_header.pack_end(menu_btn)
+
         main_box.append(self._main_header)
 
         # Content: empty state or tab view
