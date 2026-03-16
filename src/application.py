@@ -16,6 +16,7 @@ class TuskApplication(Adw.Application):
         self._register_accels()
 
     def _register_accels(self):
+        self.set_accels_for_action('app.preferences',     ['<Control>comma'])
         self.set_accels_for_action('app.quit',            ['<Control>q'])
         self.set_accels_for_action('win.close-tab',       ['<Control>w'])
         self.set_accels_for_action('win.next-tab',        ['<Control>Tab'])
@@ -38,6 +39,14 @@ class TuskApplication(Adw.Application):
         about_action = Gio.SimpleAction.new('about', None)
         about_action.connect('activate', lambda *_: self._show_about(win))
         self.add_action(about_action)
+
+        prefs_action = Gio.SimpleAction.new('preferences', None)
+        prefs_action.connect('activate', lambda *_: self._show_prefs(win))
+        self.add_action(prefs_action)
+
+    def _show_prefs(self, win):
+        from prefs_dialog import PrefsDialog
+        PrefsDialog(on_change=win._apply_fonts).present(win)
 
     def _show_about(self, win):
         dialog = Adw.AboutDialog(

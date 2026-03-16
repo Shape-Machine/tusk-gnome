@@ -5,7 +5,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Gtk, Adw, Gio, GLib, GObject
+from gi.repository import Gtk, Adw, Gio, GLib, GObject, Gdk
 
 import prefs
 from connections import ConnectionStore
@@ -27,7 +27,15 @@ class TuskWindow(Adw.ApplicationWindow):
         self._store = ConnectionStore()
         self._active_conn_id = None
         self._active_conn = None       # full conn dict with password
+        self._sidebar_css = Gtk.CssProvider()
+        self._main_css = Gtk.CssProvider()
+        display = Gdk.Display.get_default()
+        Gtk.StyleContext.add_provider_for_display(
+            display, self._sidebar_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        Gtk.StyleContext.add_provider_for_display(
+            display, self._main_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         self._build_ui()
+        self._apply_fonts()
         self._add_actions()
         self.set_help_overlay(self._build_shortcuts_window())
         self._load_connections()
@@ -58,6 +66,24 @@ class TuskWindow(Adw.ApplicationWindow):
         pages = self._tab_view.get_pages()
         if index < pages.get_n_items():
             self._tab_view.set_selected_page(pages.get_item(index))
+
+    # ── Fonts ─────────────────────────────────────────────────────────────────
+
+    _FONT_FAMILIES = ['', 'Sans', 'Serif', 'Monospace']
+
+    def _apply_fonts(self):
+        for scope, provider in [('sidebar', self._sidebar_css), ('main', self._main_css)]:
+            family = self._FONT_FAMILIES[prefs.get(f'{scope}_font', 0)]
+            size   = prefs.get(f'{scope}_size', 10)
+            decls  = (f'font-family: {family}; ' if family else '') + f'font-size: {size}pt;'
+            css = (
+                f'.tusk-{scope}, '
+                f'.tusk-{scope} label, '
+                f'.tusk-{scope} textview text, '
+                f'.tusk-{scope} treeview '
+                f'{{ {decls} }}'
+            )
+            provider.load_from_string(css)
 
     # ── Shortcuts window ──────────────────────────────────────────────────────
 
@@ -119,6 +145,12 @@ class TuskWindow(Adw.ApplicationWindow):
             <property name="title">Application</property>
             <child>
               <object class="GtkShortcutsShortcut">
+                <property name="title">Preferences</property>
+                <property name="accelerator">&lt;ctrl&gt;comma</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
                 <property name="title">Keyboard Shortcuts</property>
                 <property name="accelerator">&lt;ctrl&gt;question</property>
               </object>
@@ -152,6 +184,7 @@ class TuskWindow(Adw.ApplicationWindow):
 
     def _build_sidebar(self):
         sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        sidebar.add_css_class('tusk-sidebar')
 
         header = Adw.HeaderBar()
         header.set_show_end_title_buttons(False)
@@ -201,12 +234,14 @@ class TuskWindow(Adw.ApplicationWindow):
 
     def _build_main(self):
         main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        main_box.add_css_class('tusk-main')
 
         self._main_header = Adw.HeaderBar()
         self._header_label = Gtk.Label(label='Tusk')
         self._main_header.set_title_widget(self._header_label)
 
         menu = Gio.Menu()
+        menu.append('Preferences', 'app.preferences')
         menu.append('Keyboard Shortcuts', 'win.show-help-overlay')
         menu.append('About Tusk', 'app.about')
 

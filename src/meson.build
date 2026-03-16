@@ -25,6 +25,7 @@ tusk_sources = [
   'sql_editor.py',
   'file_explorer.py',
   'prefs.py',
+  'prefs_dialog.py',
   'tunnel.py',
 ]
 
