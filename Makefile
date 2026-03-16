@@ -15,7 +15,10 @@ apt-deps:
 release-deps:
 	sudo apt install -y flatpak-builder rpm gh ruby ruby-dev build-essential
 	sudo gem install fpm
-	@echo "Also install appimagetool from https://github.com/AppImage/appimagetool/releases and put it in PATH"
+	@mkdir -p $(HOME)/bin
+	curl -L -o $(HOME)/bin/appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+	chmod +x $(HOME)/bin/appimagetool
+	@echo "Make sure ~/bin is in your PATH"
 
 release:
 	@test -n "$(VERSION)" || (echo "Usage: make release VERSION=x.y.z"; exit 1)
