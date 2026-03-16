@@ -130,8 +130,8 @@ class FileExplorer(Gtk.Box):
                     self._store.append(['folder-symbolic', entry.name, entry.path, True])
                 elif entry.name.endswith('.sql'):
                     self._store.append(['x-office-document-symbolic', entry.name, entry.path, False])
-        except PermissionError:
-            self._error_label.set_label('Permission denied')
+        except OSError as e:
+            self._error_label.set_label('Permission denied' if isinstance(e, PermissionError) else str(e))
             self._list_stack.set_visible_child_name('error')
 
     def _navigate_to(self, path):
