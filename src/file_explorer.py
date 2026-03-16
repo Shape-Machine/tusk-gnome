@@ -169,7 +169,8 @@ class FileExplorer(Gtk.Box):
         dialog.present()
         entry.grab_focus()
 
-    def _on_create_response(self, _dialog, response, entry, kind):
+    def _on_create_response(self, dialog, response, entry, kind):
+        dialog.close()
         if response != 'create':
             return
         name = entry.get_text().strip()
