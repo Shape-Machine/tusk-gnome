@@ -243,6 +243,7 @@ class TuskWindow(Adw.ApplicationWindow):
 
         self._file_explorer = FileExplorer()
         self._file_explorer.connect('file-activated', self._on_file_activated)
+        self._file_explorer.connect('file-deleted', self._on_file_deleted)
         sidebar_paned.set_end_child(self._file_explorer)
 
         sidebar.append(sidebar_paned)
@@ -520,6 +521,12 @@ class TuskWindow(Adw.ApplicationWindow):
 
         self._show_tabs()
         self._tab_view.set_selected_page(page)
+
+    def _on_file_deleted(self, _explorer, file_path):
+        tab_id = f'file:{file_path}'
+        page = self._find_tab(tab_id)
+        if page:
+            self._tab_view.close_page(page)
 
     def _find_tab(self, tab_id):
         pages = self._tab_view.get_pages()
