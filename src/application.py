@@ -57,7 +57,7 @@ class TuskApplication(Adw.Application):
             version=config.VERSION,
             website='https://github.com/Shape-Machine/tusk-gnome',
             issue_url='https://github.com/Shape-Machine/tusk-gnome/issues',
-            comments='A minimal PostgreSQL client for GNOME',
+            comments='PostgreSQL client for GNOME',
             copyright='© 2026 Shape Machine',
         )
         dialog.present(win)
