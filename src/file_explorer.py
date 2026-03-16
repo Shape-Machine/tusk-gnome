@@ -19,6 +19,7 @@ class FileExplorer(Gtk.Box):
     __gsignals__ = {
         'file-activated': (GObject.SignalFlags.RUN_FIRST, None, (str,)),
         'file-deleted':   (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        'file-renamed':   (GObject.SignalFlags.RUN_FIRST, None, (str, str)),
     }
 
     def __init__(self):
@@ -317,6 +318,8 @@ class FileExplorer(Gtk.Box):
         new_path = os.path.join(os.path.dirname(ctx_path), name)
         try:
             os.rename(ctx_path, new_path)
+            if kind == 'file':
+                self.emit('file-renamed', ctx_path, new_path)
             self._refresh()
             self._select_path(new_path)
         except OSError as e:
