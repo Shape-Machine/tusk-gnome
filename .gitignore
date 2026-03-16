@@ -9,3 +9,4 @@ _release_staging/
 _flatpak_repo/
 _flatpak_build/
 _appimage/
+.flatpak-builder/
