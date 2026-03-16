@@ -83,6 +83,7 @@ def open_tunnel(conn):
         server_sock.settimeout(1)
     except Exception:
         server_sock.close()
+        client.close()
         raise
 
     stop = threading.Event()
