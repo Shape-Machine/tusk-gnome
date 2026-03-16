@@ -45,9 +45,23 @@ class DbBrowser(Gtk.Box):
         self._loading_bar.set_visible(False)
         self.append(self._loading_bar)
 
+        # Search entry
+        self._search_entry = Gtk.SearchEntry()
+        self._search_entry.set_placeholder_text('Filter tables…')
+        self._search_entry.set_margin_start(6)
+        self._search_entry.set_margin_end(6)
+        self._search_entry.set_margin_top(4)
+        self._search_entry.set_margin_bottom(4)
+        self._search_entry.set_visible(False)
+        self._search_entry.connect('search-changed', self._on_search_changed)
+        self.append(self._search_entry)
+
         self._store = Gtk.TreeStore(str, str, str, GObject.TYPE_PYOBJECT, str, str)
 
-        self._tree = Gtk.TreeView(model=self._store)
+        self._filter = self._store.filter_new()
+        self._filter.set_visible_func(self._is_visible)
+
+        self._tree = Gtk.TreeView(model=self._filter)
         self._tree.set_headers_visible(False)
         self._tree.set_activate_on_single_click(False)
         self._tree.connect('row-activated', self._on_row_activated)
@@ -75,16 +89,50 @@ class DbBrowser(Gtk.Box):
 
         self.append(scroll)
 
+    def _is_visible(self, model, it, _data):
+        query = self._search_entry.get_text().lower().strip()
+        if not query:
+            return True
+        item_type = model.get_value(it, COL_TYPE)
+        if item_type == 'schema':
+            child = model.iter_children(it)
+            while child:
+                if self._group_has_match(model, child, query):
+                    return True
+                child = model.iter_next(child)
+            return False
+        if item_type == 'group':
+            return self._group_has_match(model, it, query)
+        if item_type in ('table', 'view'):
+            return query in model.get_value(it, COL_LABEL).lower()
+        return True  # info, error
+
+    def _group_has_match(self, model, group_it, query):
+        child = model.iter_children(group_it)
+        while child:
+            if model.get_value(child, COL_TYPE) in ('table', 'view'):
+                if query in model.get_value(child, COL_LABEL).lower():
+                    return True
+            child = model.iter_next(child)
+        return False
+
+    def _on_search_changed(self, _entry):
+        self._filter.refilter()
+        self._tree.expand_all()
+
     def clear(self):
         self._load_gen += 1
         self._loading_spinner.stop()
         self._loading_bar.set_visible(False)
+        self._search_entry.set_text('')
+        self._search_entry.set_visible(False)
         self._store.clear()
 
     def load(self, conn):
         self._load_gen += 1
         gen = self._load_gen
         self._store.clear()
+        self._search_entry.set_text('')
         self._loading_bar.set_visible(True)
         self._loading_spinner.start()
         threading.Thread(target=self._fetch_schema, args=(conn, gen), daemon=True).start()
@@ -167,6 +215,7 @@ class DbBrowser(Gtk.Box):
                     'dialog-information-symbolic', 'No views in this schema', 'info', conn, schema, ''
                 ])
 
+        self._search_entry.set_visible(True)
         self._tree.expand_all()
 
     def _show_error(self, error_msg, gen):
@@ -180,23 +229,23 @@ class DbBrowser(Gtk.Box):
         ])
 
     def _on_row_activated(self, _tree, path, _col):
-        it = self._store.get_iter(path)
-        item_type = self._store.get_value(it, COL_TYPE)
+        it = self._filter.get_iter(path)
+        item_type = self._filter.get_value(it, COL_TYPE)
         if item_type in ('table', 'view'):
-            conn = self._store.get_value(it, COL_CONN)
-            schema = self._store.get_value(it, COL_SCHEMA)
-            table = self._store.get_value(it, COL_TABLE)
+            conn = self._filter.get_value(it, COL_CONN)
+            schema = self._filter.get_value(it, COL_SCHEMA)
+            table = self._filter.get_value(it, COL_TABLE)
             self.emit('table-selected', conn, schema, table, item_type)
 
     def _on_key_pressed(self, _ctrl, keyval, _code, _state):
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             _model, it = self._tree.get_selection().get_selected()
             if it:
-                item_type = self._store.get_value(it, COL_TYPE)
+                item_type = self._filter.get_value(it, COL_TYPE)
                 if item_type in ('table', 'view'):
-                    conn = self._store.get_value(it, COL_CONN)
-                    schema = self._store.get_value(it, COL_SCHEMA)
-                    table = self._store.get_value(it, COL_TABLE)
+                    conn = self._filter.get_value(it, COL_CONN)
+                    schema = self._filter.get_value(it, COL_SCHEMA)
+                    table = self._filter.get_value(it, COL_TABLE)
                     self.emit('table-selected', conn, schema, table, item_type)
                     return True
         return False
