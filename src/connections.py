@@ -64,11 +64,18 @@ class ConnectionStore:
         return conn
 
     def remove(self, conn_id):
-        keyring.delete_password(KEYRING_SERVICE, conn_id)
+        try:
+            keyring.delete_password(KEYRING_SERVICE, conn_id)
+        except keyring.errors.PasswordDeleteError:
+            pass
+        except Exception as e:
+            raise KeyringUnavailableError(str(e)) from e
         try:
             keyring.delete_password(KEYRING_SERVICE, _ssh_key(conn_id))
         except keyring.errors.PasswordDeleteError:
             pass
+        except Exception as e:
+            raise KeyringUnavailableError(str(e)) from e
         self._connections = [c for c in self._connections if c['id'] != conn_id]
         self._save()
 
