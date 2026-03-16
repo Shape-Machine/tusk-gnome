@@ -330,6 +330,12 @@ class SqlEditor(Gtk.Box):
         self._run_btn.set_sensitive(True)
         self._results_meta.set_label(f'{len(rows)} row{"s" if len(rows) != 1 else ""}')
 
+        if not rows:
+            self._results_message.set_label('Query returned 0 rows')
+            self._results_message.remove_css_class('error')
+            self._results_stack.set_visible_child_name('message')
+            return
+
         store = Gtk.ListStore(*([str] * len(columns)))
         for row in rows:
             store.append(['' if v is None else str(v) for v in row])

@@ -95,7 +95,17 @@ class FileExplorer(Gtk.Box):
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroll.set_vexpand(True)
         scroll.set_child(self._tree)
-        self.append(scroll)
+
+        self._error_label = Gtk.Label()
+        self._error_label.add_css_class('error')
+        self._error_label.set_halign(Gtk.Align.CENTER)
+        self._error_label.set_valign(Gtk.Align.CENTER)
+
+        self._list_stack = Gtk.Stack()
+        self._list_stack.set_vexpand(True)
+        self._list_stack.add_named(scroll, 'list')
+        self._list_stack.add_named(self._error_label, 'error')
+        self.append(self._list_stack)
 
     def _can_select(self, _sel, model, path, _current):
         it = model.get_iter(path)
@@ -104,6 +114,7 @@ class FileExplorer(Gtk.Box):
 
     def _refresh(self):
         self._store.clear()
+        self._list_stack.set_visible_child_name('list')
         self._path_label.set_label(self._current_dir)
         self._up_btn.set_sensitive(os.path.dirname(self._current_dir) != self._current_dir)
 
@@ -120,7 +131,8 @@ class FileExplorer(Gtk.Box):
                 elif entry.name.endswith('.sql'):
                     self._store.append(['x-office-document-symbolic', entry.name, entry.path, False])
         except PermissionError:
-            pass
+            self._error_label.set_label('Permission denied')
+            self._list_stack.set_visible_child_name('error')
 
     def _navigate_to(self, path):
         self._current_dir = path
