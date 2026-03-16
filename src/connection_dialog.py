@@ -100,10 +100,13 @@ class ConnectionDialog(Adw.Window):
         self._database_row.set_text(conn['database'] if conn else 'postgres')
         self._username_row.set_text(conn['username'] if conn else 'postgres')
 
+        keyring_failed = False
+
         try:
             db_password = (keyring.get_password(KEYRING_SERVICE, conn['id']) if conn else '') or ''
         except Exception:
             db_password = ''
+            keyring_failed = True
         self._password_row.set_text(db_password)
 
         ssh_enabled = conn.get('ssh_enabled', False) if conn else False
@@ -120,10 +123,20 @@ class ConnectionDialog(Adw.Window):
             ) or ''
         except Exception:
             ssh_passphrase = ''
+            keyring_failed = True
         self._ssh_passphrase_row.set_text(ssh_passphrase)
+
+        self._keyring_warning = Gtk.Label(
+            label='Could not load passwords from keyring. Make sure a secrets service is running.'
+        )
+        self._keyring_warning.add_css_class('warning')
+        self._keyring_warning.set_wrap(True)
+        self._keyring_warning.set_xalign(0)
+        self._keyring_warning.set_visible(keyring_failed)
 
         content.append(details_group)
         content.append(auth_group)
+        content.append(self._keyring_warning)
         content.append(ssh_group)
 
         # ── Test / Save ───────────────────────────────────────────────────────
@@ -138,6 +151,8 @@ class ConnectionDialog(Adw.Window):
 
         self._test_label = Gtk.Label()
         self._test_label.set_xalign(0)
+        self._test_label.set_wrap(True)
+        self._test_label.set_max_width_chars(35)
 
         status_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         status_box.set_halign(Gtk.Align.CENTER)
@@ -246,6 +261,25 @@ class ConnectionDialog(Adw.Window):
             self._test_label.remove_css_class('success')
 
     def _on_save(self, _btn):
+        name = self._name_row.get_text().strip()
+        host = self._host_row.get_text().strip()
+        username = self._username_row.get_text().strip()
+
+        valid = True
+        for row, value in (
+            (self._name_row, name),
+            (self._host_row, host),
+            (self._username_row, username),
+        ):
+            if value:
+                row.remove_css_class('error')
+            else:
+                row.add_css_class('error')
+                valid = False
+
+        if not valid:
+            return
+
         try:
             port = int(self._port_row.get_text().strip())
         except ValueError:
@@ -257,11 +291,11 @@ class ConnectionDialog(Adw.Window):
 
         conn = {
             'id': self._connection['id'] if self._connection else str(uuid.uuid4()),
-            'name': self._name_row.get_text().strip() or 'Unnamed',
-            'host': self._host_row.get_text().strip() or 'localhost',
+            'name': name,
+            'host': host,
             'port': port,
             'database': self._database_row.get_text().strip() or 'postgres',
-            'username': self._username_row.get_text().strip(),
+            'username': username,
             'password': self._password_row.get_text(),
             'ssh_enabled': self._ssh_row.get_enable_expansion(),
             'ssh_host': self._ssh_host_row.get_text().strip(),
