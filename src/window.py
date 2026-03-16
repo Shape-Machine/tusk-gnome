@@ -283,10 +283,14 @@ class TuskWindow(Adw.ApplicationWindow):
         for conn in self._store.list():
             self._add_connection_row(conn)
 
+    @staticmethod
+    def _conn_subtitle(conn):
+        return f"{conn['host']}:{conn['port']}/{conn['database']}"
+
     def _add_connection_row(self, conn):
         row = Adw.ActionRow()
         row.set_title(conn['name'])
-        row.set_subtitle(f"{conn['host']}:{conn['port']}/{conn['database']}")
+        row.set_subtitle(self._conn_subtitle(conn))
         row.set_icon_name('network-server-symbolic')
         row.set_activatable(True)
         row._conn = conn
@@ -332,7 +336,7 @@ class TuskWindow(Adw.ApplicationWindow):
         self._store.update(conn)
         old_row._conn = conn
         old_row.set_title(conn['name'])
-        old_row.set_subtitle(f"{conn['host']}:{conn['port']}/{conn['database']}")
+        old_row.set_subtitle(self._conn_subtitle(conn))
         if self._active_conn_id == conn['id']:
             self._set_active_conn(conn)
             self._browser.clear()
