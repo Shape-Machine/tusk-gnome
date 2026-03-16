@@ -9,6 +9,10 @@ CONNECTIONS_FILE = os.path.join(CONFIG_DIR, 'connections.json')
 KEYRING_SERVICE = 'xyz.shapemachine.tusk-gnome'
 
 
+class KeyringUnavailableError(Exception):
+    pass
+
+
 def _ssh_key(conn_id):
     return f'{conn_id}:ssh'
 
@@ -34,18 +38,27 @@ class ConnectionStore:
         return list(self._connections)
 
     def get_password(self, conn_id):
-        return keyring.get_password(KEYRING_SERVICE, conn_id) or ''
+        try:
+            return keyring.get_password(KEYRING_SERVICE, conn_id) or ''
+        except Exception as e:
+            raise KeyringUnavailableError(str(e)) from e
 
     def get_ssh_passphrase(self, conn_id):
-        return keyring.get_password(KEYRING_SERVICE, _ssh_key(conn_id)) or ''
+        try:
+            return keyring.get_password(KEYRING_SERVICE, _ssh_key(conn_id)) or ''
+        except Exception as e:
+            raise KeyringUnavailableError(str(e)) from e
 
     def add(self, conn):
         if 'id' not in conn:
             conn['id'] = str(uuid.uuid4())
         password = conn.pop('password', '')
         ssh_passphrase = conn.pop('ssh_passphrase', '')
-        keyring.set_password(KEYRING_SERVICE, conn['id'], password)
-        keyring.set_password(KEYRING_SERVICE, _ssh_key(conn['id']), ssh_passphrase)
+        try:
+            keyring.set_password(KEYRING_SERVICE, conn['id'], password)
+            keyring.set_password(KEYRING_SERVICE, _ssh_key(conn['id']), ssh_passphrase)
+        except Exception as e:
+            raise KeyringUnavailableError(str(e)) from e
         self._connections.append(conn)
         self._save()
         return conn
@@ -62,10 +75,13 @@ class ConnectionStore:
     def update(self, conn):
         password = conn.pop('password', None)
         ssh_passphrase = conn.pop('ssh_passphrase', None)
-        if password is not None:
-            keyring.set_password(KEYRING_SERVICE, conn['id'], password)
-        if ssh_passphrase is not None:
-            keyring.set_password(KEYRING_SERVICE, _ssh_key(conn['id']), ssh_passphrase)
+        try:
+            if password is not None:
+                keyring.set_password(KEYRING_SERVICE, conn['id'], password)
+            if ssh_passphrase is not None:
+                keyring.set_password(KEYRING_SERVICE, _ssh_key(conn['id']), ssh_passphrase)
+        except Exception as e:
+            raise KeyringUnavailableError(str(e)) from e
         for i, c in enumerate(self._connections):
             if c['id'] == conn['id']:
                 self._connections[i] = conn
