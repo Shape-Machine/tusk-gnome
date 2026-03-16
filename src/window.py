@@ -29,6 +29,7 @@ class TuskWindow(Adw.ApplicationWindow):
         self._active_conn = None       # full conn dict with password
         self._build_ui()
         self._add_actions()
+        self.set_help_overlay(self._build_shortcuts_window())
         self._load_connections()
 
     # ── Actions / shortcuts ───────────────────────────────────────────────────
@@ -57,6 +58,85 @@ class TuskWindow(Adw.ApplicationWindow):
         pages = self._tab_view.get_pages()
         if index < pages.get_n_items():
             self._tab_view.set_selected_page(pages.get_item(index))
+
+    # ── Shortcuts window ──────────────────────────────────────────────────────
+
+    def _build_shortcuts_window(self):
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <object class="GtkShortcutsWindow" id="win">
+    <property name="modal">1</property>
+    <child>
+      <object class="GtkShortcutsSection">
+        <child>
+          <object class="GtkShortcutsGroup">
+            <property name="title">Tabs</property>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Close Tab</property>
+                <property name="accelerator">&lt;ctrl&gt;w</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Next Tab</property>
+                <property name="accelerator">&lt;ctrl&gt;Tab</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Previous Tab</property>
+                <property name="accelerator">&lt;ctrl&gt;&lt;shift&gt;Tab</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Go to Tab 1–9</property>
+                <property name="accelerator">&lt;alt&gt;1</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkShortcutsGroup">
+            <property name="title">SQL Editor</property>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Run Query</property>
+                <property name="accelerator">F5 &lt;ctrl&gt;Return</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Save File</property>
+                <property name="accelerator">&lt;ctrl&gt;s</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkShortcutsGroup">
+            <property name="title">Application</property>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Keyboard Shortcuts</property>
+                <property name="accelerator">&lt;ctrl&gt;question</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Quit</property>
+                <property name="accelerator">&lt;ctrl&gt;q</property>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+</interface>"""
+        builder = Gtk.Builder.new_from_string(xml, -1)
+        return builder.get_object('win')
 
     # ── UI construction ───────────────────────────────────────────────────────
 
@@ -127,6 +207,7 @@ class TuskWindow(Adw.ApplicationWindow):
         self._main_header.set_title_widget(self._header_label)
 
         menu = Gio.Menu()
+        menu.append('Keyboard Shortcuts', 'win.show-help-overlay')
         menu.append('About Tusk', 'app.about')
 
         menu_btn = Gtk.MenuButton()
