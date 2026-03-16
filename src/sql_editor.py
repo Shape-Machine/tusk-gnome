@@ -207,6 +207,7 @@ class SqlEditor(Gtk.Box):
         if self._autosave_timer:
             GLib.source_remove(self._autosave_timer)
             self._autosave_timer = 0
+            self._do_save()
 
     def _save_now(self):
         if self._autosave_timer:
