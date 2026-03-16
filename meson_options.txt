@@ -1,0 +1,1 @@
+option('app_version', type: 'string', value: '', description: 'Override app version (defaults to project version)')

@@ -5,6 +5,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# Use venv meson/ninja if system ones aren't on PATH
+[[ -f "$ROOT/.venv/bin/meson" ]] && export PATH="$ROOT/.venv/bin:$PATH"
+
 # ── Args ──────────────────────────────────────────────────────────────────────
 
 VERSION="${1:-}"
@@ -47,20 +50,44 @@ check() {
 
 # ── 1. Patch version in meson.build ──────────────────────────────────────────
 
-log "Setting version to $VERSION in meson.build"
-sed -i "s/version: '[^']*'/version: '$VERSION'/" meson.build
-ok "meson.build updated"
-
-# ── 2. Meson install into staging dir ────────────────────────────────────────
-
 STAGING="$ROOT/_release_staging"
 BUILD="$ROOT/_release_build"
 
-log "Building with Meson (prefix=/usr/local)"
+log "Staging install tree (prefix=/usr/local, version=$VERSION)"
 rm -rf "$BUILD" "$STAGING"
-meson setup "$BUILD" --prefix=/usr/local -Dbuildtype=release --wipe
-meson install -C "$BUILD" --destdir="$STAGING"
-ok "Meson install complete → $STAGING"
+
+# Generate config.py with the release version
+mkdir -p "$STAGING/usr/local/share/tusk-gnome"
+sed "s/@VERSION@/$VERSION/g; s/@APP_ID@/xyz.shapemachine.tusk-gnome/g" \
+    "$ROOT/src/config.py.in" > "$STAGING/usr/local/share/tusk-gnome/config.py"
+
+# Copy Python sources
+for f in "$ROOT"/src/*.py; do
+    [[ "$(basename $f)" == "config.py" ]] && continue
+    cp "$f" "$STAGING/usr/local/share/tusk-gnome/"
+done
+
+# Launcher script
+mkdir -p "$STAGING/usr/local/bin"
+cat > "$STAGING/usr/local/bin/tusk" <<LAUNCHER
+#!/bin/bash
+export PYTHONPATH="/usr/local/share/tusk-gnome:\$PYTHONPATH"
+exec python3 /usr/local/share/tusk-gnome/main.py "\$@"
+LAUNCHER
+chmod +x "$STAGING/usr/local/bin/tusk"
+
+# Data files
+mkdir -p "$STAGING/usr/local/share/applications"
+mkdir -p "$STAGING/usr/local/share/icons/hicolor/scalable/apps"
+mkdir -p "$STAGING/usr/local/share/glib-2.0/schemas"
+cp "$ROOT/data/xyz.shapemachine.tusk-gnome.desktop" \
+   "$STAGING/usr/local/share/applications/"
+cp "$ROOT/data/icons/hicolor/scalable/apps/xyz.shapemachine.tusk-gnome.svg" \
+   "$STAGING/usr/local/share/icons/hicolor/scalable/apps/"
+cp "$ROOT/data/xyz.shapemachine.tusk-gnome.gschema.xml" \
+   "$STAGING/usr/local/share/glib-2.0/schemas/"
+
+ok "Staging complete → $STAGING"
 
 # ── 3. Flatpak ────────────────────────────────────────────────────────────────
 

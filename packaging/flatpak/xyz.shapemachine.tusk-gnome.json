@@ -57,6 +57,7 @@
     {
       "name": "tusk-gnome",
       "buildsystem": "meson",
+      "config-opts": ["-Dapp_version=@VERSION@"],
       "sources": [
         {
           "type": "dir",
