@@ -5,7 +5,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Gtk, Adw, GLib, Pango
+from gi.repository import Gtk, Adw, GLib, Pango, Gio, GObject
 
 try:
     gi.require_version('GtkSource', '5')
@@ -40,6 +40,50 @@ def _apply_scheme(buf, dark):
         buf.set_style_scheme(scheme)
 
 ROW_LIMIT = 500
+
+
+class _Row(GObject.Object):
+    __gtype_name__ = 'TuskDataRow'
+
+    def __init__(self, values):
+        super().__init__()
+        self._values = values
+
+    def get(self, i):
+        return self._values[i]
+
+
+def _make_column_view(columns, rows):
+    store = Gio.ListStore(item_type=_Row)
+    for row in rows:
+        store.append(_Row(['' if v is None else str(v) for v in row]))
+
+    col_view = Gtk.ColumnView(model=Gtk.NoSelection(model=store))
+    col_view.set_show_row_separators(True)
+    col_view.set_show_column_separators(True)
+    col_view.set_hexpand(True)
+
+    for i, name in enumerate(columns):
+        factory = Gtk.SignalListItemFactory()
+
+        def on_setup(_factory, list_item):
+            label = Gtk.Label()
+            label.set_xalign(0)
+            label.set_ellipsize(Pango.EllipsizeMode.END)
+            label.set_max_width_chars(40)
+            list_item.set_child(label)
+
+        def on_bind(_factory, list_item, col_idx=i):
+            list_item.get_child().set_text(list_item.get_item().get(col_idx))
+
+        factory.connect('setup', on_setup)
+        factory.connect('bind', on_bind)
+
+        col = Gtk.ColumnViewColumn(title=name, factory=factory)
+        col.set_resizable(True)
+        col_view.append_column(col)
+
+    return col_view
 
 _SCHEMA_SQL = """
     SELECT column_name, data_type,
@@ -398,24 +442,7 @@ class TablePanel(Gtk.Box):
             self._definition_buffer.set_text(definition)
 
         # Data tab — rebuild with dynamic columns
-        store = Gtk.ListStore(*([str] * len(data_cols)))
-        for row in data_rows:
-            store.append(['' if v is None else str(v) for v in row])
-
-        tree = Gtk.TreeView(model=store)
-        tree.set_grid_lines(Gtk.TreeViewGridLines.BOTH)
-        tree.set_enable_search(False)
-
-        for i, name in enumerate(data_cols):
-            renderer = Gtk.CellRendererText()
-            renderer.set_property('ellipsize', 3)
-            col = Gtk.TreeViewColumn(name, renderer, text=i)
-            col.set_resizable(True)
-            col.set_min_width(80)
-            col.set_max_width(400)
-            tree.append_column(col)
-
-        self._data_scroll.set_child(tree)
+        self._data_scroll.set_child(_make_column_view(data_cols, data_rows))
         if len(data_rows) >= ROW_LIMIT:
             self._data_limit_bar.set_label(f'Showing first {ROW_LIMIT} rows — results may be truncated')
             self._data_limit_bar.set_visible(True)
