@@ -141,9 +141,9 @@ if [[ $DO_APPIMAGE == 1 ]]; then
 #!/bin/bash
 HERE="$(dirname "$(readlink -f "$0")")"
 export PATH="$HERE/bin:$PATH"
-export PYTHONPATH="$HERE/share/tusk-gnome:$PYTHONPATH"
+export PYTHONPATH="$HERE/share/tusk-gnome/vendor:$HERE/share/tusk-gnome:$PYTHONPATH"
 export XDG_DATA_DIRS="$HERE/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
-exec "$HERE/bin/tusk" "$@"
+exec python3 "$HERE/share/tusk-gnome/main.py" "$@"
 APPRUN
     chmod +x "$APPDIR/AppRun"
 
