@@ -18,6 +18,21 @@ Tusk aims to be the best native PostgreSQL GUI on the GNOME desktop — fast, fo
 
 See [docs/features.md](docs/features.md) for a full feature overview.
 
+---
+
+## Screenshots
+
+<img src="docs/screenshots/2026.03.16-07-01.png" width="100%"/>
+<img src="docs/screenshots/2026.03.16-07-02.png" width="100%"/>
+<img src="docs/screenshots/2026.03.16-07-03.png" width="100%"/>
+<img src="docs/screenshots/2026.03.16-07-04.png" width="100%"/>
+<img src="docs/screenshots/2026.03.16-07-05.png" width="100%"/>
+<img src="docs/screenshots/2026.03.16-07-06.png" width="100%"/>
+<img src="docs/screenshots/2026.03.16-07-07.png" width="100%"/>
+<img src="docs/screenshots/2026.03.16-07-08.png" width="100%"/>
+
+---
+
 ## Install
 
 **AppImage** — works on any Linux distro:
