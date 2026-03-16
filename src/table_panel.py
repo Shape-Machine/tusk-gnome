@@ -238,8 +238,21 @@ class TablePanel(Gtk.Box):
         self._data_scroll = Gtk.ScrolledWindow()
         self._data_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         self._data_scroll.set_vexpand(True)
+
+        self._data_limit_bar = Gtk.Label()
+        self._data_limit_bar.add_css_class('caption')
+        self._data_limit_bar.add_css_class('dim-label')
+        self._data_limit_bar.set_xalign(0)
+        self._data_limit_bar.set_margin_start(10)
+        self._data_limit_bar.set_margin_top(4)
+        self._data_limit_bar.set_margin_bottom(4)
+        self._data_limit_bar.set_visible(False)
+
+        data_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        data_box.append(self._data_scroll)
+        data_box.append(self._data_limit_bar)
         self._page_data = self._view_stack.add_titled_with_icon(
-            self._data_scroll, 'data', 'Data', 'x-office-spreadsheet-symbolic'
+            data_box, 'data', 'Data', 'x-office-spreadsheet-symbolic'
         )
 
         tabs_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -403,6 +416,11 @@ class TablePanel(Gtk.Box):
             tree.append_column(col)
 
         self._data_scroll.set_child(tree)
+        if len(data_rows) >= ROW_LIMIT:
+            self._data_limit_bar.set_label(f'Showing first {ROW_LIMIT} rows — results may be truncated')
+            self._data_limit_bar.set_visible(True)
+        else:
+            self._data_limit_bar.set_visible(False)
         self._outer.set_visible_child_name('tabs')
 
     def _show_error(self, error_msg):

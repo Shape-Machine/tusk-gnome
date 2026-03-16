@@ -62,6 +62,7 @@ class SqlEditor(Gtk.Box):
         self._modified = False
         self._connection = None
         self._autosave_timer = 0
+        self._save_label_timer = 0
         self._dark_handler_id = 0
         self._build_ui()
         self._load_file()
@@ -85,7 +86,12 @@ class SqlEditor(Gtk.Box):
         self._modified_dot = Gtk.Label(label='●')
         self._modified_dot.add_css_class('accent')
         self._modified_dot.set_visible(False)
-        self._modified_dot.set_tooltip_text('Saving…')
+        self._modified_dot.set_tooltip_text('Unsaved changes')
+
+        self._save_label = Gtk.Label(label='Saved')
+        self._save_label.add_css_class('caption')
+        self._save_label.add_css_class('dim-label')
+        self._save_label.set_visible(False)
 
         save_btn = Gtk.Button(icon_name='document-save-symbolic')
         save_btn.add_css_class('flat')
@@ -108,6 +114,7 @@ class SqlEditor(Gtk.Box):
         self._run_btn.connect('clicked', lambda _: self.emit('run-sql'))
 
         toolbar.append(self._modified_dot)
+        toolbar.append(self._save_label)
         toolbar.append(save_btn)
         toolbar.append(spacer)
         toolbar.append(self._conn_label)
@@ -172,6 +179,7 @@ class SqlEditor(Gtk.Box):
         self._results_message.set_xalign(0)
         self._results_message.set_margin_start(12)
         self._results_message.set_margin_top(10)
+        self._results_message.set_wrap(True)
         self._results_stack.add_named(self._results_message, 'message')
 
         self._results_scroll = Gtk.ScrolledWindow()
@@ -209,6 +217,9 @@ class SqlEditor(Gtk.Box):
             GLib.source_remove(self._autosave_timer)
             self._autosave_timer = 0
             self._do_save()
+        if self._save_label_timer:
+            GLib.source_remove(self._save_label_timer)
+            self._save_label_timer = 0
         if self._dark_handler_id:
             Adw.StyleManager.get_default().disconnect(self._dark_handler_id)
             self._dark_handler_id = 0
@@ -227,9 +238,18 @@ class SqlEditor(Gtk.Box):
             with open(self.file_path, 'w') as f:
                 f.write(text)
             self._set_modified(False)
+            if self._save_label_timer:
+                GLib.source_remove(self._save_label_timer)
+            self._save_label.set_visible(True)
+            self._save_label_timer = GLib.timeout_add(2000, self._hide_save_label)
         except OSError as e:
             self.show_error(str(e))
         return False  # for GLib.timeout_add
+
+    def _hide_save_label(self):
+        self._save_label.set_visible(False)
+        self._save_label_timer = 0
+        return False
 
     def _set_modified(self, value):
         self._modified = value
@@ -321,7 +341,16 @@ class SqlEditor(Gtk.Box):
                         GLib.idle_add(self.show_message, msg)
                 db.commit()
         except Exception as e:
-            GLib.idle_add(self.show_error, str(e))
+            import psycopg as _pg
+            if isinstance(e, _pg.Error) and hasattr(e, 'diag'):
+                parts = [e.diag.message_primary or str(e)]
+                if e.diag.message_detail:
+                    parts.append(f'Detail: {e.diag.message_detail}')
+                if e.diag.message_hint:
+                    parts.append(f'Hint: {e.diag.message_hint}')
+                GLib.idle_add(self.show_error, '\n'.join(parts))
+            else:
+                GLib.idle_add(self.show_error, str(e))
 
     # ── Result display ────────────────────────────────────────────────────────
 
