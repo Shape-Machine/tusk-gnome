@@ -47,7 +47,7 @@ class DbBrowser(Gtk.Box):
 
         # Search entry
         self._search_entry = Gtk.SearchEntry()
-        self._search_entry.set_placeholder_text('Filter tables…')
+        self._search_entry.set_placeholder_text('Filter…')
         self._search_entry.set_margin_start(6)
         self._search_entry.set_margin_end(6)
         self._search_entry.set_margin_top(4)
