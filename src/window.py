@@ -48,9 +48,13 @@ class TuskWindow(Adw.ApplicationWindow):
             a.connect('activate', cb)
             self.add_action(a)
 
-        add('close-tab',  lambda *_: self._close_current_tab())
-        add('next-tab',   lambda *_: self._tab_view.select_next_page())
-        add('prev-tab',   lambda *_: self._tab_view.select_previous_page())
+        add('close-tab',      lambda *_: self._close_current_tab())
+        add('next-tab',       lambda *_: self._tab_view.select_next_page())
+        add('prev-tab',       lambda *_: self._tab_view.select_previous_page())
+        self._refresh_action = Gio.SimpleAction.new('refresh-tab', None)
+        self._refresh_action.connect('activate', lambda *_: self._refresh_current_tab())
+        self._refresh_action.set_enabled(False)
+        self.add_action(self._refresh_action)
         for i in range(1, 10):
             idx = i - 1
             a = Gio.SimpleAction.new(f'goto-tab-{i}', None)
@@ -119,6 +123,17 @@ class TuskWindow(Adw.ApplicationWindow):
               <object class="GtkShortcutsShortcut">
                 <property name="title">Go to Tab 1–9</property>
                 <property name="accelerator">&lt;alt&gt;1</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkShortcutsGroup">
+            <property name="title">Table Inspector</property>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Refresh</property>
+                <property name="accelerator">&lt;ctrl&gt;r</property>
               </object>
             </child>
           </object>
@@ -548,12 +563,19 @@ class TuskWindow(Adw.ApplicationWindow):
     def _show_tabs(self):
         self._main_stack.set_visible_child_name('tabs')
 
+    def _refresh_current_tab(self):
+        page = self._tab_view.get_selected_page()
+        if page and isinstance(page.get_child(), TablePanel):
+            page.get_child()._on_refresh()
+
     def _on_tab_changed(self, tab_view, _param):
         page = tab_view.get_selected_page()
         if page:
             self._header_label.set_label(page.get_title())
+            self._refresh_action.set_enabled(isinstance(page.get_child(), TablePanel))
         else:
             self._header_label.set_label('Tusk')
+            self._refresh_action.set_enabled(False)
 
     def _on_close_page(self, tab_view, page):
         tab_view.close_page_finish(page, True)
