@@ -3,7 +3,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Adw, Gio
+from gi.repository import Adw, Gio, Gtk
 
 from window import TuskWindow
 
@@ -27,7 +27,25 @@ class TuskApplication(Adw.Application):
         win = self.props.active_window
         if not win:
             win = TuskWindow(application=self)
-            quit_action = Gio.SimpleAction.new('quit', None)
-            quit_action.connect('activate', lambda *_: app.quit())
-            self.add_action(quit_action)
+            self._add_app_actions(win)
         win.present()
+
+    def _add_app_actions(self, win):
+        quit_action = Gio.SimpleAction.new('quit', None)
+        quit_action.connect('activate', lambda *_: self.quit())
+        self.add_action(quit_action)
+
+        about_action = Gio.SimpleAction.new('about', None)
+        about_action.connect('activate', lambda *_: self._show_about(win))
+        self.add_action(about_action)
+
+    def _show_about(self, win):
+        dialog = Adw.AboutDialog(
+            application_name='Tusk',
+            application_icon='io.tusk.Tusk',
+            developer_name='Shape Machine',
+            version='0.1.0',
+            comments='A minimal PostgreSQL client for GNOME',
+            license_type=Gtk.License.GPL_3_0,
+        )
+        dialog.present(win)
