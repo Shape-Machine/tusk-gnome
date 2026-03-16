@@ -21,5 +21,7 @@ def put(key, value):
     except (FileNotFoundError, json.JSONDecodeError):
         data = {}
     data[key] = value
-    with open(PREFS_FILE, 'w') as f:
+    tmp = PREFS_FILE + '.tmp'
+    with open(tmp, 'w') as f:
         json.dump(data, f, indent=2)
+    os.replace(tmp, PREFS_FILE)
