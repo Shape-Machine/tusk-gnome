@@ -12,15 +12,21 @@ from gi.repository import Gtk, Gio, GObject, Pango, Gdk
 class _Row(GObject.Object):
     __gtype_name__ = 'TuskRow'
 
-    def __init__(self, values):
+    def __init__(self, raw_values):
         super().__init__()
-        self._values = values
+        self._raw = raw_values
+        self._display = ['' if v is None else str(v) for v in raw_values]
 
     def get(self, i):
-        return self._values[i]
+        """Display string for label rendering."""
+        return self._display[i]
+
+    def raw(self, i):
+        """Original Python value (preserves None and types)."""
+        return self._raw[i]
 
     def values(self):
-        return self._values
+        return self._display
 
 
 def _to_csv(columns, rows):
@@ -33,8 +39,9 @@ def _to_csv(columns, rows):
 
 def _to_json(columns, rows):
     return json.dumps(
-        [{col: row.get(i) for i, col in enumerate(columns)} for row in rows],
+        [{col: row.raw(i) for i, col in enumerate(columns)} for row in rows],
         indent=2,
+        default=str,
     )
 
 
@@ -42,15 +49,22 @@ def _quote_ident(name):
     return '"' + name.replace('"', '""') + '"'
 
 
+def _sql_value(v):
+    if v is None:
+        return 'NULL'
+    if isinstance(v, bool):
+        return 'TRUE' if v else 'FALSE'
+    if isinstance(v, (int, float)):
+        return str(v)
+    return "'" + str(v).replace("'", "''") + "'"
+
+
 def _to_insert_sql(columns, rows, table_name):
     quoted_table = '.'.join(_quote_ident(p) for p in table_name.split('.'))
     cols = ', '.join(_quote_ident(c) for c in columns)
     lines = []
     for row in rows:
-        vals = ', '.join(
-            f"'{row.get(i).replace(chr(39), chr(39) * 2)}'"
-            for i in range(len(columns))
-        )
+        vals = ', '.join(_sql_value(row.raw(i)) for i in range(len(columns)))
         lines.append(f'INSERT INTO {quoted_table} ({cols}) VALUES ({vals});')
     return '\n'.join(lines)
 
@@ -62,7 +76,7 @@ def _copy_to_clipboard(text):
 def make_column_view(columns, rows, table_name=None):
     store = Gio.ListStore(item_type=_Row)
     for row in rows:
-        store.append(_Row(['' if v is None else str(v) for v in row]))
+        store.append(_Row(list(row)))
 
     selection = Gtk.MultiSelection(model=store)
     col_view = Gtk.ColumnView(model=selection)
