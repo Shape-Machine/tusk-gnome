@@ -206,9 +206,17 @@ if [[ $DO_GITHUB == 1 ]]; then
         [[ -f "$f" ]] && ASSETS+=("$f")
     done
 
+    PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+    if [[ -n "$PREV_TAG" ]]; then
+        log "Generating changelog since $PREV_TAG"
+        NOTES=$(git log "$PREV_TAG..HEAD" --pretty=format:"- %s" --no-merges)
+    else
+        NOTES=$(git log --pretty=format:"- %s" --no-merges)
+    fi
+
     gh release create "v$VERSION" \
         --title "v$VERSION" \
-        --notes "Release v$VERSION" \
+        --notes "$NOTES" \
         "${ASSETS[@]}"
 
     ok "GitHub release published → https://github.com/Shape-Machine/tusk-gnome/releases/tag/v$VERSION"
