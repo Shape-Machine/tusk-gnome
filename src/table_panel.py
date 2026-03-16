@@ -78,6 +78,26 @@ _DEFINITION_SQL = """
     WHERE table_schema = %s AND table_name = %s
 """
 
+_DDL_SQL = """
+    SELECT
+      'CREATE TABLE ' || quote_ident(n.nspname) || '.' || quote_ident(c.relname)
+      || E' (\n' ||
+      string_agg(
+        '    ' || quote_ident(a.attname) || ' ' ||
+        pg_catalog.format_type(a.atttypid, a.atttypmod) ||
+        CASE WHEN a.attnotnull THEN ' NOT NULL' ELSE '' END ||
+        COALESCE(' DEFAULT ' || pg_catalog.pg_get_expr(ad.adbin, ad.adrelid), ''),
+        E',\n' ORDER BY a.attnum
+      ) || E'\n);'
+    FROM pg_catalog.pg_class c
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+    JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid
+      AND a.attnum > 0 AND NOT a.attisdropped
+    LEFT JOIN pg_catalog.pg_attrdef ad ON ad.adrelid = c.oid AND ad.adnum = a.attnum
+    WHERE n.nspname = %s AND c.relname = %s
+    GROUP BY n.nspname, c.relname
+"""
+
 
 class TablePanel(Gtk.Box):
     def __init__(self):
@@ -146,6 +166,22 @@ class TablePanel(Gtk.Box):
             self._indexes_scroll, 'indexes', 'Indexes', 'edit-find-symbolic'
         )
 
+        # DDL tab (tables only)
+        self._ddl_buffer = Gtk.TextBuffer()
+        ddl_view = Gtk.TextView(buffer=self._ddl_buffer)
+        ddl_view.set_editable(False)
+        ddl_view.set_monospace(True)
+        ddl_view.set_wrap_mode(Gtk.WrapMode.NONE)
+        ddl_view.set_top_margin(12)
+        ddl_view.set_left_margin(12)
+        ddl_scroll = Gtk.ScrolledWindow()
+        ddl_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        ddl_scroll.set_vexpand(True)
+        ddl_scroll.set_child(ddl_view)
+        self._page_ddl = self._view_stack.add_titled_with_icon(
+            ddl_scroll, 'ddl', 'DDL', 'accessories-text-editor-symbolic'
+        )
+
         # Definition tab (views only)
         self._definition_buffer = Gtk.TextBuffer()
         definition_view = Gtk.TextView(buffer=self._definition_buffer)
@@ -202,9 +238,10 @@ class TablePanel(Gtk.Box):
         self._page_keys.set_visible(is_table)
         self._page_relations.set_visible(is_table)
         self._page_indexes.set_visible(is_table)
+        self._page_ddl.set_visible(is_table)
         self._page_definition.set_visible(not is_table)
         # Switch away from a now-hidden tab if needed
-        if self._view_stack.get_visible_child_name() in ('keys', 'relations', 'indexes') and not is_table:
+        if self._view_stack.get_visible_child_name() in ('keys', 'relations', 'indexes', 'ddl') and not is_table:
             self._view_stack.set_visible_child_name('schema')
         if self._view_stack.get_visible_child_name() == 'definition' and is_table:
             self._view_stack.set_visible_child_name('schema')
@@ -247,9 +284,13 @@ class TablePanel(Gtk.Box):
                         cur.execute(_INDEXES_SQL, [schema, table])
                         indexes_rows = cur.fetchall()
 
+                        cur.execute(_DDL_SQL, [schema, table])
+                        row = cur.fetchone()
+                        ddl = row[0] if row else ''
                         definition = None
                     else:
                         keys_rows = relations_rows = indexes_rows = []
+                        ddl = ''
 
                         cur.execute(_DEFINITION_SQL, [schema, table])
                         row = cur.fetchone()
@@ -271,7 +312,7 @@ class TablePanel(Gtk.Box):
             GLib.idle_add(
                 self._populate,
                 schema_rows, keys_rows, relations_rows, triggers_rows,
-                indexes_rows, definition, data_cols, data_rows,
+                indexes_rows, ddl, definition, data_cols, data_rows,
             )
         except Exception as e:
             GLib.idle_add(self._show_error, str(e))
@@ -283,7 +324,7 @@ class TablePanel(Gtk.Box):
             store.append(['' if v is None else str(v) for v in row])
 
     def _populate(self, schema_rows, keys_rows, relations_rows, triggers_rows,
-                  indexes_rows, definition, data_cols, data_rows):
+                  indexes_rows, ddl, definition, data_cols, data_rows):
         self._spinner.stop()
 
         self._fill_tree(self._schema_tree, schema_rows)
@@ -291,6 +332,8 @@ class TablePanel(Gtk.Box):
         self._fill_tree(self._relations_tree, relations_rows)
         self._fill_tree(self._triggers_tree, triggers_rows)
         self._fill_tree(self._indexes_tree, indexes_rows)
+
+        self._ddl_buffer.set_text(ddl)
 
         if definition is not None:
             self._definition_buffer.set_text(definition)
