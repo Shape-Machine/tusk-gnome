@@ -18,6 +18,7 @@ COL_IS_DIR = 3
 class FileExplorer(Gtk.Box):
     __gsignals__ = {
         'file-activated': (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        'file-deleted':   (GObject.SignalFlags.RUN_FIRST, None, (str,)),
     }
 
     def __init__(self):
@@ -356,6 +357,7 @@ class FileExplorer(Gtk.Box):
                 os.rmdir(self._ctx_path)
             else:
                 os.unlink(self._ctx_path)
+                self.emit('file-deleted', self._ctx_path)
             self._refresh()
         except OSError as e:
             self._show_create_error('Could Not Delete', str(e))
