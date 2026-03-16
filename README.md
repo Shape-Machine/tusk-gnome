@@ -9,15 +9,7 @@
 
 Tusk aims to be the best native PostgreSQL GUI on the GNOME desktop — fast, focused, and out of the way.
 
-**Features**
-
-- Connection manager with GNOME Keyring password storage
-- SSH tunnel support (key-based auth)
-- Database browser — schemas, tables, views
-- Table inspector — Schema, Keys, Relations, Triggers, Indexes, DDL, Data tabs
-- SQL editor with syntax highlighting, auto-save, and inline results
-- File explorer sidebar for `.sql` files
-- Follows GNOME conventions — dark mode, keyboard shortcuts, preferences
+See [docs/features.md](docs/features.md) for a full feature overview.
 
 ## Dev setup
 
