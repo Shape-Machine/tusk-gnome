@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Tusk
+Comment=PostgreSQL Client for GNOME
+Exec=tusk
+Icon=io.tusk.Tusk
+Terminal=false
+Type=Application
+Categories=GTK;GNOME;Utility;Database;
+StartupNotify=true
+StartupWMClass=tusk

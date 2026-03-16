@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="io.tusk.Tusk" path="/io/tusk/Tusk/">
+    <key name="window-width" type="i">
+      <default>1100</default>
+      <summary>Window width</summary>
+    </key>
+    <key name="window-height" type="i">
+      <default>700</default>
+      <summary>Window height</summary>
+    </key>
+    <key name="window-maximized" type="b">
+      <default>false</default>
+      <summary>Window maximized</summary>
+    </key>
+  </schema>
+</schemalist>

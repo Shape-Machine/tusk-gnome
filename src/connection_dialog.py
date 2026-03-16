@@ -1,0 +1,266 @@
+import threading
+import uuid
+
+import gi
+import keyring
+
+gi.require_version('Gtk', '4.0')
+gi.require_version('Adw', '1')
+
+from gi.repository import Gtk, Adw, GObject, GLib
+
+
+class ConnectionDialog(Adw.Window):
+    __gsignals__ = {
+        'connection-saved': (GObject.SignalFlags.RUN_FIRST, None, (GObject.TYPE_PYOBJECT,))
+    }
+
+    def __init__(self, parent, connection=None):
+        super().__init__(
+            title='New Connection' if connection is None else 'Edit Connection',
+            transient_for=parent,
+            modal=True,
+            default_width=440,
+            resizable=False,
+        )
+        self._connection = connection
+        self._build_ui()
+
+    def _build_ui(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+
+        header = Adw.HeaderBar()
+        box.append(header)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        content.set_margin_top(12)
+        content.set_margin_bottom(20)
+        content.set_margin_start(16)
+        content.set_margin_end(16)
+
+        conn = self._connection
+
+        # ── Database ─────────────────────────────────────────────────────────
+        details_group = Adw.PreferencesGroup(title='Database')
+
+        self._name_row = Adw.EntryRow(title='Name')
+        self._host_row = Adw.EntryRow(title='Host')
+        self._port_row = Adw.EntryRow(title='Port')
+        self._database_row = Adw.EntryRow(title='Database')
+
+        details_group.add(self._name_row)
+        details_group.add(self._host_row)
+        details_group.add(self._port_row)
+        details_group.add(self._database_row)
+
+        # ── Authentication ────────────────────────────────────────────────────
+        auth_group = Adw.PreferencesGroup(title='Authentication')
+
+        self._username_row = Adw.EntryRow(title='Username')
+        self._password_row = Adw.PasswordEntryRow(title='Password')
+
+        auth_group.add(self._username_row)
+        auth_group.add(self._password_row)
+
+        # ── SSH Tunnel ────────────────────────────────────────────────────────
+        ssh_group = Adw.PreferencesGroup(title='SSH Tunnel')
+
+        self._ssh_row = Adw.ExpanderRow(title='Use SSH Tunnel')
+        self._ssh_row.set_show_enable_switch(True)
+
+        self._ssh_host_row = Adw.EntryRow(title='SSH Host')
+        self._ssh_port_row = Adw.EntryRow(title='SSH Port')
+        self._ssh_user_row = Adw.EntryRow(title='SSH User')
+
+        # Key path row with browse button
+        self._ssh_key_row = Adw.EntryRow(title='Private Key Path')
+        browse_btn = Gtk.Button(icon_name='document-open-symbolic')
+        browse_btn.add_css_class('flat')
+        browse_btn.set_valign(Gtk.Align.CENTER)
+        browse_btn.set_tooltip_text('Browse…')
+        browse_btn.connect('clicked', self._on_browse_key)
+        self._ssh_key_row.add_suffix(browse_btn)
+
+        self._ssh_passphrase_row = Adw.PasswordEntryRow(title='Key Passphrase')
+
+        self._ssh_row.add_row(self._ssh_host_row)
+        self._ssh_row.add_row(self._ssh_port_row)
+        self._ssh_row.add_row(self._ssh_user_row)
+        self._ssh_row.add_row(self._ssh_key_row)
+        self._ssh_row.add_row(self._ssh_passphrase_row)
+
+        ssh_group.add(self._ssh_row)
+
+        # ── Populate values ───────────────────────────────────────────────────
+        self._name_row.set_text(conn['name'] if conn else '')
+        self._host_row.set_text(conn['host'] if conn else 'localhost')
+        self._port_row.set_text(str(conn['port']) if conn else '5432')
+        self._database_row.set_text(conn['database'] if conn else 'postgres')
+        self._username_row.set_text(conn['username'] if conn else 'postgres')
+
+        db_password = (keyring.get_password('io.tusk.Tusk', conn['id']) if conn else '') or ''
+        self._password_row.set_text(db_password)
+
+        ssh_enabled = conn.get('ssh_enabled', False) if conn else False
+        self._ssh_row.set_enable_expansion(ssh_enabled)
+        self._ssh_row.set_expanded(ssh_enabled)
+        self._ssh_host_row.set_text(conn.get('ssh_host', '') if conn else '')
+        self._ssh_port_row.set_text(str(conn.get('ssh_port', 22)) if conn else '22')
+        self._ssh_user_row.set_text(conn.get('ssh_user', '') if conn else '')
+        self._ssh_key_row.set_text(conn.get('ssh_key_path', '') if conn else '')
+
+        ssh_passphrase = (
+            keyring.get_password('io.tusk.Tusk', f"{conn['id']}:ssh") if conn else ''
+        ) or ''
+        self._ssh_passphrase_row.set_text(ssh_passphrase)
+
+        content.append(details_group)
+        content.append(auth_group)
+        content.append(ssh_group)
+
+        # ── Test / Save ───────────────────────────────────────────────────────
+        self._test_bar = Gtk.CenterBox()
+
+        self._test_btn = Gtk.Button(label='Test Connection')
+        self._test_btn.add_css_class('pill')
+        self._test_btn.connect('clicked', self._on_test)
+
+        self._test_spinner = Gtk.Spinner()
+        self._test_spinner.set_size_request(16, 16)
+
+        self._test_label = Gtk.Label()
+        self._test_label.set_xalign(0)
+
+        status_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        status_box.set_halign(Gtk.Align.CENTER)
+        status_box.append(self._test_spinner)
+        status_box.append(self._test_label)
+
+        self._test_bar.set_start_widget(self._test_btn)
+        self._test_bar.set_end_widget(status_box)
+        content.append(self._test_bar)
+
+        self._save_btn = Gtk.Button(label='Save Connection')
+        self._save_btn.add_css_class('suggested-action')
+        self._save_btn.add_css_class('pill')
+        self._save_btn.connect('clicked', self._on_save)
+        content.append(self._save_btn)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_propagate_natural_height(True)
+
+        clamp = Adw.Clamp(maximum_size=400)
+        clamp.set_child(content)
+        scroll.set_child(clamp)
+        box.append(scroll)
+
+        self.set_content(box)
+
+    def _on_browse_key(self, _btn):
+        dialog = Gtk.FileChooserNative(
+            title='Select Private Key',
+            transient_for=self,
+            action=Gtk.FileChooserAction.OPEN,
+        )
+        dialog.connect('response', self._on_key_chosen)
+        dialog.show()
+
+    def _on_key_chosen(self, dialog, response):
+        if response == Gtk.ResponseType.ACCEPT:
+            self._ssh_key_row.set_text(dialog.get_file().get_path())
+
+    def _current_params(self):
+        try:
+            port = int(self._port_row.get_text().strip())
+        except ValueError:
+            port = 5432
+        try:
+            ssh_port = int(self._ssh_port_row.get_text().strip())
+        except ValueError:
+            ssh_port = 22
+
+        return {
+            'host': self._host_row.get_text().strip() or 'localhost',
+            'port': port,
+            'database': self._database_row.get_text().strip() or 'postgres',
+            'username': self._username_row.get_text().strip(),
+            'password': self._password_row.get_text(),
+            'ssh_enabled': self._ssh_row.get_enable_expansion(),
+            'ssh_host': self._ssh_host_row.get_text().strip(),
+            'ssh_port': ssh_port,
+            'ssh_user': self._ssh_user_row.get_text().strip(),
+            'ssh_key_path': self._ssh_key_row.get_text().strip(),
+            'ssh_passphrase': self._ssh_passphrase_row.get_text(),
+        }
+
+    def _on_test(self, _btn):
+        self._test_btn.set_sensitive(False)
+        self._save_btn.set_sensitive(False)
+        self._test_label.set_label('Connecting…')
+        self._test_label.remove_css_class('success')
+        self._test_label.remove_css_class('error')
+        self._test_spinner.start()
+        threading.Thread(
+            target=self._run_test, args=(self._current_params(),), daemon=True
+        ).start()
+
+    def _run_test(self, params):
+        try:
+            import psycopg
+            from tunnel import open_tunnel
+
+            with open_tunnel(params) as (host, port):
+                with psycopg.connect(
+                    host=host,
+                    port=port,
+                    dbname=params['database'],
+                    user=params['username'],
+                    password=params['password'],
+                    connect_timeout=10,
+                ):
+                    pass
+            GLib.idle_add(self._on_test_result, True, None)
+        except Exception as e:
+            GLib.idle_add(self._on_test_result, False, str(e))
+
+    def _on_test_result(self, success, error):
+        self._test_spinner.stop()
+        self._test_btn.set_sensitive(True)
+        self._save_btn.set_sensitive(True)
+        if success:
+            self._test_label.set_label('Connected successfully')
+            self._test_label.add_css_class('success')
+            self._test_label.remove_css_class('error')
+        else:
+            self._test_label.set_label(error or 'Connection failed')
+            self._test_label.add_css_class('error')
+            self._test_label.remove_css_class('success')
+
+    def _on_save(self, _btn):
+        try:
+            port = int(self._port_row.get_text().strip())
+        except ValueError:
+            port = 5432
+        try:
+            ssh_port = int(self._ssh_port_row.get_text().strip())
+        except ValueError:
+            ssh_port = 22
+
+        conn = {
+            'id': self._connection['id'] if self._connection else str(uuid.uuid4()),
+            'name': self._name_row.get_text().strip() or 'Unnamed',
+            'host': self._host_row.get_text().strip() or 'localhost',
+            'port': port,
+            'database': self._database_row.get_text().strip() or 'postgres',
+            'username': self._username_row.get_text().strip(),
+            'password': self._password_row.get_text(),
+            'ssh_enabled': self._ssh_row.get_enable_expansion(),
+            'ssh_host': self._ssh_host_row.get_text().strip(),
+            'ssh_port': ssh_port,
+            'ssh_user': self._ssh_user_row.get_text().strip(),
+            'ssh_key_path': self._ssh_key_row.get_text().strip(),
+            'ssh_passphrase': self._ssh_passphrase_row.get_text(),
+        }
+        self.emit('connection-saved', conn)
+        self.close()
