@@ -5,7 +5,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Gtk, GLib, GObject
+from gi.repository import Gtk, GLib, GObject, Gdk
 
 COL_ICON = 0
 COL_LABEL = 1
@@ -29,6 +29,21 @@ class DbBrowser(Gtk.Box):
         self._build_ui()
 
     def _build_ui(self):
+        # Loading bar
+        self._loading_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self._loading_bar.set_margin_start(8)
+        self._loading_bar.set_margin_top(4)
+        self._loading_bar.set_margin_bottom(4)
+        self._loading_spinner = Gtk.Spinner()
+        self._loading_spinner.set_size_request(16, 16)
+        loading_label = Gtk.Label(label='Connecting…')
+        loading_label.add_css_class('caption')
+        loading_label.add_css_class('dim-label')
+        self._loading_bar.append(self._loading_spinner)
+        self._loading_bar.append(loading_label)
+        self._loading_bar.set_visible(False)
+        self.append(self._loading_bar)
+
         self._store = Gtk.TreeStore(str, str, str, GObject.TYPE_PYOBJECT, str, str)
 
         self._tree = Gtk.TreeView(model=self._store)
@@ -36,6 +51,10 @@ class DbBrowser(Gtk.Box):
         self._tree.set_activate_on_single_click(False)
         self._tree.connect('row-activated', self._on_row_activated)
         self._tree.get_selection().set_mode(Gtk.SelectionMode.SINGLE)
+
+        key_ctrl = Gtk.EventControllerKey()
+        key_ctrl.connect('key-pressed', self._on_key_pressed)
+        self._tree.add_controller(key_ctrl)
 
         icon_renderer = Gtk.CellRendererPixbuf()
         text_renderer = Gtk.CellRendererText()
@@ -60,9 +79,8 @@ class DbBrowser(Gtk.Box):
 
     def load(self, conn):
         self._store.clear()
-        self._store.append(None, [
-            'content-loading-symbolic', 'Connecting…', 'loading', conn, '', ''
-        ])
+        self._loading_bar.set_visible(True)
+        self._loading_spinner.start()
         threading.Thread(target=self._fetch_schema, args=(conn,), daemon=True).start()
 
     def _fetch_schema(self, conn):
@@ -104,6 +122,8 @@ class DbBrowser(Gtk.Box):
             GLib.idle_add(self._show_error, str(e))
 
     def _populate(self, conn, schema_items):
+        self._loading_spinner.stop()
+        self._loading_bar.set_visible(False)
         self._store.clear()
 
         if not schema_items:
@@ -142,6 +162,8 @@ class DbBrowser(Gtk.Box):
         self._tree.expand_all()
 
     def _show_error(self, error_msg):
+        self._loading_spinner.stop()
+        self._loading_bar.set_visible(False)
         self._store.clear()
         self._store.append(None, [
             'dialog-error-symbolic', f'Error: {error_msg}', 'error', None, '', ''
@@ -155,3 +177,16 @@ class DbBrowser(Gtk.Box):
             schema = self._store.get_value(it, COL_SCHEMA)
             table = self._store.get_value(it, COL_TABLE)
             self.emit('table-selected', conn, schema, table, item_type)
+
+    def _on_key_pressed(self, _ctrl, keyval, _code, _state):
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            _model, it = self._tree.get_selection().get_selected()
+            if it:
+                item_type = self._store.get_value(it, COL_TYPE)
+                if item_type in ('table', 'view'):
+                    conn = self._store.get_value(it, COL_CONN)
+                    schema = self._store.get_value(it, COL_SCHEMA)
+                    table = self._store.get_value(it, COL_TABLE)
+                    self.emit('table-selected', conn, schema, table, item_type)
+                    return True
+        return False
