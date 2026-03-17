@@ -174,29 +174,29 @@ class TablePanel(Gtk.Box):
         # Tabs (view_stack already created above; wrap it with switcher in outer)
         self._view_stack.set_vexpand(True)
 
-        self._schema_scroll = self._make_tab_scroll()
+        _schema_frame, self._schema_scroll = self._make_tab_scroll()
         self._page_schema = self._view_stack.add_titled_with_icon(
-            self._schema_scroll, 'schema', 'Schema', 'view-list-symbolic'
+            _schema_frame, 'schema', 'Schema', 'view-list-symbolic'
         )
 
-        self._keys_scroll = self._make_tab_scroll()
+        _keys_frame, self._keys_scroll = self._make_tab_scroll()
         self._page_keys = self._view_stack.add_titled_with_icon(
-            self._keys_scroll, 'keys', 'Keys', 'changes-prevent-symbolic'
+            _keys_frame, 'keys', 'Keys', 'changes-prevent-symbolic'
         )
 
-        self._relations_scroll = self._make_tab_scroll()
+        _relations_frame, self._relations_scroll = self._make_tab_scroll()
         self._page_relations = self._view_stack.add_titled_with_icon(
-            self._relations_scroll, 'relations', 'Relations', 'insert-link-symbolic'
+            _relations_frame, 'relations', 'Relations', 'insert-link-symbolic'
         )
 
-        self._triggers_scroll = self._make_tab_scroll()
+        _triggers_frame, self._triggers_scroll = self._make_tab_scroll()
         self._page_triggers = self._view_stack.add_titled_with_icon(
-            self._triggers_scroll, 'triggers', 'Triggers', 'media-playback-start-symbolic'
+            _triggers_frame, 'triggers', 'Triggers', 'media-playback-start-symbolic'
         )
 
-        self._indexes_scroll = self._make_tab_scroll()
+        _indexes_frame, self._indexes_scroll = self._make_tab_scroll()
         self._page_indexes = self._view_stack.add_titled_with_icon(
-            self._indexes_scroll, 'indexes', 'Indexes', 'edit-find-symbolic'
+            _indexes_frame, 'indexes', 'Indexes', 'edit-find-symbolic'
         )
 
         # DDL tab (tables only)
@@ -239,7 +239,9 @@ class TablePanel(Gtk.Box):
         self._data_scroll = Gtk.ScrolledWindow()
         self._data_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         self._data_scroll.set_vexpand(True)
-        self._data_scroll.add_css_class('frame')
+        self._data_frame = Gtk.Frame()
+        self._data_frame.set_vexpand(True)
+        self._data_frame.set_child(self._data_scroll)
 
         self._data_nav_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         self._data_nav_bar.set_margin_start(6)
@@ -280,7 +282,7 @@ class TablePanel(Gtk.Box):
         self._data_nav_bar.append(self._page_size_drop)
 
         data_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        data_box.append(self._data_scroll)
+        data_box.append(self._data_frame)
         data_box.append(self._data_nav_bar)
         self._page_data = self._view_stack.add_titled_with_icon(
             data_box, 'data', 'Data', 'x-office-spreadsheet-symbolic'
@@ -308,8 +310,10 @@ class TablePanel(Gtk.Box):
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         scroll.set_vexpand(True)
-        scroll.add_css_class('frame')
-        return scroll
+        frame = Gtk.Frame()
+        frame.set_vexpand(True)
+        frame.set_child(scroll)
+        return frame, scroll
 
     def _fill_scroll(self, scroll, cols, rows, empty_text):
         if rows:
