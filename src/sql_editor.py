@@ -1,4 +1,5 @@
 import os
+import re
 import threading
 
 import prefs
@@ -126,7 +127,14 @@ def _split_statements(sql):
     if stmt:
         statements.append(stmt)
 
-    return statements
+    return [s for s in statements if not _is_comment_only(s)]
+
+
+_COMMENT_ONLY_RE = re.compile(r'(--[^\n]*|/\*.*?\*/)', re.DOTALL)
+
+
+def _is_comment_only(stmt):
+    return not _COMMENT_ONLY_RE.sub('', stmt).strip()
 
 
 def _make_editor():
