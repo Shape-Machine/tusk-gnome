@@ -239,9 +239,14 @@ class TablePanel(Gtk.Box):
         self._data_scroll = Gtk.ScrolledWindow()
         self._data_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         self._data_scroll.set_vexpand(True)
-        self._data_frame = Gtk.Frame()
+        self._data_frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self._data_frame.add_css_class('card')
         self._data_frame.set_vexpand(True)
-        self._data_frame.set_child(self._data_scroll)
+        self._data_frame.set_margin_start(6)
+        self._data_frame.set_margin_end(6)
+        self._data_frame.set_margin_top(6)
+        self._data_frame.set_margin_bottom(6)
+        self._data_frame.append(self._data_scroll)
 
         self._data_nav_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         self._data_nav_bar.set_margin_start(6)
@@ -310,10 +315,15 @@ class TablePanel(Gtk.Box):
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         scroll.set_vexpand(True)
-        frame = Gtk.Frame()
-        frame.set_vexpand(True)
-        frame.set_child(scroll)
-        return frame, scroll
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        card.add_css_class('card')
+        card.set_vexpand(True)
+        card.set_margin_start(6)
+        card.set_margin_end(6)
+        card.set_margin_top(6)
+        card.set_margin_bottom(6)
+        card.append(scroll)
+        return card, scroll
 
     def _fill_scroll(self, scroll, cols, rows, empty_text):
         if rows:
