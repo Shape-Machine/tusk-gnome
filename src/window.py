@@ -143,8 +143,14 @@ class TuskWindow(Adw.ApplicationWindow):
             <property name="title">SQL Editor</property>
             <child>
               <object class="GtkShortcutsShortcut">
-                <property name="title">Run Query</property>
-                <property name="accelerator">F5 &lt;ctrl&gt;Return</property>
+                <property name="title">Run All</property>
+                <property name="accelerator">F5</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Run Selected</property>
+                <property name="accelerator">&lt;ctrl&gt;Return</property>
               </object>
             </child>
             <child>
