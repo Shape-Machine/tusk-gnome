@@ -302,7 +302,7 @@ class SqlEditor(Gtk.Box):
 
         self._results_page = self._results_tab_view.append(self._results_stack)
         self._results_page.set_title('Results')
-        self._results_page.set_pinned(True)
+        self._results_tab_view.set_page_pinned(self._results_page, True)
 
         results_tab_bar = Adw.TabBar()
         results_tab_bar.set_view(self._results_tab_view)
