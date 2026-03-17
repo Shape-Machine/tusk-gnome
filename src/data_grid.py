@@ -119,6 +119,7 @@ def make_column_view(columns, rows, table_name=None):
 
         col = Gtk.ColumnViewColumn(title=name, factory=factory)
         col.set_resizable(True)
+        col.set_expand(True)
         col_view.append_column(col)
 
     # ── Context menu ─────────────────────────────────────────────────────────
