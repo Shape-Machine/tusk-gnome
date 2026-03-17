@@ -23,6 +23,112 @@ except (ValueError, ImportError):
 _AUTOSAVE_DELAY_MS = 800
 
 
+def _split_statements(sql):
+    """Split SQL text into individual non-empty statements.
+
+    Splits on semicolons while respecting:
+    - Single-quoted strings  ('...')
+    - Double-quoted identifiers  ("...")
+    - PostgreSQL dollar-quoted strings  ($$...$$, $tag$...$tag$)
+    - Line comments  (-- ...)
+    - Block comments  (/* ... */)
+    """
+    statements = []
+    current = []
+    i = 0
+    n = len(sql)
+
+    while i < n:
+        c = sql[i]
+
+        # Line comment — consume to end of line
+        if c == '-' and i + 1 < n and sql[i + 1] == '-':
+            end = sql.find('\n', i)
+            if end == -1:
+                current.append(sql[i:])
+                i = n
+            else:
+                current.append(sql[i:end + 1])
+                i = end + 1
+
+        # Block comment
+        elif c == '/' and i + 1 < n and sql[i + 1] == '*':
+            end = sql.find('*/', i + 2)
+            if end == -1:
+                current.append(sql[i:])
+                i = n
+            else:
+                current.append(sql[i:end + 2])
+                i = end + 2
+
+        # Dollar-quoted string (PostgreSQL)
+        elif c == '$':
+            tag_end = sql.find('$', i + 1)
+            if tag_end != -1:
+                tag = sql[i:tag_end + 1]
+                close = sql.find(tag, tag_end + 1)
+                if close != -1:
+                    current.append(sql[i:close + len(tag)])
+                    i = close + len(tag)
+                else:
+                    current.append(c)
+                    i += 1
+            else:
+                current.append(c)
+                i += 1
+
+        # Single-quoted string
+        elif c == "'":
+            j = i + 1
+            while j < n:
+                if sql[j] == "'":
+                    if j + 1 < n and sql[j + 1] == "'":
+                        j += 2  # escaped quote
+                    else:
+                        j += 1
+                        break
+                elif sql[j] == '\\':
+                    j += 2
+                else:
+                    j += 1
+            current.append(sql[i:j])
+            i = j
+
+        # Double-quoted identifier
+        elif c == '"':
+            j = i + 1
+            while j < n:
+                if sql[j] == '"':
+                    if j + 1 < n and sql[j + 1] == '"':
+                        j += 2
+                    else:
+                        j += 1
+                        break
+                else:
+                    j += 1
+            current.append(sql[i:j])
+            i = j
+
+        # Statement terminator
+        elif c == ';':
+            stmt = ''.join(current).strip()
+            if stmt:
+                statements.append(stmt)
+            current = []
+            i += 1
+
+        else:
+            current.append(c)
+            i += 1
+
+    # Trailing statement without semicolon
+    stmt = ''.join(current).strip()
+    if stmt:
+        statements.append(stmt)
+
+    return statements
+
+
 def _make_editor():
     """Return (buffer, view) using GtkSourceView if available."""
     if _HAS_SOURCE:
@@ -56,6 +162,8 @@ def _apply_scheme(buf, dark):
 class SqlEditor(Gtk.Box):
     __gsignals__ = {
         'run-sql': (GObject.SignalFlags.RUN_FIRST, None, ()),
+        'open-results': (GObject.SignalFlags.RUN_FIRST, None,
+                         (str, GObject.TYPE_PYOBJECT, GObject.TYPE_PYOBJECT)),
     }
 
     def __init__(self, file_path):
@@ -189,6 +297,19 @@ class SqlEditor(Gtk.Box):
         self._results_scroll.set_vexpand(True)
         self._results_stack.add_named(self._results_scroll, 'grid')
 
+        self._results_log = Gtk.ListBox()
+        self._results_log.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._results_log.add_css_class('boxed-list')
+        self._results_log.set_margin_start(12)
+        self._results_log.set_margin_end(12)
+        self._results_log.set_margin_top(10)
+        self._results_log.set_margin_bottom(10)
+        log_scroll = Gtk.ScrolledWindow()
+        log_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        log_scroll.set_vexpand(True)
+        log_scroll.set_child(self._results_log)
+        self._results_stack.add_named(log_scroll, 'log')
+
         results_box.append(self._results_stack)
 
         self._paned = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
@@ -320,6 +441,58 @@ class SqlEditor(Gtk.Box):
         ).start()
 
     def _execute(self, conn, sql):
+        stmts = _split_statements(sql)
+        if not stmts:
+            GLib.idle_add(self.show_message, 'Nothing to execute')
+            return
+
+        # Single statement — keep existing inline-results behaviour
+        if len(stmts) == 1:
+            self._execute_single(conn, stmts[0])
+            return
+
+        # Multiple statements — collect results then show log
+        results = []  # list of dicts: {stmt, kind, data}
+        try:
+            import psycopg
+            from tunnel import open_tunnel
+
+            with open_tunnel(conn) as (host, port), psycopg.connect(
+                host=host,
+                port=port,
+                dbname=conn['database'],
+                user=conn['username'],
+                password=conn['password'],
+                connect_timeout=10,
+            ) as db:
+                with db.cursor() as cur:
+                    for stmt in stmts:
+                        try:
+                            cur.execute(stmt)
+                            if cur.description:
+                                cols = [d.name for d in cur.description]
+                                rows = cur.fetchall()
+                                results.append({'stmt': stmt, 'kind': 'select',
+                                                'cols': cols, 'rows': rows})
+                            else:
+                                count = cur.rowcount
+                                results.append({'stmt': stmt, 'kind': 'status',
+                                                'count': count})
+                        except psycopg.Error as e:
+                            msg = e.diag.message_primary or str(e) if hasattr(e, 'diag') else str(e)
+                            if hasattr(e, 'diag') and e.diag.message_detail:
+                                msg += f'\nDetail: {e.diag.message_detail}'
+                            if hasattr(e, 'diag') and e.diag.message_hint:
+                                msg += f'\nHint: {e.diag.message_hint}'
+                            results.append({'stmt': stmt, 'kind': 'error', 'msg': msg})
+                            break  # transaction is aborted; stop here
+                db.commit()
+        except Exception as e:
+            results.append({'stmt': '', 'kind': 'error', 'msg': str(e)})
+
+        GLib.idle_add(self._show_multi_results, results)
+
+    def _execute_single(self, conn, sql):
         try:
             import psycopg
             from tunnel import open_tunnel
@@ -387,3 +560,58 @@ class SqlEditor(Gtk.Box):
         self._results_message.set_label(text)
         self._results_message.add_css_class('error')
         self._results_stack.set_visible_child_name('message')
+
+    def _show_multi_results(self, results):
+        self._results_spinner.stop()
+        self._run_btn.set_sensitive(self._connection is not None)
+
+        # Clear previous log rows
+        while True:
+            child = self._results_log.get_first_child()
+            if child is None:
+                break
+            self._results_log.remove(child)
+
+        select_index = 0
+        errors = sum(1 for r in results if r['kind'] == 'error')
+        total = len(results)
+        self._results_meta.set_label(
+            f'{total} statement{"s" if total != 1 else ""}'
+            + (f', {errors} error{"s" if errors != 1 else ""}' if errors else '')
+        )
+
+        for i, result in enumerate(results):
+            preview = ' '.join(result['stmt'].split())
+            if len(preview) > 72:
+                preview = preview[:69] + '…'
+
+            row = Adw.ActionRow()
+            row.set_title(preview)
+            row.add_css_class('monospace')
+
+            if result['kind'] == 'select':
+                select_index += 1
+                n = len(result['rows'])
+                row.set_subtitle(f'{n} row{"s" if n != 1 else ""} — opened in new tab')
+                icon = Gtk.Image.new_from_icon_name('emblem-ok-symbolic')
+                icon.add_css_class('success')
+                row.add_prefix(icon)
+                self.emit('open-results',
+                          f'Query {i + 1}',
+                          result['cols'],
+                          result['rows'])
+            elif result['kind'] == 'status':
+                c = result['count']
+                row.set_subtitle(f'{c} row{"s" if c != 1 else ""} affected')
+                icon = Gtk.Image.new_from_icon_name('emblem-ok-symbolic')
+                icon.add_css_class('success')
+                row.add_prefix(icon)
+            else:
+                row.set_subtitle(result['msg'])
+                icon = Gtk.Image.new_from_icon_name('dialog-error-symbolic')
+                icon.add_css_class('error')
+                row.add_prefix(icon)
+
+            self._results_log.append(row)
+
+        self._results_stack.set_visible_child_name('log')
