@@ -287,6 +287,7 @@ class SqlEditor(Gtk.Box):
         self._results_scroll = Gtk.ScrolledWindow()
         self._results_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         self._results_scroll.set_vexpand(True)
+        self._results_scroll.add_css_class('frame')
         self._results_stack.add_named(self._results_scroll, 'grid')
 
         self._results_log = Gtk.ListBox()
@@ -624,6 +625,7 @@ class SqlEditor(Gtk.Box):
                 tab_scroll = Gtk.ScrolledWindow()
                 tab_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
                 tab_scroll.set_vexpand(True)
+                tab_scroll.add_css_class('frame')
                 tab_scroll.set_child(make_column_view(result['cols'], result['rows']))
                 tab_page = self._results_tab_view.append(tab_scroll)
                 tab_page.set_title(f'Query {i + 1}')
