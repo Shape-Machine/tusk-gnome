@@ -22,14 +22,14 @@ See [docs/features.md](docs/features.md) for a full feature overview.
 
 ## Screenshots
 
-<img src="docs/screenshots/2026.03.17-02-01.png" width="100%"/>
-<img src="docs/screenshots/2026.03.17-02-02.png" width="100%"/>
-<img src="docs/screenshots/2026.03.17-02-03.png" width="100%"/>
-<img src="docs/screenshots/2026.03.17-02-04.png" width="100%"/>
-<img src="docs/screenshots/2026.03.17-02-05.png" width="100%"/>
-<img src="docs/screenshots/2026.03.17-02-06.png" width="100%"/>
-<img src="docs/screenshots/2026.03.17-02-07.png" width="100%"/>
-<img src="docs/screenshots/2026.03.17-02-08.png" width="100%"/>
+<img src="docs/screenshots/2026.03.16-07-01.png" width="100%"/>
+<img src="docs/screenshots/2026.03.16-07-02.png" width="100%"/>
+<img src="docs/screenshots/2026.03.16-07-03.png" width="100%"/>
+<img src="docs/screenshots/2026.03.16-07-04.png" width="100%"/>
+<img src="docs/screenshots/2026.03.16-07-05.png" width="100%"/>
+<img src="docs/screenshots/2026.03.16-07-06.png" width="100%"/>
+<img src="docs/screenshots/2026.03.16-07-07.png" width="100%"/>
+<img src="docs/screenshots/2026.03.16-07-08.png" width="100%"/>
 
 ---
 
