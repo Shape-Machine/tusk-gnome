@@ -177,6 +177,8 @@ class FileExplorer(Gtk.Box):
 
     def _on_row_activated(self, _tree, path, _col):
         it = self._store.get_iter(path)
+        if not self._store.get_value(it, COL_SENSITIVE):
+            return
         is_dir = self._store.get_value(it, COL_IS_DIR)
         fpath = self._store.get_value(it, COL_PATH)
         if is_dir:
