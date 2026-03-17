@@ -5,7 +5,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Gtk, Adw, GLib, Pango
+from gi.repository import Gtk, Adw, GLib
 
 import prefs
 from data_grid import make_column_view
@@ -16,6 +16,13 @@ try:
     _HAS_SOURCE = True
 except (ValueError, ImportError):
     _HAS_SOURCE = False
+
+
+_SCHEMA_COLS    = ['Column', 'Type', 'Length', 'Nullable', 'Default']
+_KEYS_COLS      = ['Constraint', 'Type', 'Columns']
+_RELATIONS_COLS = ['Constraint', 'Column', 'References', 'Ref Column', 'On Update', 'On Delete']
+_TRIGGERS_COLS  = ['Name', 'Event', 'Timing', 'Orientation', 'Statement']
+_INDEXES_COLS   = ['Name', 'Definition']
 
 
 def _make_source_view():
@@ -167,39 +174,29 @@ class TablePanel(Gtk.Box):
         # Tabs (view_stack already created above; wrap it with switcher in outer)
         self._view_stack.set_vexpand(True)
 
-        self._schema_stack, self._schema_tree = self._make_tree(
-            ['Column', 'Type', 'Length', 'Nullable', 'Default'], 'No columns'
-        )
+        self._schema_scroll = self._make_tab_scroll()
         self._page_schema = self._view_stack.add_titled_with_icon(
-            self._schema_stack, 'schema', 'Schema', 'view-list-symbolic'
+            self._schema_scroll, 'schema', 'Schema', 'view-list-symbolic'
         )
 
-        self._keys_stack, self._keys_tree = self._make_tree(
-            ['Constraint', 'Type', 'Columns'], 'No keys'
-        )
+        self._keys_scroll = self._make_tab_scroll()
         self._page_keys = self._view_stack.add_titled_with_icon(
-            self._keys_stack, 'keys', 'Keys', 'changes-prevent-symbolic'
+            self._keys_scroll, 'keys', 'Keys', 'changes-prevent-symbolic'
         )
 
-        self._relations_stack, self._relations_tree = self._make_tree(
-            ['Constraint', 'Column', 'References', 'Ref Column', 'On Update', 'On Delete'], 'No relations'
-        )
+        self._relations_scroll = self._make_tab_scroll()
         self._page_relations = self._view_stack.add_titled_with_icon(
-            self._relations_stack, 'relations', 'Relations', 'insert-link-symbolic'
+            self._relations_scroll, 'relations', 'Relations', 'insert-link-symbolic'
         )
 
-        self._triggers_stack, self._triggers_tree = self._make_tree(
-            ['Name', 'Event', 'Timing', 'Orientation', 'Statement'], 'No triggers'
-        )
+        self._triggers_scroll = self._make_tab_scroll()
         self._page_triggers = self._view_stack.add_titled_with_icon(
-            self._triggers_stack, 'triggers', 'Triggers', 'media-playback-start-symbolic'
+            self._triggers_scroll, 'triggers', 'Triggers', 'media-playback-start-symbolic'
         )
 
-        self._indexes_stack, self._indexes_tree = self._make_tree(
-            ['Name', 'Definition'], 'No indexes'
-        )
+        self._indexes_scroll = self._make_tab_scroll()
         self._page_indexes = self._view_stack.add_titled_with_icon(
-            self._indexes_stack, 'indexes', 'Indexes', 'edit-find-symbolic'
+            self._indexes_scroll, 'indexes', 'Indexes', 'edit-find-symbolic'
         )
 
         # DDL tab (tables only)
@@ -306,34 +303,19 @@ class TablePanel(Gtk.Box):
         self._outer.add_named(tabs_box, 'tabs')
         self.append(self._outer)
 
-    def _make_tree(self, columns, empty_text='No data'):
-        store = Gtk.ListStore(*([str] * len(columns)))
-        tree = Gtk.TreeView(model=store)
-        tree.set_grid_lines(Gtk.TreeViewGridLines.HORIZONTAL)
-        tree.set_enable_search(False)
-
-        for i, name in enumerate(columns):
-            renderer = Gtk.CellRendererText()
-            renderer.set_property('ellipsize', 3)
-            col = Gtk.TreeViewColumn(name, renderer, text=i)
-            col.set_resizable(True)
-            col.set_min_width(80)
-            tree.append_column(col)
-
+    def _make_tab_scroll(self):
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         scroll.set_vexpand(True)
-        scroll.set_child(tree)
+        return scroll
 
-        empty = Adw.StatusPage(title=empty_text)
-        empty.set_vexpand(True)
-
-        stack = Gtk.Stack()
-        stack.set_vexpand(True)
-        stack.add_named(scroll, 'tree')
-        stack.add_named(empty, 'empty')
-
-        return stack, tree
+    def _fill_scroll(self, scroll, cols, rows, empty_text):
+        if rows:
+            scroll.set_child(make_column_view(cols, rows))
+        else:
+            empty = Adw.StatusPage(title=empty_text)
+            empty.set_vexpand(True)
+            scroll.set_child(empty)
 
     def _set_tabs_for_type(self, item_type):
         is_table = item_type == 'table'
@@ -445,13 +427,6 @@ class TablePanel(Gtk.Box):
         except Exception as e:
             GLib.idle_add(self._show_error, str(e), gen)
 
-    def _fill_tree(self, stack, tree, rows):
-        store = tree.get_model()
-        store.clear()
-        for row in rows:
-            store.append(['' if v is None else str(v) for v in row])
-        stack.set_visible_child_name('tree' if rows else 'empty')
-
     def _populate(self, schema_rows, keys_rows, relations_rows, triggers_rows,
                   indexes_rows, ddl, definition, data_cols, data_rows, gen):
         if gen != self._load_gen:
@@ -459,11 +434,11 @@ class TablePanel(Gtk.Box):
         self._spinner.stop()
         self._refresh_btn.set_sensitive(True)
 
-        self._fill_tree(self._schema_stack, self._schema_tree, schema_rows)
-        self._fill_tree(self._keys_stack, self._keys_tree, keys_rows)
-        self._fill_tree(self._relations_stack, self._relations_tree, relations_rows)
-        self._fill_tree(self._triggers_stack, self._triggers_tree, triggers_rows)
-        self._fill_tree(self._indexes_stack, self._indexes_tree, indexes_rows)
+        self._fill_scroll(self._schema_scroll,    _SCHEMA_COLS,    schema_rows,    'No columns')
+        self._fill_scroll(self._keys_scroll,      _KEYS_COLS,      keys_rows,      'No keys')
+        self._fill_scroll(self._relations_scroll, _RELATIONS_COLS, relations_rows, 'No relations')
+        self._fill_scroll(self._triggers_scroll,  _TRIGGERS_COLS,  triggers_rows,  'No triggers')
+        self._fill_scroll(self._indexes_scroll,   _INDEXES_COLS,   indexes_rows,   'No indexes')
 
         self._ddl_buffer.set_text(ddl)
 
