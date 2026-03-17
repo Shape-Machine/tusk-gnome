@@ -13,6 +13,7 @@ COL_ICON = 0
 COL_NAME = 1
 COL_PATH = 2
 COL_IS_DIR = 3
+COL_SENSITIVE = 4
 
 
 class FileExplorer(Gtk.Box):
@@ -74,7 +75,7 @@ class FileExplorer(Gtk.Box):
         self.append(Gtk.Separator())
 
         # ── File tree ─────────────────────────────────────────────────────────
-        self._store = Gtk.ListStore(str, str, str, GObject.TYPE_BOOLEAN)
+        self._store = Gtk.ListStore(str, str, str, GObject.TYPE_BOOLEAN, GObject.TYPE_BOOLEAN)
 
         self._tree = Gtk.TreeView(model=self._store)
         self._tree.set_headers_visible(False)
@@ -90,7 +91,9 @@ class FileExplorer(Gtk.Box):
         col.pack_start(icon_r, False)
         col.pack_start(text_r, True)
         col.add_attribute(icon_r, 'icon-name', COL_ICON)
+        col.add_attribute(icon_r, 'sensitive', COL_SENSITIVE)
         col.add_attribute(text_r, 'text', COL_NAME)
+        col.add_attribute(text_r, 'sensitive', COL_SENSITIVE)
         self._tree.append_column(col)
 
         scroll = Gtk.ScrolledWindow()
@@ -136,8 +139,7 @@ class FileExplorer(Gtk.Box):
 
     def _can_select(self, _sel, model, path, _current):
         it = model.get_iter(path)
-        return (model.get_value(it, COL_IS_DIR) or
-                model.get_value(it, COL_NAME).endswith('.sql'))
+        return model.get_value(it, COL_SENSITIVE)
 
     def _refresh(self):
         self._store.clear()
@@ -154,9 +156,11 @@ class FileExplorer(Gtk.Box):
                 if entry.name.startswith('.'):
                     continue
                 if entry.is_dir():
-                    self._store.append(['folder-symbolic', entry.name, entry.path, True])
+                    self._store.append(['folder-symbolic', entry.name, entry.path, True, True])
                 elif entry.name.endswith('.sql'):
-                    self._store.append(['x-office-document-symbolic', entry.name, entry.path, False])
+                    self._store.append(['x-office-document-symbolic', entry.name, entry.path, False, True])
+                else:
+                    self._store.append(['text-x-generic-symbolic', entry.name, entry.path, False, False])
         except OSError as e:
             self._error_label.set_label('Permission denied' if isinstance(e, PermissionError) else str(e))
             self._list_stack.set_visible_child_name('error')
@@ -254,6 +258,9 @@ class FileExplorer(Gtk.Box):
     def _on_right_click(self, _gesture, _n, x, y):
         result = self._tree.get_path_at_pos(int(x), int(y))
         if not result:
+            return
+        it = self._store.get_iter(result[0])
+        if not self._store.get_value(it, COL_SENSITIVE):
             return
         tree_path, _col, _cx, _cy = result
         self._tree.get_selection().select_path(tree_path)
