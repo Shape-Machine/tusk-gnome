@@ -287,8 +287,10 @@ class SqlEditor(Gtk.Box):
         self._results_scroll = Gtk.ScrolledWindow()
         self._results_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         self._results_scroll.set_vexpand(True)
-        self._results_scroll.add_css_class('frame')
-        self._results_stack.add_named(self._results_scroll, 'grid')
+        _results_frame = Gtk.Frame()
+        _results_frame.set_vexpand(True)
+        _results_frame.set_child(self._results_scroll)
+        self._results_stack.add_named(_results_frame, 'grid')
 
         self._results_log = Gtk.ListBox()
         self._results_log.set_selection_mode(Gtk.SelectionMode.NONE)
@@ -625,9 +627,11 @@ class SqlEditor(Gtk.Box):
                 tab_scroll = Gtk.ScrolledWindow()
                 tab_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
                 tab_scroll.set_vexpand(True)
-                tab_scroll.add_css_class('frame')
                 tab_scroll.set_child(make_column_view(result['cols'], result['rows']))
-                tab_page = self._results_tab_view.append(tab_scroll)
+                tab_frame = Gtk.Frame()
+                tab_frame.set_vexpand(True)
+                tab_frame.set_child(tab_scroll)
+                tab_page = self._results_tab_view.append(tab_frame)
                 tab_page.set_title(f'Query {i + 1}')
             elif result['kind'] == 'status':
                 c = result['count']
