@@ -239,6 +239,7 @@ class TablePanel(Gtk.Box):
         self._data_scroll = Gtk.ScrolledWindow()
         self._data_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         self._data_scroll.set_vexpand(True)
+        self._data_scroll.add_css_class('frame')
 
         self._data_nav_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         self._data_nav_bar.set_margin_start(6)
@@ -307,6 +308,7 @@ class TablePanel(Gtk.Box):
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         scroll.set_vexpand(True)
+        scroll.add_css_class('frame')
         return scroll
 
     def _fill_scroll(self, scroll, cols, rows, empty_text):
