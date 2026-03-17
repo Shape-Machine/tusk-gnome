@@ -162,8 +162,6 @@ def _apply_scheme(buf, dark):
 class SqlEditor(Gtk.Box):
     __gsignals__ = {
         'run-sql': (GObject.SignalFlags.RUN_FIRST, None, ()),
-        'open-results': (GObject.SignalFlags.RUN_FIRST, None,
-                         (str, GObject.TYPE_PYOBJECT, GObject.TYPE_PYOBJECT)),
     }
 
     def __init__(self, file_path):
@@ -254,35 +252,21 @@ class SqlEditor(Gtk.Box):
         editor_scroll.set_child(self._editor)
 
         # ── Results pane ──────────────────────────────────────────────────────
-        results_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-
-        results_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        results_header.set_margin_start(10)
-        results_header.set_margin_top(6)
-        results_header.set_margin_bottom(6)
-
-        results_title = Gtk.Label(label='Results')
-        results_title.add_css_class('heading')
-        results_title.set_hexpand(True)
-        results_title.set_xalign(0)
+        # Spinner + meta shown as tab bar end-action widgets
+        self._results_spinner = Gtk.Spinner()
+        self._results_spinner.set_size_request(16, 16)
+        self._results_spinner.set_margin_end(4)
 
         self._results_meta = Gtk.Label()
         self._results_meta.add_css_class('caption')
         self._results_meta.add_css_class('dim-label')
-        self._results_meta.set_margin_end(10)
+        self._results_meta.set_margin_end(8)
 
-        self._results_spinner = Gtk.Spinner()
-        self._results_spinner.set_size_request(16, 16)
-        self._results_spinner.set_margin_end(10)
+        meta_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        meta_box.append(self._results_spinner)
+        meta_box.append(self._results_meta)
 
-        results_header.append(results_title)
-        results_header.append(self._results_spinner)
-        results_header.append(self._results_meta)
-
-        results_box.append(Gtk.Separator())
-        results_box.append(results_header)
-        results_box.append(Gtk.Separator())
-
+        # Content stack (used by the permanent "Results" tab)
         self._results_stack = Gtk.Stack()
 
         self._results_message = Gtk.Label()
@@ -310,14 +294,32 @@ class SqlEditor(Gtk.Box):
         log_scroll.set_child(self._results_log)
         self._results_stack.add_named(log_scroll, 'log')
 
-        results_box.append(self._results_stack)
+        # Tab view — "Results" is always the first (pinned) tab;
+        # SELECT query results appear as additional tabs beside it.
+        self._results_tab_view = Adw.TabView()
+        self._results_tab_view.set_vexpand(True)
+        self._results_tab_view.connect('close-page', self._on_results_close_page)
+
+        self._results_page = self._results_tab_view.append(self._results_stack)
+        self._results_page.set_title('Results')
+        self._results_page.set_pinned(True)
+
+        results_tab_bar = Adw.TabBar()
+        results_tab_bar.set_view(self._results_tab_view)
+        results_tab_bar.set_autohide(True)
+        results_tab_bar.set_end_action_widget(meta_box)
+
+        results_outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        results_outer.append(Gtk.Separator())
+        results_outer.append(results_tab_bar)
+        results_outer.append(self._results_tab_view)
 
         self._paned = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
         self._paned.set_vexpand(True)
         self._paned.set_shrink_start_child(False)
         self._paned.set_shrink_end_child(False)
         self._paned.set_start_child(editor_scroll)
-        self._paned.set_end_child(results_box)
+        self._paned.set_end_child(results_outer)
         self._paned.set_position(prefs.get('sql_pane_pos', 400))
         self._paned.connect('notify::position',
                             lambda p, _: prefs.put('sql_pane_pos', p.get_position()))
@@ -410,6 +412,20 @@ class SqlEditor(Gtk.Box):
     def is_modified(self):
         return self._modified
 
+    # ── Results tab helpers ───────────────────────────────────────────────────
+
+    def _on_results_close_page(self, view, page):
+        # Pinned "Results" tab cannot be closed; all query-result tabs can be.
+        view.close_page_finish(page, page is not self._results_page)
+        return True
+
+    def _clear_result_tabs(self):
+        pages = self._results_tab_view.get_pages()
+        to_close = [pages.get_item(i) for i in range(pages.get_n_items())
+                    if pages.get_item(i) is not self._results_page]
+        for page in to_close:
+            self._results_tab_view.close_page(page)
+
     # ── Run ───────────────────────────────────────────────────────────────────
 
     def run(self):
@@ -427,6 +443,8 @@ class SqlEditor(Gtk.Box):
         if not sql:
             return
 
+        self._clear_result_tabs()
+        self._results_tab_view.set_selected_page(self._results_page)
         self._run_btn.set_sensitive(False)
         self._results_meta.set_label('')
         self._results_spinner.start()
@@ -572,7 +590,6 @@ class SqlEditor(Gtk.Box):
                 break
             self._results_log.remove(child)
 
-        select_index = 0
         errors = sum(1 for r in results if r['kind'] == 'error')
         total = len(results)
         self._results_meta.set_label(
@@ -590,16 +607,18 @@ class SqlEditor(Gtk.Box):
             row.add_css_class('monospace')
 
             if result['kind'] == 'select':
-                select_index += 1
                 n = len(result['rows'])
-                row.set_subtitle(f'{n} row{"s" if n != 1 else ""} — opened in new tab')
+                row.set_subtitle(f'{n} row{"s" if n != 1 else ""}')
                 icon = Gtk.Image.new_from_icon_name('emblem-ok-symbolic')
                 icon.add_css_class('success')
                 row.add_prefix(icon)
-                self.emit('open-results',
-                          f'Query {i + 1}',
-                          result['cols'],
-                          result['rows'])
+
+                tab_scroll = Gtk.ScrolledWindow()
+                tab_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+                tab_scroll.set_vexpand(True)
+                tab_scroll.set_child(make_column_view(result['cols'], result['rows']))
+                tab_page = self._results_tab_view.append(tab_scroll)
+                tab_page.set_title(f'Query {i + 1}')
             elif result['kind'] == 'status':
                 c = result['count']
                 row.set_subtitle(f'{c} row{"s" if c != 1 else ""} affected')
