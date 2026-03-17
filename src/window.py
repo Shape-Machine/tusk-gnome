@@ -12,7 +12,6 @@ from connections import ConnectionStore, KeyringUnavailableError
 from connection_dialog import ConnectionDialog
 from db_browser import DbBrowser
 from file_explorer import FileExplorer
-from data_grid import make_column_view
 from sql_editor import SqlEditor
 from table_panel import TablePanel
 
@@ -530,25 +529,11 @@ class TuskWindow(Adw.ApplicationWindow):
         editor = SqlEditor(file_path)
         editor.set_connection(self._active_conn)
         editor.connect('run-sql', lambda e: e.run())
-        editor.connect('open-results', self._on_query_results)
 
         page = self._tab_view.append(editor)
         page.set_title(os.path.basename(file_path))
         page.set_icon(Gio.ThemedIcon.new('x-office-document-symbolic'))
         page._tab_id = tab_id
-
-        self._show_tabs()
-        self._tab_view.set_selected_page(page)
-
-    def _on_query_results(self, _editor, title, columns, rows):
-        scroll = Gtk.ScrolledWindow()
-        scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        scroll.set_child(make_column_view(columns, rows))
-
-        page = self._tab_view.append(scroll)
-        page.set_title(title)
-        page.set_icon(Gio.ThemedIcon.new('x-office-spreadsheet-symbolic'))
-        page._tab_id = None
 
         self._show_tabs()
         self._tab_view.set_selected_page(page)
