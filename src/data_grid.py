@@ -73,6 +73,17 @@ def _copy_to_clipboard(text):
     Gdk.Display.get_default().get_clipboard().set(text)
 
 
+def update_column_view(col_view, rows):
+    """Replace the data in an existing ColumnView without recreating it.
+
+    Preserves column widths and other per-widget state.
+    """
+    store = col_view.get_model().get_model()
+    store.remove_all()
+    for row in rows:
+        store.append(_Row(list(row)))
+
+
 def make_column_view(columns, rows, table_name=None):
     store = Gio.ListStore(item_type=_Row)
     for row in rows:
