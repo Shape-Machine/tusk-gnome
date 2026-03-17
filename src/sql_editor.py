@@ -137,6 +137,113 @@ def _is_comment_only(stmt):
     return not _COMMENT_ONLY_RE.sub('', stmt).strip()
 
 
+def _statement_at_offset(sql, offset):
+    """Return the SQL statement whose extent contains the given character offset.
+
+    Uses the same quoting/comment rules as _split_statements.  Falls back to
+    the nearest preceding statement when the cursor sits in whitespace between
+    statements (e.g. after a semicolon).
+    """
+    statements = []   # list of (stmt_text, raw_start, raw_end)
+    current = []
+    stmt_start = 0
+    i = 0
+    n = len(sql)
+
+    while i < n:
+        c = sql[i]
+
+        if c == '-' and i + 1 < n and sql[i + 1] == '-':
+            end = sql.find('\n', i)
+            if end == -1:
+                current.append(sql[i:])
+                i = n
+            else:
+                current.append(sql[i:end + 1])
+                i = end + 1
+
+        elif c == '/' and i + 1 < n and sql[i + 1] == '*':
+            end = sql.find('*/', i + 2)
+            if end == -1:
+                current.append(sql[i:])
+                i = n
+            else:
+                current.append(sql[i:end + 2])
+                i = end + 2
+
+        elif c == '$':
+            tag_end = sql.find('$', i + 1)
+            if tag_end != -1:
+                tag = sql[i:tag_end + 1]
+                close = sql.find(tag, tag_end + 1)
+                if close != -1:
+                    current.append(sql[i:close + len(tag)])
+                    i = close + len(tag)
+                else:
+                    current.append(c)
+                    i += 1
+            else:
+                current.append(c)
+                i += 1
+
+        elif c == "'":
+            j = i + 1
+            while j < n:
+                if sql[j] == "'":
+                    if j + 1 < n and sql[j + 1] == "'":
+                        j += 2
+                    else:
+                        j += 1
+                        break
+                elif sql[j] == '\\':
+                    j += 2
+                else:
+                    j += 1
+            current.append(sql[i:j])
+            i = j
+
+        elif c == '"':
+            j = i + 1
+            while j < n:
+                if sql[j] == '"':
+                    if j + 1 < n and sql[j + 1] == '"':
+                        j += 2
+                    else:
+                        j += 1
+                        break
+                else:
+                    j += 1
+            current.append(sql[i:j])
+            i = j
+
+        elif c == ';':
+            stmt = ''.join(current).strip()
+            if stmt and not _is_comment_only(stmt):
+                statements.append((stmt, stmt_start, i))
+            current = []
+            stmt_start = i + 1
+            i += 1
+
+        else:
+            current.append(c)
+            i += 1
+
+    stmt = ''.join(current).strip()
+    if stmt and not _is_comment_only(stmt):
+        statements.append((stmt, stmt_start, n))
+
+    if not statements:
+        return ''
+
+    # Return the statement whose raw range contains the cursor
+    for text, start, end in statements:
+        if start <= offset <= end:
+            return text
+
+    # Cursor is past all statements — return the last one
+    return statements[-1][0]
+
+
 def _make_editor():
     """Return (buffer, view) using GtkSourceView if available."""
     if _HAS_SOURCE:
@@ -169,7 +276,8 @@ def _apply_scheme(buf, dark):
 
 class SqlEditor(Gtk.Box):
     __gsignals__ = {
-        'run-sql': (GObject.SignalFlags.RUN_FIRST, None, ()),
+        'run-sql':          (GObject.SignalFlags.RUN_FIRST, None, ()),
+        'run-selected-sql': (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
     def __init__(self, file_path):
@@ -221,12 +329,19 @@ class SqlEditor(Gtk.Box):
         self._conn_label.add_css_class('caption')
         self._conn_label.add_css_class('dim-label')
 
-        self._run_btn = Gtk.Button(label='Run')
-        self._run_btn.set_icon_name('media-playback-start-symbolic')
+        self._run_sel_btn = Gtk.Button(label='Run Selected')
+        self._run_sel_btn.set_icon_name('media-playback-start-symbolic')
+        self._run_sel_btn.add_css_class('pill')
+        self._run_sel_btn.set_sensitive(False)
+        self._run_sel_btn.set_tooltip_text('Run selected / at cursor  Ctrl+Enter')
+        self._run_sel_btn.connect('clicked', lambda _: self.emit('run-selected-sql'))
+
+        self._run_btn = Gtk.Button(label='Run All')
+        self._run_btn.set_icon_name('media-skip-forward-symbolic')
         self._run_btn.add_css_class('suggested-action')
         self._run_btn.add_css_class('pill')
         self._run_btn.set_sensitive(False)
-        self._run_btn.set_tooltip_text('Run SQL  F5 / Ctrl+Enter')
+        self._run_btn.set_tooltip_text('Run all  F5')
         self._run_btn.connect('clicked', lambda _: self.emit('run-sql'))
 
         toolbar.append(self._modified_dot)
@@ -234,6 +349,7 @@ class SqlEditor(Gtk.Box):
         toolbar.append(save_btn)
         toolbar.append(spacer)
         toolbar.append(self._conn_label)
+        toolbar.append(self._run_sel_btn)
         toolbar.append(self._run_btn)
 
         self.append(toolbar)
@@ -396,13 +512,16 @@ class SqlEditor(Gtk.Box):
         self._autosave_timer = GLib.timeout_add(_AUTOSAVE_DELAY_MS, self._do_save)
 
     def _on_key_pressed(self, _ctrl, keyval, _code, state):
-        if state & Gdk.ModifierType.CONTROL_MASK and keyval == Gdk.KEY_s:
+        ctrl = state & Gdk.ModifierType.CONTROL_MASK
+        if ctrl and keyval == Gdk.KEY_s:
             self._save_now()
             return True
-        if keyval in (Gdk.KEY_F5, Gdk.KEY_Return, Gdk.KEY_KP_Enter) and \
-                self._run_btn.get_sensitive() and \
-                (keyval == Gdk.KEY_F5 or state & Gdk.ModifierType.CONTROL_MASK):
+        if keyval == Gdk.KEY_F5 and self._run_btn.get_sensitive():
             self.emit('run-sql')
+            return True
+        if ctrl and keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and \
+                self._run_sel_btn.get_sensitive():
+            self.emit('run-selected-sql')
             return True
         return False
 
@@ -413,9 +532,11 @@ class SqlEditor(Gtk.Box):
         if conn:
             self._conn_label.set_label(conn['name'])
             self._run_btn.set_sensitive(True)
+            self._run_sel_btn.set_sensitive(True)
         else:
             self._conn_label.set_label('')
             self._run_btn.set_sensitive(False)
+            self._run_sel_btn.set_sensitive(False)
 
     def is_modified(self):
         return self._modified
@@ -437,16 +558,30 @@ class SqlEditor(Gtk.Box):
     # ── Run ───────────────────────────────────────────────────────────────────
 
     def run(self):
+        """Run All — always executes the full buffer."""
         if not self._connection:
             return
+        start = self._buffer.get_start_iter()
+        end = self._buffer.get_end_iter()
+        sql = self._buffer.get_text(start, end, False).strip()
+        self._start_run(sql)
 
+    def run_selected(self):
+        """Run Selected — executes the selection, or the statement at the cursor."""
+        if not self._connection:
+            return
         bounds = self._buffer.get_selection_bounds()
         if bounds:
             sql = self._buffer.get_text(bounds[0], bounds[1], False).strip()
         else:
+            cursor = self._buffer.get_iter_at_mark(self._buffer.get_insert())
             start = self._buffer.get_start_iter()
             end = self._buffer.get_end_iter()
-            sql = self._buffer.get_text(start, end, False).strip()
+            full_text = self._buffer.get_text(start, end, False)
+            sql = _statement_at_offset(full_text, cursor.get_offset())
+        self._start_run(sql)
+
+    def _start_run(self, sql):
 
         if not sql:
             return
@@ -454,6 +589,7 @@ class SqlEditor(Gtk.Box):
         self._clear_result_tabs()
         self._results_tab_view.set_selected_page(self._results_page)
         self._run_btn.set_sensitive(False)
+        self._run_sel_btn.set_sensitive(False)
         self._results_meta.set_label('')
         self._results_spinner.start()
         self._results_stack.set_visible_child_name('message')
@@ -562,6 +698,7 @@ class SqlEditor(Gtk.Box):
     def show_results(self, columns, rows):
         self._results_spinner.stop()
         self._run_btn.set_sensitive(self._connection is not None)
+        self._run_sel_btn.set_sensitive(self._connection is not None)
         self._results_meta.set_label(f'{len(rows)} row{"s" if len(rows) != 1 else ""}')
 
         if not rows:
@@ -576,6 +713,7 @@ class SqlEditor(Gtk.Box):
     def show_message(self, text):
         self._results_spinner.stop()
         self._run_btn.set_sensitive(self._connection is not None)
+        self._run_sel_btn.set_sensitive(self._connection is not None)
         self._results_message.set_label(text)
         self._results_message.remove_css_class('error')
         self._results_stack.set_visible_child_name('message')
@@ -583,6 +721,7 @@ class SqlEditor(Gtk.Box):
     def show_error(self, text):
         self._results_spinner.stop()
         self._run_btn.set_sensitive(self._connection is not None)
+        self._run_sel_btn.set_sensitive(self._connection is not None)
         self._results_message.set_label(text)
         self._results_message.add_css_class('error')
         self._results_stack.set_visible_child_name('message')
@@ -590,6 +729,7 @@ class SqlEditor(Gtk.Box):
     def _show_multi_results(self, results):
         self._results_spinner.stop()
         self._run_btn.set_sensitive(self._connection is not None)
+        self._run_sel_btn.set_sensitive(self._connection is not None)
 
         # Clear previous log rows
         while True:

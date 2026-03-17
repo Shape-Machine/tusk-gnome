@@ -529,6 +529,7 @@ class TuskWindow(Adw.ApplicationWindow):
         editor = SqlEditor(file_path)
         editor.set_connection(self._active_conn)
         editor.connect('run-sql', lambda e: e.run())
+        editor.connect('run-selected-sql', lambda e: e.run_selected())
 
         page = self._tab_view.append(editor)
         page.set_title(os.path.basename(file_path))
