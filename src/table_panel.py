@@ -8,7 +8,7 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib
 
 import prefs
-from data_grid import make_column_view
+from data_grid import make_column_view, update_column_view
 
 try:
     gi.require_version('GtkSource', '5')
@@ -311,7 +311,11 @@ class TablePanel(Gtk.Box):
 
     def _fill_scroll(self, scroll, cols, rows, empty_text):
         if rows:
-            scroll.set_child(make_column_view(cols, rows))
+            existing = scroll.get_child()
+            if isinstance(existing, Gtk.ColumnView):
+                update_column_view(existing, rows)
+            else:
+                scroll.set_child(make_column_view(cols, rows))
         else:
             empty = Adw.StatusPage(title=empty_text)
             empty.set_vexpand(True)
