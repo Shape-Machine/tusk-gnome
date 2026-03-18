@@ -36,10 +36,15 @@ Tabs available for each object type:
 | Data | ✓ | ✓ |
 
 - Data tab is paginated — 100, 500, or 1000 rows per page (configurable); Prev/Next buttons navigate between pages; current row range shown
+- Filter bar above the data grid — type to instantly filter visible rows by any cell value (client-side, no extra query)
+- Columns are sortable — click a column header to sort ascending/descending; numeric values sort numerically, NULLs sort first
 - NULL values are shown distinctly (greyed "NULL" label)
 - Right-click on a data cell to copy the cell value
 - Right-click on selected rows to copy as CSV, JSON, or INSERT SQL (tables only)
 - Right-click anywhere to copy all visible rows as CSV, JSON, or INSERT SQL (tables only)
+- Right-click to export the current page to a file as CSV, JSON, or INSERT SQL
+- Export button in the nav bar exports the full table (all rows, no page limit) as CSV, JSON, or INSERT SQL (tables only)
+- Row count estimate and total size on disk shown in a status bar at the bottom of the panel (tables only; sourced from PostgreSQL statistics, no extra query needed)
 - Empty state shown per tab when there is no data to display
 - Refresh button reloads all tabs for the current table (also Ctrl+R)
 
@@ -51,8 +56,9 @@ Tabs available for each object type:
 - Active connection name shown in the editor toolbar; run buttons disabled when no connection is active
 - **Run All** (F5) — executes the entire buffer as one or more statements
 - **Run Selected** (Ctrl+Enter) — executes the selected text, or the statement at the cursor if nothing is selected
+- **Cancel** — stops a running query mid-execution; shown in place of the run buttons while a query is active
 - Single-statement queries show results inline in the resizable results pane
-- Multi-statement scripts show a results log listing each statement's outcome (rows affected, row count, or error); SELECT results open as additional closeable tabs
+- Multi-statement scripts show a results log listing each statement's outcome (rows affected, row count, error, or cancelled); SELECT results open as additional closeable tabs
 - Row count shown after each query
 - Spinner shown while a query is running
 - Right-click on results to copy the cell value, copy selected rows as CSV or JSON, or copy all rows as CSV or JSON
