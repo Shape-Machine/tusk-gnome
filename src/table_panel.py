@@ -1,3 +1,6 @@
+import csv
+import io
+import json
 import threading
 
 import gi
@@ -5,7 +8,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Gtk, Adw, GLib
+from gi.repository import Gtk, Adw, GLib, Gio
 
 import prefs
 from data_grid import make_column_view, update_column_view
@@ -273,10 +276,30 @@ class TablePanel(Gtk.Box):
         self._page_size_drop.set_tooltip_text('Rows per page')
         self._page_size_drop.connect('notify::selected', self._on_page_size_changed)
 
+        export_menu = Gio.Menu()
+        export_menu.append('Export all as CSV…',        'tbl.export-csv')
+        export_menu.append('Export all as JSON…',       'tbl.export-json')
+        export_menu.append('Export all as INSERT SQL…', 'tbl.export-sql')
+
+        self._export_btn = Gtk.MenuButton()
+        self._export_btn.set_icon_name('document-save-symbolic')
+        self._export_btn.set_tooltip_text('Export table')
+        self._export_btn.add_css_class('flat')
+        self._export_btn.set_menu_model(export_menu)
+        self._export_btn.set_sensitive(False)
+
+        export_ag = Gio.SimpleActionGroup()
+        for fmt in ('csv', 'json', 'sql'):
+            action = Gio.SimpleAction.new(f'export-{fmt}', None)
+            action.connect('activate', lambda _a, _p, f=fmt: self._export_table(f))
+            export_ag.add_action(action)
+        self._data_nav_bar.insert_action_group('tbl', export_ag)
+
         self._data_nav_bar.append(self._data_prev_btn)
         self._data_nav_bar.append(self._data_page_label)
         self._data_nav_bar.append(self._data_next_btn)
         self._data_nav_bar.append(self._page_size_drop)
+        self._data_nav_bar.append(self._export_btn)
 
         self._filter_entry = Gtk.SearchEntry()
         self._filter_entry.set_placeholder_text('Filter rows…')
@@ -359,6 +382,81 @@ class TablePanel(Gtk.Box):
                 daemon=True,
             ).start()
 
+    def _export_table(self, fmt):
+        ext = 'sql' if fmt == 'sql' else fmt
+        dialog = Gtk.FileDialog()
+        dialog.set_initial_name(f'{self._current_table}.{ext}')
+        def _on_save(d, result):
+            try:
+                gfile = d.save_finish(result)
+            except Exception:
+                return
+            threading.Thread(
+                target=self._fetch_and_write,
+                args=(gfile, fmt, self._conn, self._current_schema, self._current_table),
+                daemon=True,
+            ).start()
+        dialog.save(self.get_root(), None, _on_save)
+
+    def _fetch_and_write(self, gfile, fmt, conn, schema, table):
+        try:
+            import psycopg
+            from psycopg import sql as pgsql
+            from tunnel import open_tunnel
+
+            with open_tunnel(conn) as (host, port), psycopg.connect(
+                host=host,
+                port=port,
+                dbname=conn['database'],
+                user=conn['username'],
+                password=conn['password'],
+                connect_timeout=10,
+            ) as db:
+                with db.cursor() as cur:
+                    cur.execute(
+                        pgsql.SQL('SELECT * FROM {}.{}').format(
+                            pgsql.Identifier(schema), pgsql.Identifier(table)
+                        )
+                    )
+                    cols = [d.name for d in cur.description]
+                    rows = cur.fetchall()
+
+            if fmt == 'csv':
+                buf = io.StringIO()
+                w = csv.writer(buf)
+                w.writerow(cols)
+                w.writerows(rows)
+                text = buf.getvalue()
+            elif fmt == 'json':
+                text = json.dumps(
+                    [{col: v for col, v in zip(cols, row)} for row in rows],
+                    indent=2, default=str,
+                )
+            else:
+                def _quote(name):
+                    return '"' + name.replace('"', '""') + '"'
+                def _val(v):
+                    if v is None: return 'NULL'
+                    if isinstance(v, bool): return 'TRUE' if v else 'FALSE'
+                    if isinstance(v, (int, float)): return str(v)
+                    return "'" + str(v).replace("'", "''") + "'"
+                qtable = f'{_quote(schema)}.{_quote(table)}'
+                col_str = ', '.join(_quote(c) for c in cols)
+                lines = [
+                    f'INSERT INTO {qtable} ({col_str}) VALUES ({", ".join(_val(v) for v in row)});'
+                    for row in rows
+                ]
+                text = '\n'.join(lines)
+
+            data = text.encode()
+            GLib.idle_add(
+                lambda: gfile.replace_contents(
+                    data, None, False, Gio.FileCreateFlags.REPLACE_DESTINATION, None
+                )
+            )
+        except Exception:
+            pass
+
     def _apply_local_filter(self, *_):
         if not hasattr(self, '_all_data_rows'):
             return
@@ -401,6 +499,7 @@ class TablePanel(Gtk.Box):
         self._filter_entry.set_text('')
         self._load_gen += 1
         self._refresh_btn.set_sensitive(False)
+        self._export_btn.set_sensitive(False)
         self._set_tabs_for_type(item_type)
         self._spinner.start()
         self._outer.set_visible_child_name('loading')
@@ -477,6 +576,7 @@ class TablePanel(Gtk.Box):
             return
         self._spinner.stop()
         self._refresh_btn.set_sensitive(True)
+        self._export_btn.set_sensitive(self._item_type == 'table')
 
         self._fill_scroll(self._schema_scroll,    _SCHEMA_COLS,    schema_rows,    'No columns')
         self._fill_scroll(self._keys_scroll,      _KEYS_COLS,      keys_rows,      'No keys')

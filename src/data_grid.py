@@ -187,12 +187,18 @@ def make_column_view(columns, rows, table_name=None):
     all_json = make_action('all-json', lambda *_: _copy_to_clipboard(_to_json(columns, get_all_rows())))
 
     def _save_to_file(fmt):
+        ext = 'sql' if fmt == 'sql' else fmt
         dialog = Gtk.FileDialog()
-        dialog.set_initial_name(f'export.{fmt}')
+        dialog.set_initial_name(f'export.{ext}')
         def _on_save(d, result):
             try:
                 gfile = d.save_finish(result)
-                text = _to_csv(columns, get_all_rows()) if fmt == 'csv' else _to_json(columns, get_all_rows())
+                if fmt == 'csv':
+                    text = _to_csv(columns, get_all_rows())
+                elif fmt == 'json':
+                    text = _to_json(columns, get_all_rows())
+                else:
+                    text = _to_insert_sql(columns, get_all_rows(), table_name)
                 gfile.replace_contents(text.encode(), None, False, Gio.FileCreateFlags.REPLACE_DESTINATION, None)
             except Exception:
                 pass
@@ -200,6 +206,8 @@ def make_column_view(columns, rows, table_name=None):
 
     make_action('export-csv',  lambda *_: _save_to_file('csv'))
     make_action('export-json', lambda *_: _save_to_file('json'))
+    if table_name:
+        make_action('export-sql', lambda *_: _save_to_file('sql'))
 
     sel_actions = [sel_csv, sel_json]
 
@@ -235,8 +243,10 @@ def make_column_view(columns, rows, table_name=None):
     all_section.append('Copy all as JSON',  'copy.all-json')
     if table_name:
         all_section.append('Copy all as INSERT SQL', 'copy.all-sql')
-    all_section.append('Export all as CSV…',  'copy.export-csv')
-    all_section.append('Export all as JSON…', 'copy.export-json')
+    all_section.append('Export page as CSV…',  'copy.export-csv')
+    all_section.append('Export page as JSON…', 'copy.export-json')
+    if table_name:
+        all_section.append('Export page as INSERT SQL…', 'copy.export-sql')
 
     menu = Gio.Menu()
     menu.append_section(None, cell_section)
