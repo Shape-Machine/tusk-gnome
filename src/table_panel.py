@@ -145,6 +145,7 @@ class TablePanel(Gtk.Box):
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._load_gen = 0
+        self._filter_where = ''
         self._build_ui()
 
     def _build_ui(self):
@@ -278,7 +279,40 @@ class TablePanel(Gtk.Box):
         self._data_nav_bar.append(self._data_next_btn)
         self._data_nav_bar.append(self._page_size_drop)
 
+        # Filter bar
+        filter_label = Gtk.Label(label='WHERE')
+        filter_label.add_css_class('dim-label')
+        filter_label.set_margin_start(6)
+
+        self._filter_entry = Gtk.Entry()
+        self._filter_entry.set_placeholder_text('condition …')
+        self._filter_entry.set_hexpand(True)
+        self._filter_entry.connect('activate', self._on_filter_apply)
+
+        self._filter_apply_btn = Gtk.Button(icon_name='edit-find-symbolic')
+        self._filter_apply_btn.add_css_class('flat')
+        self._filter_apply_btn.set_tooltip_text('Apply filter')
+        self._filter_apply_btn.connect('clicked', self._on_filter_apply)
+
+        self._filter_clear_btn = Gtk.Button(icon_name='edit-clear-symbolic')
+        self._filter_clear_btn.add_css_class('flat')
+        self._filter_clear_btn.set_tooltip_text('Clear filter')
+        self._filter_clear_btn.set_visible(False)
+        self._filter_clear_btn.connect('clicked', self._on_filter_clear)
+
+        self._filter_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self._filter_bar.set_margin_start(2)
+        self._filter_bar.set_margin_end(4)
+        self._filter_bar.set_margin_top(4)
+        self._filter_bar.set_margin_bottom(4)
+        self._filter_bar.append(filter_label)
+        self._filter_bar.append(self._filter_entry)
+        self._filter_bar.append(self._filter_apply_btn)
+        self._filter_bar.append(self._filter_clear_btn)
+
         data_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        data_box.append(self._filter_bar)
+        data_box.append(Gtk.Separator())
         data_box.append(self._data_scroll)
         data_box.append(self._data_nav_bar)
         self._page_data = self._view_stack.add_titled_with_icon(
@@ -349,6 +383,29 @@ class TablePanel(Gtk.Box):
                 daemon=True,
             ).start()
 
+    def _on_filter_apply(self, *_):
+        self._filter_where = self._filter_entry.get_text().strip()
+        self._filter_clear_btn.set_visible(bool(self._filter_where))
+        self._data_prev_btn.set_sensitive(False)
+        self._data_next_btn.set_sensitive(False)
+        threading.Thread(
+            target=self._fetch_data_page,
+            args=(self._conn, self._current_schema, self._current_table, 0),
+            daemon=True,
+        ).start()
+
+    def _on_filter_clear(self, *_):
+        self._filter_entry.set_text('')
+        self._filter_where = ''
+        self._filter_clear_btn.set_visible(False)
+        self._data_prev_btn.set_sensitive(False)
+        self._data_next_btn.set_sensitive(False)
+        threading.Thread(
+            target=self._fetch_data_page,
+            args=(self._conn, self._current_schema, self._current_table, 0),
+            daemon=True,
+        ).start()
+
     def _on_refresh(self):
         if self._refresh_btn.get_sensitive():
             self.load(self._conn, self._current_schema, self._current_table, self._item_type)
@@ -359,6 +416,9 @@ class TablePanel(Gtk.Box):
         self._current_table = table
         self._item_type = item_type
         self._data_page = 0
+        self._filter_where = ''
+        self._filter_entry.set_text('')
+        self._filter_clear_btn.set_visible(False)
         self._load_gen += 1
         self._refresh_btn.set_sensitive(False)
         self._set_tabs_for_type(item_type)
@@ -413,13 +473,16 @@ class TablePanel(Gtk.Box):
                     cur.execute(_TRIGGERS_SQL, [schema, table])
                     triggers_rows = cur.fetchall()
 
-                    cur.execute(
-                        sql.SQL('SELECT * FROM {}.{} LIMIT %s OFFSET %s').format(
-                            sql.Identifier(schema),
-                            sql.Identifier(table),
-                        ),
-                        [self._page_size + 1, 0],
-                    )
+                    where = self._filter_where
+                    if where:
+                        data_query = sql.SQL(
+                            'SELECT * FROM {}.{} WHERE {} LIMIT %s OFFSET %s'
+                        ).format(sql.Identifier(schema), sql.Identifier(table), sql.SQL(where))
+                    else:
+                        data_query = sql.SQL(
+                            'SELECT * FROM {}.{} LIMIT %s OFFSET %s'
+                        ).format(sql.Identifier(schema), sql.Identifier(table))
+                    cur.execute(data_query, [self._page_size + 1, 0])
                     data_cols = [d.name for d in cur.description]
                     data_rows = cur.fetchall()
 
@@ -510,13 +573,16 @@ class TablePanel(Gtk.Box):
                 connect_timeout=10,
             ) as db:
                 with db.cursor() as cur:
-                    cur.execute(
-                        sql.SQL('SELECT * FROM {}.{} LIMIT %s OFFSET %s').format(
-                            sql.Identifier(schema),
-                            sql.Identifier(table),
-                        ),
-                        [self._page_size + 1, page * self._page_size],
-                    )
+                    where = self._filter_where
+                    if where:
+                        query = sql.SQL(
+                            'SELECT * FROM {}.{} WHERE {} LIMIT %s OFFSET %s'
+                        ).format(sql.Identifier(schema), sql.Identifier(table), sql.SQL(where))
+                    else:
+                        query = sql.SQL(
+                            'SELECT * FROM {}.{} LIMIT %s OFFSET %s'
+                        ).format(sql.Identifier(schema), sql.Identifier(table))
+                    cur.execute(query, [self._page_size + 1, page * self._page_size])
                     cols = [d.name for d in cur.description]
                     rows = cur.fetchall()
 
