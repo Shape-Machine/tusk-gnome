@@ -803,8 +803,7 @@ class SqlEditor(Gtk.Box):
 
     def _show_multi_results(self, results):
         self._finish_run()
-        has_success = any(r['kind'] in ('select', 'status') for r in results)
-        if has_success and _DDL_RE.search(self._last_sql):
+        if any(_DDL_RE.search(r['stmt']) for r in results if r['kind'] in ('select', 'status')):
             self.emit('ddl-executed')
 
         # Clear previous log rows
