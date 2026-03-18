@@ -58,14 +58,18 @@ try:
                     if word.lower().startswith(lp):
                         store.append(_Proposal(word, kind))
             self._last_proposals = store
-            task = Gio.Task.new(self, cancellable, callback, user_data)
-            task.return_boolean(True)
+            # Keep a strong reference so the task isn't GC'd before populate_finish
+            self._current_task = Gio.Task.new(self, cancellable, callback, user_data)
+            self._current_task.return_boolean(True)
 
         def do_populate_finish(self, result):
-            result.propagate_boolean()
+            # result arrives typed as Gio.AsyncResult; propagate_boolean is a
+            # Gio.Task-only method and would crash — skip it, return stored proposals
             return self._last_proposals
 
         def do_display(self, context, proposal, cell):
+            if not isinstance(proposal, _Proposal):
+                return
             col = cell.get_column()
             if col == GtkSource.CompletionColumn.TYPED_TEXT:
                 cell.set_text(proposal.word)
@@ -73,6 +77,8 @@ try:
                 cell.set_text(proposal.kind)
 
         def do_activate(self, context, proposal):
+            if not isinstance(proposal, _Proposal):
+                return
             buf = context.get_buffer()
             ok, start, end = context.get_bounds()
             if ok:
