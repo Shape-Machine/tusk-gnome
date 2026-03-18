@@ -79,19 +79,20 @@ exec python3 /usr/local/share/tusk-gnome/main.py "\$@"
 LAUNCHER
 chmod +x "$STAGING/usr/local/bin/tusk"
 
-# Data files
-mkdir -p "$STAGING/usr/local/share/applications"
-mkdir -p "$STAGING/usr/local/share/icons/hicolor/scalable/apps"
-mkdir -p "$STAGING/usr/local/share/glib-2.0/schemas"
+# XDG integration files — must go under /usr/share (not /usr/local/share)
+# so appstreamcli, GNOME Software, and update-desktop-database find them
+mkdir -p "$STAGING/usr/share/applications"
+mkdir -p "$STAGING/usr/share/icons/hicolor/scalable/apps"
+mkdir -p "$STAGING/usr/share/glib-2.0/schemas"
+mkdir -p "$STAGING/usr/share/metainfo"
 cp "$ROOT/data/xyz.shapemachine.tusk-gnome.desktop" \
-   "$STAGING/usr/local/share/applications/"
+   "$STAGING/usr/share/applications/"
 cp "$ROOT/data/icons/hicolor/scalable/apps/xyz.shapemachine.tusk-gnome.svg" \
-   "$STAGING/usr/local/share/icons/hicolor/scalable/apps/"
+   "$STAGING/usr/share/icons/hicolor/scalable/apps/"
 cp "$ROOT/data/xyz.shapemachine.tusk-gnome.gschema.xml" \
-   "$STAGING/usr/local/share/glib-2.0/schemas/"
-mkdir -p "$STAGING/usr/local/share/metainfo"
+   "$STAGING/usr/share/glib-2.0/schemas/"
 cp "$ROOT/data/xyz.shapemachine.tusk-gnome.metainfo.xml" \
-   "$STAGING/usr/local/share/metainfo/"
+   "$STAGING/usr/share/metainfo/"
 
 ok "Staging complete → $STAGING"
 
@@ -133,12 +134,13 @@ if [[ $DO_APPIMAGE == 1 ]]; then
     rm -rf "$ROOT/_appimage"
     mkdir -p "$APPDIR"
 
-    # Copy installed files into AppDir
+    # Copy installed files into AppDir (app code from /usr/local, XDG files from /usr/share)
     cp -r "$STAGING/usr/local/"* "$APPDIR/"
+    cp -r "$STAGING/usr/share/"* "$APPDIR/share/"
 
-    # AppDir metadata
-    cp "$STAGING/usr/local/share/applications/$APP_ID.desktop" "$APPDIR/$APP_ID.desktop"
-    cp "$STAGING/usr/local/share/icons/hicolor/scalable/apps/$APP_ID.svg" "$APPDIR/$APP_ID.svg"
+    # AppDir metadata (root-level symlinks required by AppImage spec)
+    cp "$STAGING/usr/share/applications/$APP_ID.desktop" "$APPDIR/$APP_ID.desktop"
+    cp "$STAGING/usr/share/icons/hicolor/scalable/apps/$APP_ID.svg" "$APPDIR/$APP_ID.svg"
 
     cat > "$APPDIR/AppRun" <<'APPRUN'
 #!/bin/bash
