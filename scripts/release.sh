@@ -89,6 +89,9 @@ cp "$ROOT/data/icons/hicolor/scalable/apps/xyz.shapemachine.tusk-gnome.svg" \
    "$STAGING/usr/local/share/icons/hicolor/scalable/apps/"
 cp "$ROOT/data/xyz.shapemachine.tusk-gnome.gschema.xml" \
    "$STAGING/usr/local/share/glib-2.0/schemas/"
+mkdir -p "$STAGING/usr/local/share/metainfo"
+cp "$ROOT/data/xyz.shapemachine.tusk-gnome.metainfo.xml" \
+   "$STAGING/usr/local/share/metainfo/"
 
 ok "Staging complete → $STAGING"
 
@@ -163,8 +166,8 @@ if [[ $DO_DEB == 1 ]]; then
         -n tusk-gnome \
         -v "$VERSION" \
         --description "PostgreSQL client for GNOME" \
-        --url "https://github.com/Shape-Machine/tusk-gnome" \
-        --maintainer "Shape Machine <hello@shapemachine.xyz>" \
+        --url "https://shapemachine.xyz/tusk" \
+        --maintainer "Shape Machine <tusk.gnome@shapemachine.xyz>" \
         --depends "python3" \
         --depends "python3-gi" \
         --depends "gir1.2-gtk-4.0" \
@@ -190,8 +193,8 @@ if [[ $DO_RPM == 1 ]]; then
         -n tusk-gnome \
         -v "$VERSION" \
         --description "PostgreSQL client for GNOME" \
-        --url "https://github.com/Shape-Machine/tusk-gnome" \
-        --maintainer "Shape Machine <hello@shapemachine.xyz>" \
+        --url "https://shapemachine.xyz/tusk" \
+        --maintainer "Shape Machine <tusk.gnome@shapemachine.xyz>" \
         --depends "python3" \
         --depends "python3-gobject" \
         --depends "gtk4" \
