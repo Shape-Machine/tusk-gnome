@@ -392,7 +392,6 @@ class SqlEditor(Gtk.Box):
             self._schema_buf = GtkSource.Buffer()
             self._schema_buf.set_text(' '.join(w.lower() for w in _SQL_KEYWORDS))
             provider = GtkSource.CompletionWords.new('SQL')
-            provider.props.minimum_word_size = 1
             provider.register(self._buffer)       # words typed in the editor
             provider.register(self._schema_buf)   # keywords + schema objects
             self._editor.get_completion().add_provider(provider)
