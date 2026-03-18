@@ -52,6 +52,37 @@
     <keyword>query</keyword>
   </keywords>
 
+  <screenshots>
+    <screenshot type="default">
+      <caption>Browse schemas, tables, and views with a filterable sidebar</caption>
+      <image>https://raw.githubusercontent.com/Shape-Machine/tusk-gnome/main/docs/screenshots/table-schema.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Paginated data tab with sortable columns and quick filter bar</caption>
+      <image>https://raw.githubusercontent.com/Shape-Machine/tusk-gnome/main/docs/screenshots/table-data-filter.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>SQL editor with syntax highlighting and multi-statement execution</caption>
+      <image>https://raw.githubusercontent.com/Shape-Machine/tusk-gnome/main/docs/screenshots/sql-editor-multistatement.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>DDL tab showing the full CREATE TABLE statement</caption>
+      <image>https://raw.githubusercontent.com/Shape-Machine/tusk-gnome/main/docs/screenshots/table-ddl.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Indexes tab for the selected table</caption>
+      <image>https://raw.githubusercontent.com/Shape-Machine/tusk-gnome/main/docs/screenshots/table-indexes.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Connection dialog with SSH tunnel support</caption>
+      <image>https://raw.githubusercontent.com/Shape-Machine/tusk-gnome/main/docs/screenshots/connection-dialog-ssh.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Font and size preferences for sidebar and main content</caption>
+      <image>https://raw.githubusercontent.com/Shape-Machine/tusk-gnome/main/docs/screenshots/preferences.png</image>
+    </screenshot>
+  </screenshots>
+
   <content_rating type="oars-1.1" />
 
   <releases>
