@@ -448,14 +448,15 @@ class TablePanel(Gtk.Box):
                 ]
                 text = '\n'.join(lines)
 
-            data = text.encode()
-            GLib.idle_add(
-                lambda: gfile.replace_contents(
-                    data, None, False, Gio.FileCreateFlags.REPLACE_DESTINATION, None
-                )
+            gfile.replace_contents(
+                text.encode(), None, False,
+                Gio.FileCreateFlags.REPLACE_DESTINATION, None,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            GLib.idle_add(self._show_export_error, str(e))
+
+    def _show_export_error(self, msg):
+        self._data_page_label.set_label(f'Export failed: {msg}')
 
     def _apply_local_filter(self, *_):
         if not hasattr(self, '_all_data_rows'):

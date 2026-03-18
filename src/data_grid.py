@@ -1,12 +1,13 @@
 import csv
 import io
 import json
+import threading
 
 import gi
 
 gi.require_version('Gtk', '4.0')
 
-from gi.repository import Gtk, Gio, GObject, Pango, Gdk
+from gi.repository import Gtk, Gio, GObject, Pango, Gdk, GLib
 
 
 class _Row(GObject.Object):
@@ -193,16 +194,28 @@ def make_column_view(columns, rows, table_name=None):
         def _on_save(d, result):
             try:
                 gfile = d.save_finish(result)
-                if fmt == 'csv':
-                    text = _to_csv(columns, get_all_rows())
-                elif fmt == 'json':
-                    text = _to_json(columns, get_all_rows())
-                else:
-                    text = _to_insert_sql(columns, get_all_rows(), table_name)
-                gfile.replace_contents(text.encode(), None, False, Gio.FileCreateFlags.REPLACE_DESTINATION, None)
             except Exception:
-                pass
+                return  # user cancelled
+            def _write():
+                try:
+                    if fmt == 'csv':
+                        text = _to_csv(columns, get_all_rows())
+                    elif fmt == 'json':
+                        text = _to_json(columns, get_all_rows())
+                    else:
+                        text = _to_insert_sql(columns, get_all_rows(), table_name)
+                    gfile.replace_contents(
+                        text.encode(), None, False,
+                        Gio.FileCreateFlags.REPLACE_DESTINATION, None,
+                    )
+                except Exception as e:
+                    GLib.idle_add(_show_export_error, str(e))
+            threading.Thread(target=_write, daemon=True).start()
         dialog.save(col_view.get_root(), None, _on_save)
+
+    def _show_export_error(msg):
+        alert = Gtk.AlertDialog(message='Export failed', detail=msg)
+        alert.show(col_view.get_root())
 
     make_action('export-csv',  lambda *_: _save_to_file('csv'))
     make_action('export-json', lambda *_: _save_to_file('json'))
