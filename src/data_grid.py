@@ -132,9 +132,19 @@ def make_column_view(columns, rows, table_name=None):
         col.set_resizable(True)
         col.set_expand(True)
 
-        sorter = Gtk.CustomSorter.new(
-            lambda a, b, *_, idx=i: (a.get(idx) > b.get(idx)) - (a.get(idx) < b.get(idx))
-        )
+        def _cmp(a, b, *_, idx=i):
+            ra, rb = a.raw(idx), b.raw(idx)
+            if ra is None and rb is None:
+                return 0
+            if ra is None:
+                return -1
+            if rb is None:
+                return 1
+            if isinstance(ra, (int, float)) and isinstance(rb, (int, float)):
+                return (ra > rb) - (ra < rb)
+            sa, sb = a.get(idx), b.get(idx)
+            return (sa > sb) - (sa < sb)
+        sorter = Gtk.CustomSorter.new(_cmp)
         col.set_sorter(sorter)
 
         col_view.append_column(col)
