@@ -602,6 +602,7 @@ class TablePanel(Gtk.Box):
         self._all_data_cols = cols
         self._all_data_rows = rows
         self._filter_entry.set_text('')
+        self._data_scroll.set_child(None)  # force fresh ColumnView; reuse is unsafe across tables
         self._render_data_rows(rows)
 
         offset = page * self._page_size
