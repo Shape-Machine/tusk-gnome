@@ -613,6 +613,8 @@ class SqlEditor(Gtk.Box):
         self._cancel_event.clear()
         self._clear_result_tabs()
         self._results_tab_view.set_selected_page(self._results_page)
+        self._run_btn.set_sensitive(False)
+        self._run_sel_btn.set_sensitive(False)
         self._run_stack.set_visible_child_name('cancel')
         self._results_meta.set_label('')
         self._results_spinner.start()
