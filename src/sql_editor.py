@@ -275,10 +275,14 @@ def _apply_scheme(buf, dark):
         buf.set_style_scheme(scheme)
 
 
+_DDL_RE = re.compile(r'\b(CREATE|DROP|ALTER)\b', re.IGNORECASE)
+
+
 class SqlEditor(Gtk.Box):
     __gsignals__ = {
         'run-sql':          (GObject.SignalFlags.RUN_FIRST, None, ()),
         'run-selected-sql': (GObject.SignalFlags.RUN_FIRST, None, ()),
+        'ddl-executed':     (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
     def __init__(self, file_path):
@@ -291,6 +295,7 @@ class SqlEditor(Gtk.Box):
         self._dark_handler_id = 0
         self._active_conn = None
         self._cancel_event = threading.Event()
+        self._last_sql = ''
         self._build_ui()
         self._load_file()
         self.connect('destroy', self._on_destroy)
@@ -610,6 +615,7 @@ class SqlEditor(Gtk.Box):
         if not sql:
             return
 
+        self._last_sql = sql
         self._cancel_event.clear()
         self._clear_result_tabs()
         self._results_tab_view.set_selected_page(self._results_page)
@@ -768,6 +774,8 @@ class SqlEditor(Gtk.Box):
 
     def show_results(self, columns, rows):
         self._finish_run()
+        if _DDL_RE.search(self._last_sql):
+            self.emit('ddl-executed')
         self._results_meta.set_label(f'{len(rows)} row{"s" if len(rows) != 1 else ""}')
 
         if not rows:
@@ -781,6 +789,8 @@ class SqlEditor(Gtk.Box):
 
     def show_message(self, text):
         self._finish_run()
+        if _DDL_RE.search(self._last_sql):
+            self.emit('ddl-executed')
         self._results_message.set_label(text)
         self._results_message.remove_css_class('error')
         self._results_stack.set_visible_child_name('message')
@@ -793,6 +803,9 @@ class SqlEditor(Gtk.Box):
 
     def _show_multi_results(self, results):
         self._finish_run()
+        has_success = any(r['kind'] in ('select', 'status') for r in results)
+        if has_success and _DDL_RE.search(self._last_sql):
+            self.emit('ddl-executed')
 
         # Clear previous log rows
         while True:
