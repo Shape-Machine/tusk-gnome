@@ -133,7 +133,7 @@ def make_column_view(columns, rows, table_name=None):
         col.set_expand(True)
 
         sorter = Gtk.CustomSorter.new(
-            lambda a, b, idx=i: (a.get(idx) > b.get(idx)) - (a.get(idx) < b.get(idx))
+            lambda a, b, *_, idx=i: (a.get(idx) > b.get(idx)) - (a.get(idx) < b.get(idx))
         )
         col.set_sorter(sorter)
 
