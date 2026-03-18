@@ -19,26 +19,10 @@ try:
     from gi.repository import GtkSource
     _HAS_SOURCE = True
 
-    pass  # GtkSource available — completion set up in SqlEditor.__init__
-
 except (ValueError, ImportError):
     _HAS_SOURCE = False
 
 _AUTOSAVE_DELAY_MS = 800
-
-_SQL_KEYWORDS = [
-    'SELECT', 'FROM', 'WHERE', 'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER',
-    'FULL', 'CROSS', 'ON', 'AS', 'AND', 'OR', 'NOT', 'IN', 'EXISTS',
-    'BETWEEN', 'LIKE', 'ILIKE', 'IS', 'NULL', 'TRUE', 'FALSE', 'DISTINCT',
-    'GROUP', 'BY', 'ORDER', 'HAVING', 'LIMIT', 'OFFSET', 'UNION', 'ALL',
-    'INTERSECT', 'EXCEPT', 'WITH', 'RETURNING', 'INSERT', 'INTO', 'VALUES',
-    'UPDATE', 'SET', 'DELETE', 'CREATE', 'DROP', 'ALTER', 'TABLE', 'VIEW',
-    'INDEX', 'SCHEMA', 'BEGIN', 'COMMIT', 'ROLLBACK', 'CASE', 'WHEN',
-    'THEN', 'ELSE', 'END', 'ASC', 'DESC', 'NULLS', 'FIRST', 'LAST',
-    'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'COALESCE', 'NULLIF', 'CAST',
-    'EXTRACT', 'NOW', 'CURRENT_DATE', 'CURRENT_TIMESTAMP', 'PRIMARY', 'KEY',
-    'FOREIGN', 'REFERENCES', 'UNIQUE', 'DEFAULT', 'NOT NULL', 'CONSTRAINT',
-]
 
 
 def _split_statements(sql):
@@ -397,17 +381,6 @@ class SqlEditor(Gtk.Box):
         # ── Editor ────────────────────────────────────────────────────────────
         self._buffer, self._editor = _make_editor()
         self._buffer.connect('changed', self._on_changed)
-        self._schema_buf = None
-        if _HAS_SOURCE:
-            # Hidden buffer holding SQL keywords + schema objects for word completion.
-            # set_text is called AFTER register() so CompletionWords picks it up via
-            # the buffer's 'changed' signal.
-            self._schema_buf = GtkSource.Buffer()
-            provider = GtkSource.CompletionWords.new('SQL')
-            provider.register(self._buffer)       # words typed in the editor
-            provider.register(self._schema_buf)   # keywords + schema objects
-            self._editor.get_completion().add_provider(provider)
-            self._schema_buf.set_text(' '.join(w.lower() for w in _SQL_KEYWORDS))
 
         self._editor.set_monospace(True)
         self._editor.set_wrap_mode(Gtk.WrapMode.NONE)
@@ -584,48 +557,10 @@ class SqlEditor(Gtk.Box):
             self._conn_label.set_label(conn['name'])
             self._run_btn.set_sensitive(True)
             self._run_sel_btn.set_sensitive(True)
-            if self._schema_buf is not None:
-                threading.Thread(
-                    target=self._fetch_schema_for_completion,
-                    args=(dict(conn),),
-                    daemon=True,
-                ).start()
         else:
             self._conn_label.set_label('')
             self._run_btn.set_sensitive(False)
             self._run_sel_btn.set_sensitive(False)
-            if self._schema_buf is not None:
-                GLib.idle_add(self._schema_buf.set_text, ' '.join(w.lower() for w in _SQL_KEYWORDS))
-
-    def _fetch_schema_for_completion(self, conn):
-        try:
-            import psycopg
-            from tunnel import open_tunnel
-
-            with open_tunnel(conn) as (host, port), psycopg.connect(
-                host=host,
-                port=port,
-                dbname=conn['database'],
-                user=conn['username'],
-                password=conn['password'],
-                connect_timeout=10,
-            ) as db:
-                with db.cursor() as cur:
-                    cur.execute("""
-                        SELECT DISTINCT table_schema, table_name, column_name
-                        FROM information_schema.columns
-                        WHERE table_schema NOT IN ('information_schema', 'pg_catalog')
-                        ORDER BY table_schema, table_name, column_name
-                    """)
-                    rows = cur.fetchall()
-
-            schemas = list(dict.fromkeys(r[0] for r in rows))
-            tables  = list(dict.fromkeys(r[1] for r in rows))
-            columns = list(dict.fromkeys(r[2] for r in rows))
-            words = ' '.join([w.lower() for w in _SQL_KEYWORDS] + schemas + tables + columns)
-            GLib.idle_add(self._schema_buf.set_text, words)
-        except Exception:
-            pass  # completion still works with keywords only
 
     def is_modified(self):
         return self._modified
