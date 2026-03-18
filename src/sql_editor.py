@@ -390,7 +390,7 @@ class SqlEditor(Gtk.Box):
         if _HAS_SOURCE:
             # Hidden buffer holding SQL keywords + schema objects for word completion
             self._schema_buf = GtkSource.Buffer()
-            self._schema_buf.set_text(' '.join(_SQL_KEYWORDS))
+            self._schema_buf.set_text(' '.join(w.lower() for w in _SQL_KEYWORDS))
             provider = GtkSource.CompletionWords.new('SQL')
             provider.props.minimum_word_size = 1
             provider.register(self._buffer)       # words typed in the editor
@@ -519,6 +519,7 @@ class SqlEditor(Gtk.Box):
         self._do_save()
 
     def _do_save(self):
+        self._autosave_timer = 0  # timer fired and consumed itself; clear stale ID
         try:
             start = self._buffer.get_start_iter()
             end = self._buffer.get_end_iter()
@@ -582,7 +583,7 @@ class SqlEditor(Gtk.Box):
             self._run_btn.set_sensitive(False)
             self._run_sel_btn.set_sensitive(False)
             if self._schema_buf is not None:
-                GLib.idle_add(self._schema_buf.set_text, ' '.join(_SQL_KEYWORDS))
+                GLib.idle_add(self._schema_buf.set_text, ' '.join(w.lower() for w in _SQL_KEYWORDS))
 
     def _fetch_schema_for_completion(self, conn):
         try:
@@ -609,7 +610,7 @@ class SqlEditor(Gtk.Box):
             schemas = list(dict.fromkeys(r[0] for r in rows))
             tables  = list(dict.fromkeys(r[1] for r in rows))
             columns = list(dict.fromkeys(r[2] for r in rows))
-            words = ' '.join(_SQL_KEYWORDS + schemas + tables + columns)
+            words = ' '.join([w.lower() for w in _SQL_KEYWORDS] + schemas + tables + columns)
             GLib.idle_add(self._schema_buf.set_text, words)
         except Exception:
             pass  # completion still works with keywords only
