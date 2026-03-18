@@ -357,7 +357,7 @@ class TablePanel(Gtk.Box):
         self._stats_label.add_css_class('dim-label')
         self._stats_label.set_margin_start(12)
         self._stats_label.set_margin_top(4)
-        self._stats_label.set_margin_bottom(2)
+        self._stats_label.set_margin_bottom(4)
         self._stats_label.set_xalign(0)
         self._stats_label.set_visible(False)
 
@@ -366,11 +366,15 @@ class TablePanel(Gtk.Box):
         switcher_bar.append(self._switcher)
         switcher_bar.append(self._refresh_btn)
 
+        self._stats_separator = Gtk.Separator()
+        self._stats_separator.set_visible(False)
+
         tabs_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        tabs_box.append(self._stats_label)
         tabs_box.append(switcher_bar)
         tabs_box.append(Gtk.Separator())
         tabs_box.append(self._view_stack)
+        tabs_box.append(self._stats_separator)
+        tabs_box.append(self._stats_label)
         self._outer.add_named(tabs_box, 'tabs')
         self.append(self._outer)
 
@@ -629,8 +633,10 @@ class TablePanel(Gtk.Box):
                 parts.append(size)
             self._stats_label.set_label(' · '.join(parts))
             self._stats_label.set_visible(True)
+            self._stats_separator.set_visible(True)
         else:
             self._stats_label.set_visible(False)
+            self._stats_separator.set_visible(False)
 
         self._fill_scroll(self._schema_scroll,    _SCHEMA_COLS,    schema_rows,    'No columns')
         self._fill_scroll(self._keys_scroll,      _KEYS_COLS,      keys_rows,      'No keys')
