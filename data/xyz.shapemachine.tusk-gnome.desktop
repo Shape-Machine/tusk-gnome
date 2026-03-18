@@ -1,10 +1,12 @@
 [Desktop Entry]
 Name=Tusk
-Comment=PostgreSQL Client for GNOME
+GenericName=PostgreSQL Client
+Comment=Browse schemas, run queries, and inspect data
 Exec=tusk
 Icon=xyz.shapemachine.tusk-gnome
 Terminal=false
 Type=Application
-Categories=GTK;GNOME;Utility;Database;
+Categories=GNOME;GTK;Development;Database;
+Keywords=postgresql;postgres;database;sql;query;db;
 StartupNotify=true
 StartupWMClass=tusk

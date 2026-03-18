@@ -4,6 +4,11 @@ install_data(
 )
 
 install_data(
+  'xyz.shapemachine.tusk-gnome.metainfo.xml',
+  install_dir: get_option('datadir') / 'metainfo',
+)
+
+install_data(
   'xyz.shapemachine.tusk-gnome.gschema.xml',
   install_dir: get_option('datadir') / 'glib-2.0' / 'schemas',
 )
