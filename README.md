@@ -22,6 +22,7 @@ See [docs/features.md](docs/features.md) for a full feature overview.
 
 ## Screenshots
 
+<img src="docs/screenshots/home-empty.png" width="100%"/>
 <img src="docs/screenshots/table-schema.png" width="100%"/>
 <img src="docs/screenshots/table-data-filter.png" width="100%"/>
 <img src="docs/screenshots/table-ddl.png" width="100%"/>
@@ -29,6 +30,8 @@ See [docs/features.md](docs/features.md) for a full feature overview.
 <img src="docs/screenshots/sql-editor-multistatement.png" width="100%"/>
 <img src="docs/screenshots/connection-dialog.png" width="100%"/>
 <img src="docs/screenshots/connection-dialog-ssh.png" width="100%"/>
+<img src="docs/screenshots/preferences.png" width="100%"/>
+<img src="docs/screenshots/keyboard-shortcuts.png" width="100%"/>
 
 ---
 
