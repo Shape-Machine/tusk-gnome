@@ -676,11 +676,13 @@ class SqlEditor(Gtk.Box):
                 connect_timeout=10,
             ) as db:
                 self._active_conn = db
+                cancelled = False
                 try:
                     with db.cursor() as cur:
                         for stmt in stmts:
                             if self._cancel_event.is_set():
                                 results.append({'stmt': stmt, 'kind': 'cancelled'})
+                                cancelled = True
                                 break
                             try:
                                 cur.execute(stmt)
@@ -695,6 +697,7 @@ class SqlEditor(Gtk.Box):
                                                     'count': count})
                             except psycopg.errors.QueryCanceled:
                                 results.append({'stmt': stmt, 'kind': 'cancelled'})
+                                cancelled = True
                                 break
                             except psycopg.Error as e:
                                 msg = e.diag.message_primary or str(e) if hasattr(e, 'diag') else str(e)
@@ -704,7 +707,10 @@ class SqlEditor(Gtk.Box):
                                     msg += f'\nHint: {e.diag.message_hint}'
                                 results.append({'stmt': stmt, 'kind': 'error', 'msg': msg})
                                 break  # transaction is aborted; stop here
-                    db.commit()
+                    if cancelled:
+                        db.rollback()
+                    else:
+                        db.commit()
                 finally:
                     self._active_conn = None
         except Exception as e:
