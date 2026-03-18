@@ -42,15 +42,19 @@ class ConnectionDialog(Adw.Window):
 
         conn = self._connection
 
+        # ── Name ─────────────────────────────────────────────────────────────
+        name_group = Adw.PreferencesGroup()
+
+        self._name_row = Adw.EntryRow(title='Connection Name')
+        name_group.add(self._name_row)
+
         # ── Database ─────────────────────────────────────────────────────────
         details_group = Adw.PreferencesGroup(title='Database')
 
-        self._name_row = Adw.EntryRow(title='Name')
         self._host_row = Adw.EntryRow(title='Host')
         self._port_row = Adw.EntryRow(title='Port')
         self._database_row = Adw.EntryRow(title='Database')
 
-        details_group.add(self._name_row)
         details_group.add(self._host_row)
         details_group.add(self._port_row)
         details_group.add(self._database_row)
@@ -134,6 +138,7 @@ class ConnectionDialog(Adw.Window):
         self._keyring_warning.set_xalign(0)
         self._keyring_warning.set_visible(keyring_failed)
 
+        content.append(name_group)
         content.append(details_group)
         content.append(auth_group)
         content.append(self._keyring_warning)
