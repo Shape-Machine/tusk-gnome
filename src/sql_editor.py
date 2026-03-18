@@ -368,17 +368,28 @@ class SqlEditor(Gtk.Box):
         self._cancel_btn.add_css_class('destructive-action')
         self._cancel_btn.add_css_class('pill')
         self._cancel_btn.set_tooltip_text('Cancel running query')
-        self._cancel_btn.set_visible(False)
         self._cancel_btn.connect('clicked', self._on_cancel)
+
+        run_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        run_box.append(self._run_sel_btn)
+        run_box.append(self._run_btn)
+
+        cancel_box = Gtk.Box()
+        cancel_box.append(self._cancel_btn)
+
+        # Stack avoids set_visible() on siblings, which triggers a GTK CSS node bug
+        self._run_stack = Gtk.Stack()
+        self._run_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self._run_stack.set_transition_duration(80)
+        self._run_stack.add_named(run_box, 'run')
+        self._run_stack.add_named(cancel_box, 'cancel')
 
         toolbar.append(self._modified_dot)
         toolbar.append(self._save_label)
         toolbar.append(save_btn)
         toolbar.append(spacer)
         toolbar.append(self._conn_label)
-        toolbar.append(self._run_sel_btn)
-        toolbar.append(self._run_btn)
-        toolbar.append(self._cancel_btn)
+        toolbar.append(self._run_stack)
 
         self.append(toolbar)
         self.append(Gtk.Separator())
@@ -388,13 +399,15 @@ class SqlEditor(Gtk.Box):
         self._buffer.connect('changed', self._on_changed)
         self._schema_buf = None
         if _HAS_SOURCE:
-            # Hidden buffer holding SQL keywords + schema objects for word completion
+            # Hidden buffer holding SQL keywords + schema objects for word completion.
+            # set_text is called AFTER register() so CompletionWords picks it up via
+            # the buffer's 'changed' signal.
             self._schema_buf = GtkSource.Buffer()
-            self._schema_buf.set_text(' '.join(w.lower() for w in _SQL_KEYWORDS))
             provider = GtkSource.CompletionWords.new('SQL')
             provider.register(self._buffer)       # words typed in the editor
             provider.register(self._schema_buf)   # keywords + schema objects
             self._editor.get_completion().add_provider(provider)
+            self._schema_buf.set_text(' '.join(w.lower() for w in _SQL_KEYWORDS))
 
         self._editor.set_monospace(True)
         self._editor.set_wrap_mode(Gtk.WrapMode.NONE)
@@ -665,9 +678,7 @@ class SqlEditor(Gtk.Box):
         self._cancel_event.clear()
         self._clear_result_tabs()
         self._results_tab_view.set_selected_page(self._results_page)
-        self._run_btn.set_visible(False)
-        self._run_sel_btn.set_visible(False)
-        self._cancel_btn.set_visible(True)
+        self._run_stack.set_visible_child_name('cancel')
         self._results_meta.set_label('')
         self._results_spinner.start()
         self._results_stack.set_visible_child_name('message')
@@ -697,9 +708,7 @@ class SqlEditor(Gtk.Box):
     def _finish_run(self):
         """Restore run buttons; called by all result-display methods."""
         self._results_spinner.stop()
-        self._cancel_btn.set_visible(False)
-        self._run_btn.set_visible(True)
-        self._run_sel_btn.set_visible(True)
+        self._run_stack.set_visible_child_name('run')
         has_conn = self._connection is not None
         self._run_btn.set_sensitive(has_conn)
         self._run_sel_btn.set_sensitive(has_conn)
