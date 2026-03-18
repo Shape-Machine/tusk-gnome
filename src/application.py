@@ -56,7 +56,7 @@ class TuskApplication(Adw.Application):
             application_icon=config.APP_ID,
             developer_name='Sri Rang',
             version=config.VERSION,
-            website='https://github.com/Shape-Machine/tusk-gnome',
+            website='https://shapemachine.xyz/tusk',
             issue_url='https://github.com/Shape-Machine/tusk-gnome/issues',
             comments='PostgreSQL client for GNOME',
             copyright='© 2026 Shape Machine',
