@@ -9,7 +9,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Gtk, Adw, GObject, GLib, Gdk
+from gi.repository import Gtk, Adw, GObject, GLib, Gdk, Gio
 
 from data_grid import make_column_view
 
@@ -18,10 +18,87 @@ try:
     gi.require_version('GtkSource', '5')
     from gi.repository import GtkSource
     _HAS_SOURCE = True
+
+    class _Proposal(GObject.Object):
+        __gtype_name__ = 'TuskSqlProposal'
+
+        def __init__(self, word, kind):
+            super().__init__()
+            self.word = word
+            self.kind = kind  # 'keyword' | 'table' | 'column' | 'schema'
+
+    class _SqlCompletionProvider(GObject.Object, GtkSource.CompletionProvider):
+        __gtype_name__ = 'TuskSqlCompletionProvider'
+
+        def __init__(self):
+            super().__init__()
+            self._completions = [(w, 'keyword') for w in _SQL_KEYWORDS]
+            self._last_proposals = None
+
+        def update_schema(self, schemas, tables, columns):
+            self._completions = (
+                [(w, 'keyword') for w in _SQL_KEYWORDS] +
+                [(s, 'schema') for s in schemas] +
+                [(t, 'table') for t in tables] +
+                [(c, 'column') for c in columns]
+            )
+
+        def do_get_title(self):
+            return 'SQL'
+
+        def do_is_trigger(self, location, ch):
+            return ch.isalnum() or ch == '_'
+
+        def do_populate_async(self, context, cancellable, callback, user_data):
+            prefix = context.get_word()
+            store = Gio.ListStore(item_type=_Proposal)
+            if prefix:
+                lp = prefix.lower()
+                for word, kind in self._completions:
+                    if word.lower().startswith(lp):
+                        store.append(_Proposal(word, kind))
+            self._last_proposals = store
+            task = Gio.Task.new(self, cancellable, callback, user_data)
+            task.return_boolean(True)
+
+        def do_populate_finish(self, result):
+            result.propagate_boolean()
+            return self._last_proposals
+
+        def do_display(self, context, proposal, cell):
+            col = cell.get_column()
+            if col == GtkSource.CompletionColumn.TYPED_TEXT:
+                cell.set_text(proposal.word)
+            elif col == GtkSource.CompletionColumn.COMMENT:
+                cell.set_text(proposal.kind)
+
+        def do_activate(self, context, proposal):
+            buf = context.get_buffer()
+            ok, start, end = context.get_bounds()
+            if ok:
+                buf.begin_user_action()
+                buf.delete(start, end)
+                buf.insert(start, proposal.word)
+                buf.end_user_action()
+
 except (ValueError, ImportError):
     _HAS_SOURCE = False
 
 _AUTOSAVE_DELAY_MS = 800
+
+_SQL_KEYWORDS = [
+    'SELECT', 'FROM', 'WHERE', 'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER',
+    'FULL', 'CROSS', 'ON', 'AS', 'AND', 'OR', 'NOT', 'IN', 'EXISTS',
+    'BETWEEN', 'LIKE', 'ILIKE', 'IS', 'NULL', 'TRUE', 'FALSE', 'DISTINCT',
+    'GROUP', 'BY', 'ORDER', 'HAVING', 'LIMIT', 'OFFSET', 'UNION', 'ALL',
+    'INTERSECT', 'EXCEPT', 'WITH', 'RETURNING', 'INSERT', 'INTO', 'VALUES',
+    'UPDATE', 'SET', 'DELETE', 'CREATE', 'DROP', 'ALTER', 'TABLE', 'VIEW',
+    'INDEX', 'SCHEMA', 'BEGIN', 'COMMIT', 'ROLLBACK', 'CASE', 'WHEN',
+    'THEN', 'ELSE', 'END', 'ASC', 'DESC', 'NULLS', 'FIRST', 'LAST',
+    'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'COALESCE', 'NULLIF', 'CAST',
+    'EXTRACT', 'NOW', 'CURRENT_DATE', 'CURRENT_TIMESTAMP', 'PRIMARY', 'KEY',
+    'FOREIGN', 'REFERENCES', 'UNIQUE', 'DEFAULT', 'NOT NULL', 'CONSTRAINT',
+]
 
 
 def _split_statements(sql):
@@ -288,6 +365,8 @@ class SqlEditor(Gtk.Box):
         self._autosave_timer = 0
         self._save_label_timer = 0
         self._dark_handler_id = 0
+        self._active_conn = None
+        self._cancel_event = threading.Event()
         self._build_ui()
         self._load_file()
         self.connect('destroy', self._on_destroy)
@@ -344,6 +423,14 @@ class SqlEditor(Gtk.Box):
         self._run_btn.set_tooltip_text('Run all  F5')
         self._run_btn.connect('clicked', lambda _: self.emit('run-sql'))
 
+        self._cancel_btn = Gtk.Button(label='Cancel')
+        self._cancel_btn.set_icon_name('media-playback-stop-symbolic')
+        self._cancel_btn.add_css_class('destructive-action')
+        self._cancel_btn.add_css_class('pill')
+        self._cancel_btn.set_tooltip_text('Cancel running query')
+        self._cancel_btn.set_visible(False)
+        self._cancel_btn.connect('clicked', self._on_cancel)
+
         toolbar.append(self._modified_dot)
         toolbar.append(self._save_label)
         toolbar.append(save_btn)
@@ -351,6 +438,7 @@ class SqlEditor(Gtk.Box):
         toolbar.append(self._conn_label)
         toolbar.append(self._run_sel_btn)
         toolbar.append(self._run_btn)
+        toolbar.append(self._cancel_btn)
 
         self.append(toolbar)
         self.append(Gtk.Separator())
@@ -358,6 +446,10 @@ class SqlEditor(Gtk.Box):
         # ── Editor ────────────────────────────────────────────────────────────
         self._buffer, self._editor = _make_editor()
         self._buffer.connect('changed', self._on_changed)
+        self._completion_provider = None
+        if _HAS_SOURCE:
+            self._completion_provider = _SqlCompletionProvider()
+            self._editor.get_completion().add_provider(self._completion_provider)
 
         self._editor.set_monospace(True)
         self._editor.set_wrap_mode(Gtk.WrapMode.NONE)
@@ -533,10 +625,47 @@ class SqlEditor(Gtk.Box):
             self._conn_label.set_label(conn['name'])
             self._run_btn.set_sensitive(True)
             self._run_sel_btn.set_sensitive(True)
+            if self._completion_provider:
+                threading.Thread(
+                    target=self._fetch_schema_for_completion,
+                    args=(dict(conn),),
+                    daemon=True,
+                ).start()
         else:
             self._conn_label.set_label('')
             self._run_btn.set_sensitive(False)
             self._run_sel_btn.set_sensitive(False)
+            if self._completion_provider:
+                self._completion_provider.update_schema([], [], [])
+
+    def _fetch_schema_for_completion(self, conn):
+        try:
+            import psycopg
+            from tunnel import open_tunnel
+
+            with open_tunnel(conn) as (host, port), psycopg.connect(
+                host=host,
+                port=port,
+                dbname=conn['database'],
+                user=conn['username'],
+                password=conn['password'],
+                connect_timeout=10,
+            ) as db:
+                with db.cursor() as cur:
+                    cur.execute("""
+                        SELECT DISTINCT table_schema, table_name, column_name
+                        FROM information_schema.columns
+                        WHERE table_schema NOT IN ('information_schema', 'pg_catalog')
+                        ORDER BY table_schema, table_name, column_name
+                    """)
+                    rows = cur.fetchall()
+
+            schemas = list(dict.fromkeys(r[0] for r in rows))
+            tables  = list(dict.fromkeys(r[1] for r in rows))
+            columns = list(dict.fromkeys(r[2] for r in rows))
+            GLib.idle_add(self._completion_provider.update_schema, schemas, tables, columns)
+        except Exception:
+            pass  # completion still works with keywords only
 
     def is_modified(self):
         return self._modified
@@ -586,10 +715,12 @@ class SqlEditor(Gtk.Box):
         if not sql:
             return
 
+        self._cancel_event.clear()
         self._clear_result_tabs()
         self._results_tab_view.set_selected_page(self._results_page)
-        self._run_btn.set_sensitive(False)
-        self._run_sel_btn.set_sensitive(False)
+        self._run_btn.set_visible(False)
+        self._run_sel_btn.set_visible(False)
+        self._cancel_btn.set_visible(True)
         self._results_meta.set_label('')
         self._results_spinner.start()
         self._results_stack.set_visible_child_name('message')
@@ -601,6 +732,30 @@ class SqlEditor(Gtk.Box):
             args=(dict(self._connection), sql),
             daemon=True,
         ).start()
+
+    def _on_cancel(self, _):
+        self._cancel_event.set()
+        conn = self._active_conn
+        if conn:
+            try:
+                conn.cancel_safe()
+            except AttributeError:
+                try:
+                    conn.cancel()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+    def _finish_run(self):
+        """Restore run buttons; called by all result-display methods."""
+        self._results_spinner.stop()
+        self._cancel_btn.set_visible(False)
+        self._run_btn.set_visible(True)
+        self._run_sel_btn.set_visible(True)
+        has_conn = self._connection is not None
+        self._run_btn.set_sensitive(has_conn)
+        self._run_sel_btn.set_sensitive(has_conn)
 
     def _execute(self, conn, sql):
         stmts = _split_statements(sql)
@@ -627,28 +782,38 @@ class SqlEditor(Gtk.Box):
                 password=conn['password'],
                 connect_timeout=10,
             ) as db:
-                with db.cursor() as cur:
-                    for stmt in stmts:
-                        try:
-                            cur.execute(stmt)
-                            if cur.description:
-                                cols = [d.name for d in cur.description]
-                                rows = cur.fetchall()
-                                results.append({'stmt': stmt, 'kind': 'select',
-                                                'cols': cols, 'rows': rows})
-                            else:
-                                count = cur.rowcount
-                                results.append({'stmt': stmt, 'kind': 'status',
-                                                'count': count})
-                        except psycopg.Error as e:
-                            msg = e.diag.message_primary or str(e) if hasattr(e, 'diag') else str(e)
-                            if hasattr(e, 'diag') and e.diag.message_detail:
-                                msg += f'\nDetail: {e.diag.message_detail}'
-                            if hasattr(e, 'diag') and e.diag.message_hint:
-                                msg += f'\nHint: {e.diag.message_hint}'
-                            results.append({'stmt': stmt, 'kind': 'error', 'msg': msg})
-                            break  # transaction is aborted; stop here
-                db.commit()
+                self._active_conn = db
+                try:
+                    with db.cursor() as cur:
+                        for stmt in stmts:
+                            if self._cancel_event.is_set():
+                                results.append({'stmt': stmt, 'kind': 'cancelled'})
+                                break
+                            try:
+                                cur.execute(stmt)
+                                if cur.description:
+                                    cols = [d.name for d in cur.description]
+                                    rows = cur.fetchall()
+                                    results.append({'stmt': stmt, 'kind': 'select',
+                                                    'cols': cols, 'rows': rows})
+                                else:
+                                    count = cur.rowcount
+                                    results.append({'stmt': stmt, 'kind': 'status',
+                                                    'count': count})
+                            except psycopg.errors.QueryCanceled:
+                                results.append({'stmt': stmt, 'kind': 'cancelled'})
+                                break
+                            except psycopg.Error as e:
+                                msg = e.diag.message_primary or str(e) if hasattr(e, 'diag') else str(e)
+                                if hasattr(e, 'diag') and e.diag.message_detail:
+                                    msg += f'\nDetail: {e.diag.message_detail}'
+                                if hasattr(e, 'diag') and e.diag.message_hint:
+                                    msg += f'\nHint: {e.diag.message_hint}'
+                                results.append({'stmt': stmt, 'kind': 'error', 'msg': msg})
+                                break  # transaction is aborted; stop here
+                    db.commit()
+                finally:
+                    self._active_conn = None
         except Exception as e:
             results.append({'stmt': '', 'kind': 'error', 'msg': str(e)})
 
@@ -667,20 +832,27 @@ class SqlEditor(Gtk.Box):
                 password=conn['password'],
                 connect_timeout=10,
             ) as db:
-                with db.cursor() as cur:
-                    cur.execute(sql)
-                    if cur.description:
-                        cols = [d.name for d in cur.description]
-                        rows = cur.fetchall()
-                        GLib.idle_add(self.show_results, cols, rows)
-                    else:
-                        count = cur.rowcount
-                        msg = f'{count} row{"s" if count != 1 else ""} affected'
-                        GLib.idle_add(self.show_message, msg)
-                db.commit()
+                self._active_conn = db
+                try:
+                    with db.cursor() as cur:
+                        cur.execute(sql)
+                        if cur.description:
+                            cols = [d.name for d in cur.description]
+                            rows = cur.fetchall()
+                            GLib.idle_add(self.show_results, cols, rows)
+                        else:
+                            count = cur.rowcount
+                            msg = f'{count} row{"s" if count != 1 else ""} affected'
+                            GLib.idle_add(self.show_message, msg)
+                    db.commit()
+                finally:
+                    self._active_conn = None
         except Exception as e:
             try:
                 import psycopg as _pg
+                if isinstance(e, _pg.errors.QueryCanceled):
+                    GLib.idle_add(self.show_message, 'Query cancelled')
+                    return
                 if isinstance(e, _pg.Error) and hasattr(e, 'diag'):
                     parts = [e.diag.message_primary or str(e)]
                     if e.diag.message_detail:
@@ -696,9 +868,7 @@ class SqlEditor(Gtk.Box):
     # ── Result display ────────────────────────────────────────────────────────
 
     def show_results(self, columns, rows):
-        self._results_spinner.stop()
-        self._run_btn.set_sensitive(self._connection is not None)
-        self._run_sel_btn.set_sensitive(self._connection is not None)
+        self._finish_run()
         self._results_meta.set_label(f'{len(rows)} row{"s" if len(rows) != 1 else ""}')
 
         if not rows:
@@ -711,25 +881,19 @@ class SqlEditor(Gtk.Box):
         self._results_stack.set_visible_child_name('grid')
 
     def show_message(self, text):
-        self._results_spinner.stop()
-        self._run_btn.set_sensitive(self._connection is not None)
-        self._run_sel_btn.set_sensitive(self._connection is not None)
+        self._finish_run()
         self._results_message.set_label(text)
         self._results_message.remove_css_class('error')
         self._results_stack.set_visible_child_name('message')
 
     def show_error(self, text):
-        self._results_spinner.stop()
-        self._run_btn.set_sensitive(self._connection is not None)
-        self._run_sel_btn.set_sensitive(self._connection is not None)
+        self._finish_run()
         self._results_message.set_label(text)
         self._results_message.add_css_class('error')
         self._results_stack.set_visible_child_name('message')
 
     def _show_multi_results(self, results):
-        self._results_spinner.stop()
-        self._run_btn.set_sensitive(self._connection is not None)
-        self._run_sel_btn.set_sensitive(self._connection is not None)
+        self._finish_run()
 
         # Clear previous log rows
         while True:
@@ -739,11 +903,14 @@ class SqlEditor(Gtk.Box):
             self._results_log.remove(child)
 
         errors = sum(1 for r in results if r['kind'] == 'error')
+        cancelled = any(r['kind'] == 'cancelled' for r in results)
         total = len(results)
-        self._results_meta.set_label(
-            f'{total} statement{"s" if total != 1 else ""}'
-            + (f', {errors} error{"s" if errors != 1 else ""}' if errors else '')
-        )
+        meta = f'{total} statement{"s" if total != 1 else ""}'
+        if errors:
+            meta += f', {errors} error{"s" if errors != 1 else ""}'
+        if cancelled:
+            meta += ', cancelled'
+        self._results_meta.set_label(meta)
 
         for i, result in enumerate(results):
             preview = ' '.join(result['stmt'].split())
@@ -772,6 +939,11 @@ class SqlEditor(Gtk.Box):
                 row.set_subtitle(f'{c} row{"s" if c != 1 else ""} affected')
                 icon = Gtk.Image.new_from_icon_name('emblem-ok-symbolic')
                 icon.add_css_class('success')
+                row.add_prefix(icon)
+            elif result['kind'] == 'cancelled':
+                row.set_subtitle('Cancelled')
+                icon = Gtk.Image.new_from_icon_name('media-playback-stop-symbolic')
+                icon.add_css_class('dim-label')
                 row.add_prefix(icon)
             else:
                 row.set_subtitle(result['msg'])
