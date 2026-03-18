@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>xyz.shapemachine.tusk-gnome</id>
+
+  <name>Tusk</name>
+  <summary>PostgreSQL client for GNOME</summary>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <developer id="xyz.shapemachine">
+    <name>Shape Machine</name>
+  </developer>
+
+  <description>
+    <p>
+      Tusk is a native PostgreSQL client for the GNOME desktop. It lets you browse
+      schemas, inspect tables, run SQL queries, and export data — all from a clean,
+      distraction-free interface that follows your system's dark and light mode.
+    </p>
+    <p>Features include:</p>
+    <ul>
+      <li>Browse schemas, tables, and views with a filterable sidebar</li>
+      <li>Inspect columns, keys, relations, indexes, triggers, and DDL</li>
+      <li>Paginated data tab with sortable columns and a quick filter bar</li>
+      <li>SQL editor with syntax highlighting, multi-statement execution, and auto-save</li>
+      <li>Run selected statement or the full buffer; cancel queries mid-execution</li>
+      <li>Copy or export results as CSV, JSON, or INSERT SQL</li>
+      <li>SSH tunnel support with key-based authentication</li>
+      <li>Passwords stored securely in GNOME Keyring</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">xyz.shapemachine.tusk-gnome.desktop</launchable>
+
+  <url type="homepage">https://shapemachine.xyz/tusk/</url>
+  <url type="bugtracker">https://github.com/Shape-Machine/tusk-gnome/issues</url>
+  <url type="donation">https://github.com/sponsors/srirangan</url>
+  <url type="vcs-browser">https://github.com/Shape-Machine/tusk-gnome</url>
+
+  <categories>
+    <category>Development</category>
+    <category>Database</category>
+  </categories>
+
+  <keywords>
+    <keyword>postgresql</keyword>
+    <keyword>postgres</keyword>
+    <keyword>database</keyword>
+    <keyword>sql</keyword>
+    <keyword>db</keyword>
+    <keyword>query</keyword>
+  </keywords>
+
+  <content_rating type="oars-1.1" />
+
+  <releases>
+    <release version="2026.03.18-01" date="2026-03-18">
+      <description>
+        <p>Connection dialog: moved the connection name field above the database settings for clearer layout.</p>
+      </description>
+    </release>
+    <release version="2026.03.18-00" date="2026-03-18">
+      <description>
+        <p>Table inspector now shows estimated row count and total size on disk in a status bar at the bottom of the panel.</p>
+      </description>
+    </release>
+    <release version="2026.03.17-02" date="2026-03-17">
+      <description>
+        <p>SQL editor: added a Cancel button to abort in-progress queries. Fixed overlapping query execution via keyboard shortcuts.</p>
+      </description>
+    </release>
+    <release version="2026.03.17-01" date="2026-03-17">
+      <description>
+        <p>Data grid: sortable columns, client-side filter bar, and export to CSV, JSON, or INSERT SQL. Full-table export available from the table panel nav bar.</p>
+      </description>
+    </release>
+  </releases>
+
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <recommends>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </recommends>
+
+  <branding>
+    <color type="primary" scheme_preference="light">#e0c8a0</color>
+    <color type="primary" scheme_preference="dark">#5c3d1e</color>
+  </branding>
+</component>
