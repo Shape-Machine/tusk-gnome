@@ -78,7 +78,8 @@ def update_column_view(col_view, rows):
 
     Preserves column widths and other per-widget state.
     """
-    store = col_view.get_model().get_model()
+    # Model chain: MultiSelection → SortListModel → ListStore
+    store = col_view.get_model().get_model().get_model()
     store.remove_all()
     for row in rows:
         store.append(_Row(list(row)))
@@ -89,8 +90,7 @@ def make_column_view(columns, rows, table_name=None):
     for row in rows:
         store.append(_Row(list(row)))
 
-    selection = Gtk.MultiSelection(model=store)
-    col_view = Gtk.ColumnView(model=selection)
+    col_view = Gtk.ColumnView()
     col_view.set_show_row_separators(True)
     col_view.set_show_column_separators(True)
     col_view.set_hexpand(True)
@@ -131,7 +131,17 @@ def make_column_view(columns, rows, table_name=None):
         col = Gtk.ColumnViewColumn(title=name, factory=factory)
         col.set_resizable(True)
         col.set_expand(True)
+
+        sorter = Gtk.CustomSorter.new(
+            lambda a, b, idx=i: (a.get(idx) > b.get(idx)) - (a.get(idx) < b.get(idx))
+        )
+        col.set_sorter(sorter)
+
         col_view.append_column(col)
+
+    sort_model = Gtk.SortListModel(model=store, sorter=col_view.get_sorter())
+    selection = Gtk.MultiSelection(model=sort_model)
+    col_view.set_model(selection)
 
     # ── Context menu ─────────────────────────────────────────────────────────
 
@@ -140,12 +150,12 @@ def make_column_view(columns, rows, table_name=None):
         result = []
         valid, pos, _ = Gtk.BitsetIter.init_first(bitset)
         while valid:
-            result.append(store.get_item(pos))
+            result.append(sort_model.get_item(pos))
             valid, pos = Gtk.BitsetIter.next(_)
         return result
 
     def get_all_rows():
-        return [store.get_item(i) for i in range(store.get_n_items())]
+        return [sort_model.get_item(i) for i in range(sort_model.get_n_items())]
 
     ag = Gio.SimpleActionGroup()
 
@@ -165,6 +175,21 @@ def make_column_view(columns, rows, table_name=None):
     sel_json = make_action('sel-json', lambda *_: _copy_to_clipboard(_to_json(columns, get_selected_rows())))
     all_csv  = make_action('all-csv',  lambda *_: _copy_to_clipboard(_to_csv(columns, get_all_rows())))
     all_json = make_action('all-json', lambda *_: _copy_to_clipboard(_to_json(columns, get_all_rows())))
+
+    def _save_to_file(fmt):
+        dialog = Gtk.FileDialog()
+        dialog.set_initial_name(f'export.{fmt}')
+        def _on_save(d, result):
+            try:
+                gfile = d.save_finish(result)
+                text = _to_csv(columns, get_all_rows()) if fmt == 'csv' else _to_json(columns, get_all_rows())
+                gfile.replace_contents(text.encode(), None, False, Gio.FileCreateFlags.REPLACE_DESTINATION, None)
+            except Exception:
+                pass
+        dialog.save(col_view.get_root(), None, _on_save)
+
+    make_action('export-csv',  lambda *_: _save_to_file('csv'))
+    make_action('export-json', lambda *_: _save_to_file('json'))
 
     sel_actions = [sel_csv, sel_json]
 
@@ -196,10 +221,12 @@ def make_column_view(columns, rows, table_name=None):
         selected_section.append('Copy selected as INSERT SQL', 'copy.sel-sql')
 
     all_section = Gio.Menu()
-    all_section.append('Copy all as CSV',  'copy.all-csv')
-    all_section.append('Copy all as JSON', 'copy.all-json')
+    all_section.append('Copy all as CSV',   'copy.all-csv')
+    all_section.append('Copy all as JSON',  'copy.all-json')
     if table_name:
         all_section.append('Copy all as INSERT SQL', 'copy.all-sql')
+    all_section.append('Export all as CSV…',  'copy.export-csv')
+    all_section.append('Export all as JSON…', 'copy.export-json')
 
     menu = Gio.Menu()
     menu.append_section(None, cell_section)
