@@ -536,6 +536,7 @@ class TuskWindow(Adw.ApplicationWindow):
         editor.set_connection(self._active_conn)
         editor.connect('run-sql', lambda e: e.run())
         editor.connect('run-selected-sql', lambda e: e.run_selected())
+        editor.connect('ddl-executed', lambda _: self._on_ddl_executed())
 
         page = self._tab_view.append(editor)
         page.set_title(os.path.basename(file_path))
@@ -594,3 +595,7 @@ class TuskWindow(Adw.ApplicationWindow):
         if self._tab_view.get_n_pages() == 0:
             self._header_label.set_label('Tusk')
             self._main_stack.set_visible_child_name('empty')
+
+    def _on_ddl_executed(self):
+        if self._active_conn:
+            self._browser.load(self._active_conn)
