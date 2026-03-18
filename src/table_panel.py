@@ -123,6 +123,34 @@ _DEFINITION_SQL = """
     WHERE table_schema = %s AND table_name = %s
 """
 
+_STATS_SQL = """
+    SELECT s.n_live_tup, pg_total_relation_size(c.oid)
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    LEFT JOIN pg_stat_user_tables s
+           ON s.schemaname = n.nspname AND s.relname = c.relname
+    WHERE n.nspname = %s AND c.relname = %s
+"""
+
+
+def _fmt_size(n_bytes):
+    if n_bytes is None:
+        return None
+    for unit, threshold in (('GB', 1 << 30), ('MB', 1 << 20), ('KB', 1 << 10)):
+        if n_bytes >= threshold:
+            return f'{n_bytes / threshold:.1f} {unit}'
+    return f'{n_bytes} B'
+
+
+def _fmt_rows(n):
+    if n is None:
+        return '~? rows'
+    if n >= 1_000_000:
+        return f'~{n / 1_000_000:.1f}M rows'
+    if n >= 1_000:
+        return f'~{n / 1_000:.1f}K rows'
+    return f'~{n:,} rows'
+
 _DDL_SQL = """
     SELECT
       'CREATE TABLE ' || quote_ident(n.nspname) || '.' || quote_ident(c.relname)
@@ -324,12 +352,22 @@ class TablePanel(Gtk.Box):
         self._refresh_btn.set_sensitive(False)
         self._refresh_btn.connect('clicked', lambda _: self._on_refresh())
 
+        self._stats_label = Gtk.Label()
+        self._stats_label.add_css_class('caption')
+        self._stats_label.add_css_class('dim-label')
+        self._stats_label.set_margin_start(12)
+        self._stats_label.set_margin_top(4)
+        self._stats_label.set_margin_bottom(2)
+        self._stats_label.set_xalign(0)
+        self._stats_label.set_visible(False)
+
         switcher_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         self._switcher.set_hexpand(True)
         switcher_bar.append(self._switcher)
         switcher_bar.append(self._refresh_btn)
 
         tabs_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        tabs_box.append(self._stats_label)
         tabs_box.append(switcher_bar)
         tabs_box.append(Gtk.Separator())
         tabs_box.append(self._view_stack)
@@ -542,9 +580,13 @@ class TablePanel(Gtk.Box):
                         row = cur.fetchone()
                         ddl = row[0] if row else ''
                         definition = None
+
+                        cur.execute(_STATS_SQL, [schema, table])
+                        stats_row = cur.fetchone()  # (n_live_tup, total_bytes)
                     else:
                         keys_rows = relations_rows = indexes_rows = []
                         ddl = ''
+                        stats_row = None
 
                         cur.execute(_DEFINITION_SQL, [schema, table])
                         row = cur.fetchone()
@@ -566,18 +608,29 @@ class TablePanel(Gtk.Box):
             GLib.idle_add(
                 self._populate,
                 schema_rows, keys_rows, relations_rows, triggers_rows,
-                indexes_rows, ddl, definition, data_cols, data_rows, gen,
+                indexes_rows, ddl, definition, data_cols, data_rows, stats_row, gen,
             )
         except Exception as e:
             GLib.idle_add(self._show_error, str(e), gen)
 
     def _populate(self, schema_rows, keys_rows, relations_rows, triggers_rows,
-                  indexes_rows, ddl, definition, data_cols, data_rows, gen):
+                  indexes_rows, ddl, definition, data_cols, data_rows, stats_row, gen):
         if gen != self._load_gen:
             return
         self._spinner.stop()
         self._refresh_btn.set_sensitive(True)
         self._export_btn.set_sensitive(self._item_type == 'table')
+
+        if stats_row:
+            n_live_tup, total_bytes = stats_row
+            parts = [_fmt_rows(n_live_tup)]
+            size = _fmt_size(total_bytes)
+            if size:
+                parts.append(size)
+            self._stats_label.set_label(' · '.join(parts))
+            self._stats_label.set_visible(True)
+        else:
+            self._stats_label.set_visible(False)
 
         self._fill_scroll(self._schema_scroll,    _SCHEMA_COLS,    schema_rows,    'No columns')
         self._fill_scroll(self._keys_scroll,      _KEYS_COLS,      keys_rows,      'No keys')
