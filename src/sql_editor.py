@@ -19,73 +19,7 @@ try:
     from gi.repository import GtkSource
     _HAS_SOURCE = True
 
-    class _Proposal(GObject.Object):
-        __gtype_name__ = 'TuskSqlProposal'
-
-        def __init__(self, word, kind):
-            super().__init__()
-            self.word = word
-            self.kind = kind  # 'keyword' | 'table' | 'column' | 'schema'
-
-    class _SqlCompletionProvider(GObject.Object, GtkSource.CompletionProvider):
-        __gtype_name__ = 'TuskSqlCompletionProvider'
-
-        def __init__(self):
-            super().__init__()
-            self._completions = [(w, 'keyword') for w in _SQL_KEYWORDS]
-            self._last_proposals = None
-
-        def update_schema(self, schemas, tables, columns):
-            self._completions = (
-                [(w, 'keyword') for w in _SQL_KEYWORDS] +
-                [(s, 'schema') for s in schemas] +
-                [(t, 'table') for t in tables] +
-                [(c, 'column') for c in columns]
-            )
-
-        def do_get_title(self):
-            return 'SQL'
-
-        def do_is_trigger(self, location, ch):
-            return ch.isalnum() or ch == '_'
-
-        def do_populate_async(self, context, cancellable, callback, user_data):
-            prefix = context.get_word()
-            store = Gio.ListStore(item_type=_Proposal)
-            if prefix:
-                lp = prefix.lower()
-                for word, kind in self._completions:
-                    if word.lower().startswith(lp):
-                        store.append(_Proposal(word, kind))
-            self._last_proposals = store
-            # Keep a strong reference so the task isn't GC'd before populate_finish
-            self._current_task = Gio.Task.new(self, cancellable, callback, user_data)
-            self._current_task.return_boolean(True)
-
-        def do_populate_finish(self, result):
-            # result arrives typed as Gio.AsyncResult; propagate_boolean is a
-            # Gio.Task-only method and would crash — skip it, return stored proposals
-            return self._last_proposals
-
-        def do_display(self, context, proposal, cell):
-            if not isinstance(proposal, _Proposal):
-                return
-            col = cell.get_column()
-            if col == GtkSource.CompletionColumn.TYPED_TEXT:
-                cell.set_text(proposal.word)
-            elif col == GtkSource.CompletionColumn.COMMENT:
-                cell.set_text(proposal.kind)
-
-        def do_activate(self, context, proposal):
-            if not isinstance(proposal, _Proposal):
-                return
-            buf = context.get_buffer()
-            ok, start, end = context.get_bounds()
-            if ok:
-                buf.begin_user_action()
-                buf.delete(start, end)
-                buf.insert(start, proposal.word)
-                buf.end_user_action()
+    pass  # GtkSource available — completion set up in SqlEditor.__init__
 
 except (ValueError, ImportError):
     _HAS_SOURCE = False
@@ -452,10 +386,16 @@ class SqlEditor(Gtk.Box):
         # ── Editor ────────────────────────────────────────────────────────────
         self._buffer, self._editor = _make_editor()
         self._buffer.connect('changed', self._on_changed)
-        self._completion_provider = None
+        self._schema_buf = None
         if _HAS_SOURCE:
-            self._completion_provider = _SqlCompletionProvider()
-            self._editor.get_completion().add_provider(self._completion_provider)
+            # Hidden buffer holding SQL keywords + schema objects for word completion
+            self._schema_buf = GtkSource.Buffer()
+            self._schema_buf.set_text(' '.join(_SQL_KEYWORDS))
+            provider = GtkSource.CompletionWords.new('SQL')
+            provider.props.minimum_word_size = 1
+            provider.register(self._buffer)       # words typed in the editor
+            provider.register(self._schema_buf)   # keywords + schema objects
+            self._editor.get_completion().add_provider(provider)
 
         self._editor.set_monospace(True)
         self._editor.set_wrap_mode(Gtk.WrapMode.NONE)
@@ -631,7 +571,7 @@ class SqlEditor(Gtk.Box):
             self._conn_label.set_label(conn['name'])
             self._run_btn.set_sensitive(True)
             self._run_sel_btn.set_sensitive(True)
-            if self._completion_provider:
+            if self._schema_buf is not None:
                 threading.Thread(
                     target=self._fetch_schema_for_completion,
                     args=(dict(conn),),
@@ -641,8 +581,8 @@ class SqlEditor(Gtk.Box):
             self._conn_label.set_label('')
             self._run_btn.set_sensitive(False)
             self._run_sel_btn.set_sensitive(False)
-            if self._completion_provider:
-                self._completion_provider.update_schema([], [], [])
+            if self._schema_buf is not None:
+                GLib.idle_add(self._schema_buf.set_text, ' '.join(_SQL_KEYWORDS))
 
     def _fetch_schema_for_completion(self, conn):
         try:
@@ -669,7 +609,8 @@ class SqlEditor(Gtk.Box):
             schemas = list(dict.fromkeys(r[0] for r in rows))
             tables  = list(dict.fromkeys(r[1] for r in rows))
             columns = list(dict.fromkeys(r[2] for r in rows))
-            GLib.idle_add(self._completion_provider.update_schema, schemas, tables, columns)
+            words = ' '.join(_SQL_KEYWORDS + schemas + tables + columns)
+            GLib.idle_add(self._schema_buf.set_text, words)
         except Exception:
             pass  # completion still works with keywords only
 
