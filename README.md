@@ -22,14 +22,13 @@ See [docs/features.md](docs/features.md) for a full feature overview.
 
 ## Screenshots
 
-<img src="docs/screenshots/2026.03.16-07-01.png" width="100%"/>
-<img src="docs/screenshots/2026.03.16-07-02.png" width="100%"/>
-<img src="docs/screenshots/2026.03.16-07-03.png" width="100%"/>
-<img src="docs/screenshots/2026.03.16-07-04.png" width="100%"/>
-<img src="docs/screenshots/2026.03.16-07-05.png" width="100%"/>
-<img src="docs/screenshots/2026.03.16-07-06.png" width="100%"/>
-<img src="docs/screenshots/2026.03.16-07-07.png" width="100%"/>
-<img src="docs/screenshots/2026.03.16-07-08.png" width="100%"/>
+<img src="docs/screenshots/table-schema.png" width="100%"/>
+<img src="docs/screenshots/table-data-filter.png" width="100%"/>
+<img src="docs/screenshots/table-ddl.png" width="100%"/>
+<img src="docs/screenshots/table-indexes.png" width="100%"/>
+<img src="docs/screenshots/sql-editor-multistatement.png" width="100%"/>
+<img src="docs/screenshots/connection-dialog.png" width="100%"/>
+<img src="docs/screenshots/connection-dialog-ssh.png" width="100%"/>
 
 ---
 
