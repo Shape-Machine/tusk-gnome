@@ -42,6 +42,10 @@ class TuskApplication(Adw.Application):
         about_action.connect('activate', lambda *_: self._show_about(win))
         self.add_action(about_action)
 
+        sponsor_action = Gio.SimpleAction.new('sponsor', None)
+        sponsor_action.connect('activate', lambda *_: self._show_sponsor(win))
+        self.add_action(sponsor_action)
+
         prefs_action = Gio.SimpleAction.new('preferences', None)
         prefs_action.connect('activate', lambda *_: self._show_prefs(win))
         self.add_action(prefs_action)
@@ -49,6 +53,10 @@ class TuskApplication(Adw.Application):
     def _show_prefs(self, win):
         from prefs_dialog import PrefsDialog
         PrefsDialog(on_change=win._apply_fonts).present(win)
+
+    def _show_sponsor(self, win):
+        from sponsor_dialog import SponsorDialog
+        SponsorDialog().present(win)
 
     def _show_about(self, win):
         dialog = Adw.AboutDialog(

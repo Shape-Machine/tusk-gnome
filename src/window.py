@@ -280,9 +280,16 @@ class TuskWindow(Adw.ApplicationWindow):
         self._main_header.set_title_widget(self._header_label)
 
         menu = Gio.Menu()
-        menu.append('Preferences', 'app.preferences')
-        menu.append('Keyboard Shortcuts', 'win.show-help-overlay')
-        menu.append('About Tusk', 'app.about')
+
+        util_section = Gio.Menu()
+        util_section.append('Preferences', 'app.preferences')
+        util_section.append('Keyboard Shortcuts', 'win.show-help-overlay')
+        menu.append_section(None, util_section)
+
+        app_section = Gio.Menu()
+        app_section.append('Sponsor Tusk', 'app.sponsor')
+        app_section.append('About Tusk', 'app.about')
+        menu.append_section(None, app_section)
 
         menu_btn = Gtk.MenuButton()
         menu_btn.set_icon_name('open-menu-symbolic')
@@ -299,6 +306,13 @@ class TuskWindow(Adw.ApplicationWindow):
         empty.set_title('Nothing Open')
         empty.set_description('Select a table from the browser or open a .sql file')
         empty.set_icon_name('xyz.shapemachine.tusk-gnome')
+
+        sponsor_btn = Gtk.Button(label='Sponsor Tusk')
+        sponsor_btn.set_action_name('app.sponsor')
+        sponsor_btn.add_css_class('flat')
+        sponsor_btn.set_halign(Gtk.Align.CENTER)
+        empty.set_child(sponsor_btn)
+
         self._main_stack.add_named(empty, 'empty')
 
         tabs_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
