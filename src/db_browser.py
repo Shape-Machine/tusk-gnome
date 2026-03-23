@@ -343,7 +343,7 @@ class DbBrowser(Gtk.Box):
             'dialog-error-symbolic', f'Error: {error_msg}', 'error', None, '', ''
         ])
 
-    def _on_row_activated(self, _tree, path, _col):
+    def _on_row_activated(self, tree, path, _col):
         it = self._filter.get_iter(path)
         item_type = self._filter.get_value(it, COL_TYPE)
         if item_type in ('table', 'view'):
@@ -351,6 +351,11 @@ class DbBrowser(Gtk.Box):
             schema = self._filter.get_value(it, COL_SCHEMA)
             table = self._filter.get_value(it, COL_TABLE)
             self.emit('table-selected', conn, schema, table, item_type)
+        elif item_type in ('schema', 'group'):
+            if tree.row_expanded(path):
+                tree.collapse_row(path)
+            else:
+                tree.expand_row(path, False)
 
     def _on_key_pressed(self, _ctrl, keyval, _code, _state):
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
@@ -362,5 +367,13 @@ class DbBrowser(Gtk.Box):
                     schema = self._filter.get_value(it, COL_SCHEMA)
                     table = self._filter.get_value(it, COL_TABLE)
                     self.emit('table-selected', conn, schema, table, item_type)
+                    return True
+                if item_type in ('schema', 'group'):
+                    path, _ = self._tree.get_cursor()
+                    if path:
+                        if self._tree.row_expanded(path):
+                            self._tree.collapse_row(path)
+                        else:
+                            self._tree.expand_row(path, False)
                     return True
         return False
