@@ -671,8 +671,8 @@ class TablePanel(Gtk.Box):
                 self._edit_btn.set_tooltip_text('Edit selected row')
                 self._delete_btn.set_tooltip_text('Delete selected row(s)')
             else:
-                self._edit_btn.set_tooltip_text('Edit row (no primary key)')
-                self._delete_btn.set_tooltip_text('Delete row (no primary key)')
+                self._edit_btn.set_tooltip_text('Table has no primary key')
+                self._delete_btn.set_tooltip_text('Table has no primary key')
 
         if stats_row:
             n_live_tup, total_bytes = stats_row
@@ -872,6 +872,7 @@ class TablePanel(Gtk.Box):
 
         conn, schema, table = self._conn, self._current_schema, self._current_table
         pk_cols, page = list(self._pk_cols), self._data_page
+        page_size = self._page_size
 
         msg = f'Delete {n} row{"s" if n > 1 else ""}?'
         dialog = Adw.AlertDialog(heading=msg, body='This action cannot be undone.')
@@ -885,7 +886,7 @@ class TablePanel(Gtk.Box):
             if response == 'delete':
                 threading.Thread(
                     target=self._exec_delete,
-                    args=(conn, schema, table, rows_to_delete, pk_cols, page),
+                    args=(conn, schema, table, rows_to_delete, pk_cols, page, page_size),
                     daemon=True,
                 ).start()
 
@@ -904,15 +905,22 @@ class TablePanel(Gtk.Box):
                 connect_timeout=10,
             ) as db:
                 with db.cursor() as cur:
-                    query = pgsql.SQL('INSERT INTO {}.{} ({}) VALUES ({})').format(
-                        pgsql.Identifier(schema),
-                        pgsql.Identifier(table),
-                        pgsql.SQL(', ').join(pgsql.Identifier(c) for c in cols),
-                        pgsql.SQL(', ').join(pgsql.Placeholder() for _ in cols),
-                    )
-                    cur.execute(query, vals)
+                    if cols:
+                        query = pgsql.SQL('INSERT INTO {}.{} ({}) VALUES ({})').format(
+                            pgsql.Identifier(schema),
+                            pgsql.Identifier(table),
+                            pgsql.SQL(', ').join(pgsql.Identifier(c) for c in cols),
+                            pgsql.SQL(', ').join(pgsql.Placeholder() for _ in cols),
+                        )
+                        cur.execute(query, vals)
+                    else:
+                        cur.execute(
+                            pgsql.SQL('INSERT INTO {}.{} DEFAULT VALUES').format(
+                                pgsql.Identifier(schema), pgsql.Identifier(table)
+                            )
+                        )
                 db.commit()
-            GLib.idle_add(self._reload_data_page, page)
+            GLib.idle_add(self._reload_data_page, conn, schema, table, page)
         except Exception as e:
             GLib.idle_add(self._show_edit_error, str(e))
 
@@ -946,11 +954,11 @@ class TablePanel(Gtk.Box):
                     )
                     cur.execute(query, set_vals + where_vals)
                 db.commit()
-            GLib.idle_add(self._reload_data_page, page)
+            GLib.idle_add(self._reload_data_page, conn, schema, table, page)
         except Exception as e:
             GLib.idle_add(self._show_edit_error, str(e))
 
-    def _exec_delete(self, conn, schema, table, rows_to_delete, pk_cols, page):
+    def _exec_delete(self, conn, schema, table, rows_to_delete, pk_cols, page, page_size):
         try:
             import psycopg
             from psycopg import sql as pgsql
@@ -960,7 +968,7 @@ class TablePanel(Gtk.Box):
                 pgsql.SQL('{} = {}').format(pgsql.Identifier(c), pgsql.Placeholder())
                 for c in pk_cols
             )
-            query = pgsql.SQL('DELETE FROM {}.{} WHERE {}').format(
+            del_query = pgsql.SQL('DELETE FROM {}.{} WHERE {}').format(
                 pgsql.Identifier(schema),
                 pgsql.Identifier(table),
                 where_clause,
@@ -972,16 +980,30 @@ class TablePanel(Gtk.Box):
             ) as db:
                 with db.cursor() as cur:
                     for row_vals in rows_to_delete:
-                        cur.execute(query, [row_vals[c] for c in pk_cols])
+                        cur.execute(del_query, [row_vals[c] for c in pk_cols])
+                    # If on a non-first page, check whether it still has rows after
+                    # the delete; if not, navigate back to the previous page.
+                    reload_page = page
+                    if page > 0:
+                        cur.execute(
+                            pgsql.SQL(
+                                'SELECT EXISTS(SELECT 1 FROM {}.{} OFFSET %s)'
+                            ).format(
+                                pgsql.Identifier(schema), pgsql.Identifier(table)
+                            ),
+                            [page * page_size],
+                        )
+                        if not cur.fetchone()[0]:
+                            reload_page = page - 1
                 db.commit()
-            GLib.idle_add(self._reload_data_page, page)
+            GLib.idle_add(self._reload_data_page, conn, schema, table, reload_page)
         except Exception as e:
             GLib.idle_add(self._show_edit_error, str(e))
 
-    def _reload_data_page(self, page):
+    def _reload_data_page(self, conn, schema, table, page):
         threading.Thread(
             target=self._fetch_data_page,
-            args=(self._conn, self._current_schema, self._current_table, page),
+            args=(conn, schema, table, page),
             daemon=True,
         ).start()
 
