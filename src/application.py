@@ -56,7 +56,7 @@ class TuskApplication(Adw.Application):
 
     def _show_sponsor(self, win):
         from sponsor_dialog import SponsorDialog
-        SponsorDialog().present(win)
+        SponsorDialog(win).present(win)
 
     def _show_about(self, win):
         dialog = Adw.AboutDialog(
