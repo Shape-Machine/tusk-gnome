@@ -36,6 +36,7 @@ tusk_sources = [
   'file_explorer.py',
   'prefs.py',
   'prefs_dialog.py',
+  'sponsor_dialog.py',
   'tunnel.py',
 ]
 
