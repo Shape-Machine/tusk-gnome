@@ -3,7 +3,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Gtk, Adw
+from gi.repository import Gtk, Adw, Gdk
 
 _TIERS = {
     'One-time': [
@@ -20,8 +20,9 @@ _TIERS = {
 
 
 class SponsorDialog(Adw.Dialog):
-    def __init__(self):
+    def __init__(self, win):
         super().__init__(title='Sponsor Tusk', content_width=420)
+        self._win = win
 
         toolbar_view = Adw.ToolbarView()
         toolbar_view.add_top_bar(Adw.HeaderBar())
@@ -53,4 +54,4 @@ class SponsorDialog(Adw.Dialog):
         self.set_child(toolbar_view)
 
     def _on_tier_activated(self, _row, url):
-        Gtk.show_uri(None, url, 0)
+        Gtk.show_uri(self._win, url, Gdk.CURRENT_TIME)
