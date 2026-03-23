@@ -9,7 +9,7 @@ from gi.repository import Gtk, GLib, GObject, Gdk
 
 COL_ICON = 0
 COL_LABEL = 1
-COL_TYPE = 2    # 'schema' | 'group' | 'table' | 'view' | 'loading' | 'error'
+COL_TYPE = 2    # 'schema' | 'group' | 'table' | 'view' | 'sequence' | 'enum' | 'function' | 'loading' | 'error'
 COL_CONN = 3
 COL_SCHEMA = 4
 COL_TABLE = 5
@@ -103,15 +103,20 @@ class DbBrowser(Gtk.Box):
             return False
         if item_type == 'group':
             return self._group_has_match(model, it, query)
-        if item_type in ('table', 'view'):
+        if item_type in ('table', 'view', 'sequence', 'enum', 'function'):
             return query in model.get_value(it, COL_LABEL).lower()
         return True  # info, error
 
     def _group_has_match(self, model, group_it, query):
         child = model.iter_children(group_it)
         while child:
-            if model.get_value(child, COL_TYPE) in ('table', 'view'):
+            child_type = model.get_value(child, COL_TYPE)
+            if child_type in ('table', 'view', 'sequence', 'enum', 'function'):
                 if query in model.get_value(child, COL_LABEL).lower():
+                    return True
+            elif child_type == 'group':
+                # overloaded function parent node — check its children
+                if self._group_has_match(model, child, query):
                     return True
             child = model.iter_next(child)
         return False
@@ -180,15 +185,65 @@ class DbBrowser(Gtk.Box):
                         )
                         ORDER BY table_schema, table_type DESC, table_name
                     """)
-                    rows = cur.fetchall()
+                    table_rows = cur.fetchall()
+
+                    cur.execute("""
+                        SELECT sequence_schema, sequence_name
+                        FROM information_schema.sequences
+                        WHERE sequence_schema NOT IN (
+                            'pg_catalog', 'information_schema',
+                            'pg_toast', 'pg_temp_1', 'pg_toast_temp_1'
+                        )
+                        ORDER BY sequence_schema, sequence_name
+                    """)
+                    sequence_rows = cur.fetchall()
+
+                    cur.execute("""
+                        SELECT n.nspname, t.typname
+                        FROM pg_type t JOIN pg_namespace n ON t.typnamespace = n.oid
+                        WHERE t.typtype = 'e'
+                          AND n.nspname NOT IN (
+                              'pg_catalog', 'information_schema',
+                              'pg_toast', 'pg_temp_1', 'pg_toast_temp_1'
+                          )
+                        ORDER BY n.nspname, t.typname
+                    """)
+                    enum_rows = cur.fetchall()
+
+                    cur.execute("""
+                        SELECT n.nspname, p.proname, pg_get_function_arguments(p.oid) AS args
+                        FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid
+                        WHERE n.nspname NOT IN (
+                            'pg_catalog', 'information_schema',
+                            'pg_toast', 'pg_temp_1', 'pg_toast_temp_1'
+                        )
+                          AND p.prokind IN ('f', 'p')
+                        ORDER BY n.nspname, p.proname, args
+                    """)
+                    function_rows = cur.fetchall()
 
             schema_items = {}
-            for schema, table, ttype in rows:
-                schema_items.setdefault(schema, {'tables': [], 'views': []})
+
+            def _schema(s):
+                return schema_items.setdefault(s, {
+                    'tables': [], 'views': [], 'sequences': [], 'enums': [], 'functions': []
+                })
+
+            for schema, table, ttype in table_rows:
+                bucket = _schema(schema)
                 if ttype == 'BASE TABLE':
-                    schema_items[schema]['tables'].append(table)
+                    bucket['tables'].append(table)
                 else:
-                    schema_items[schema]['views'].append(table)
+                    bucket['views'].append(table)
+
+            for schema, seq in sequence_rows:
+                _schema(schema)['sequences'].append(seq)
+
+            for schema, enum in enum_rows:
+                _schema(schema)['enums'].append(enum)
+
+            for schema, name, args in function_rows:
+                _schema(schema)['functions'].append((name, args))
 
             GLib.idle_add(self._populate, conn, schema_items, gen)
 
@@ -235,9 +290,48 @@ class DbBrowser(Gtk.Box):
                     'dialog-information-symbolic', 'No views in this schema', 'info', conn, schema, ''
                 ])
 
+            if items['sequences']:
+                seq_it = self._store.append(schema_it, [
+                    'view-list-ordered-symbolic', 'Sequences', 'group', conn, schema, ''
+                ])
+                for seq in items['sequences']:
+                    self._store.append(seq_it, [
+                        'view-list-ordered-symbolic', seq, 'sequence', conn, schema, seq
+                    ])
+
+            if items['enums']:
+                enum_it = self._store.append(schema_it, [
+                    'emblem-important-symbolic', 'Enums', 'group', conn, schema, ''
+                ])
+                for enum in items['enums']:
+                    self._store.append(enum_it, [
+                        'emblem-important-symbolic', enum, 'enum', conn, schema, enum
+                    ])
+
+            if items['functions']:
+                from itertools import groupby
+                func_it = self._store.append(schema_it, [
+                    'system-run-symbolic', 'Functions', 'group', conn, schema, ''
+                ])
+                for name, overloads in groupby(items['functions'], key=lambda x: x[0]):
+                    overloads = list(overloads)
+                    if len(overloads) == 1:
+                        label = f'{name}({overloads[0][1]})'
+                        self._store.append(func_it, [
+                            'system-run-symbolic', label, 'function', conn, schema, name
+                        ])
+                    else:
+                        parent_it = self._store.append(func_it, [
+                            'system-run-symbolic', name, 'group', conn, schema, ''
+                        ])
+                        for _, args in overloads:
+                            label = f'{name}({args})'
+                            self._store.append(parent_it, [
+                                'system-run-symbolic', label, 'function', conn, schema, name
+                            ])
+
         self._saved_expansion = None
         self._search_entry.set_visible(True)
-        self._tree.expand_all()
 
     def _show_error(self, error_msg, gen):
         if gen != self._load_gen:
