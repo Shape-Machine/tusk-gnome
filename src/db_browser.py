@@ -124,7 +124,7 @@ class DbBrowser(Gtk.Box):
     def _on_search_changed(self, _entry):
         query = self._search_entry.get_text().strip()
         if query:
-            if not self._saved_expansion:
+            if self._saved_expansion is None:
                 self._saved_expansion = self._get_expanded_paths()
             self._filter.refilter()
             self._tree.expand_all()
