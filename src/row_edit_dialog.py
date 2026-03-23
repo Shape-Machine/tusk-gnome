@@ -60,8 +60,16 @@ class RowEditDialog(Adw.Dialog):
 
             if data_type == 'boolean':
                 widget = Adw.SwitchRow(title=col_name, subtitle='boolean')
+                # Track whether this switch started in an "unset" state so that
+                # saving without interaction preserves NULL (edit) or skips the
+                # column to let PostgreSQL apply the default (insert).
+                widget._starts_as_unset = (init_val is None) or (mode == 'insert' and bool(default_val))
+                widget._user_touched = False
                 if init_val is not None:
                     widget.set_active(bool(init_val))
+                def _on_active(_w, _p, w=widget):
+                    w._user_touched = True
+                widget.connect('notify::active', _on_active)
             else:
                 widget = Adw.EntryRow(title=col_name)
                 if init_val is not None:
@@ -95,7 +103,10 @@ class RowEditDialog(Adw.Dialog):
         values = {}
         for col, widget in self._widgets.items():
             if isinstance(widget, Adw.SwitchRow):
-                values[col] = widget.get_active()
+                if getattr(widget, '_starts_as_unset', False) and not getattr(widget, '_user_touched', False):
+                    values[col] = None
+                else:
+                    values[col] = widget.get_active()
             else:
                 text = widget.get_text().strip()
                 values[col] = text if text else None
