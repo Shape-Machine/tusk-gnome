@@ -337,8 +337,34 @@ class TablePanel(Gtk.Box):
         self._filter_entry.set_margin_bottom(4)
         self._filter_entry.connect('search-changed', self._apply_local_filter)
 
+        self._insert_btn = Gtk.Button(icon_name='list-add-symbolic')
+        self._insert_btn.add_css_class('flat')
+        self._insert_btn.set_tooltip_text('Insert row')
+        self._insert_btn.connect('clicked', self._on_insert_clicked)
+
+        self._edit_btn = Gtk.Button(icon_name='document-edit-symbolic')
+        self._edit_btn.add_css_class('flat')
+        self._edit_btn.set_tooltip_text('Edit selected row')
+        self._edit_btn.set_sensitive(False)
+        self._edit_btn.connect('clicked', self._on_edit_clicked)
+
+        self._delete_btn = Gtk.Button(icon_name='edit-delete-symbolic')
+        self._delete_btn.add_css_class('flat')
+        self._delete_btn.set_tooltip_text('Delete selected row(s)')
+        self._delete_btn.set_sensitive(False)
+        self._delete_btn.connect('clicked', self._on_delete_clicked)
+
+        self._edit_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        self._edit_bar.set_margin_end(4)
+        self._edit_bar.set_halign(Gtk.Align.END)
+        self._edit_bar.set_visible(False)
+        self._edit_bar.append(self._insert_btn)
+        self._edit_bar.append(self._edit_btn)
+        self._edit_bar.append(self._delete_btn)
+
         data_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         data_box.append(self._filter_entry)
+        data_box.append(self._edit_bar)
         data_box.append(Gtk.Separator())
         data_box.append(self._data_scroll)
         data_box.append(self._data_nav_bar)
@@ -520,14 +546,20 @@ class TablePanel(Gtk.Box):
             if isinstance(existing, Gtk.ColumnView):
                 update_column_view(existing, rows)
             else:
-                self._data_scroll.set_child(
-                    make_column_view(self._all_data_cols, rows, table_name=table_name)
-                )
+                col_view = make_column_view(self._all_data_cols, rows, table_name=table_name)
+                self._data_scroll.set_child(col_view)
+                self._column_view = col_view
+                if self._item_type == 'table':
+                    self._edit_btn.set_sensitive(False)
+                    self._delete_btn.set_sensitive(False)
+                    col_view.connect('activate', self._on_data_row_activate)
+                    col_view.get_model().connect('selection-changed', self._on_data_selection_changed)
         else:
             text = self._filter_entry.get_text().strip()
             empty = Adw.StatusPage(title='No matching rows' if text else 'No data')
             empty.set_vexpand(True)
             self._data_scroll.set_child(empty)
+            self._column_view = None
 
     def _on_refresh(self):
         if self._refresh_btn.get_sensitive():
@@ -539,10 +571,16 @@ class TablePanel(Gtk.Box):
         self._current_table = table
         self._item_type = item_type
         self._data_page = 0
+        self._schema_info = []
+        self._pk_cols = []
+        self._column_view = None
         self._filter_entry.set_text('')
         self._load_gen += 1
         self._refresh_btn.set_sensitive(False)
         self._export_btn.set_sensitive(False)
+        self._edit_bar.set_visible(item_type == 'table')
+        self._edit_btn.set_sensitive(False)
+        self._delete_btn.set_sensitive(False)
         self._set_tabs_for_type(item_type)
         self._spinner.start()
         self._outer.set_visible_child_name('loading')
@@ -624,6 +662,17 @@ class TablePanel(Gtk.Box):
         self._spinner.stop()
         self._refresh_btn.set_sensitive(True)
         self._export_btn.set_sensitive(self._item_type == 'table')
+
+        self._schema_info = [(r[0], r[1], r[3], r[4]) for r in schema_rows]
+        pk_entry = next((r for r in keys_rows if r[1] == 'PRIMARY KEY'), None)
+        self._pk_cols = pk_entry[2].split(', ') if pk_entry else []
+        if self._item_type == 'table':
+            if self._pk_cols:
+                self._edit_btn.set_tooltip_text('Edit selected row')
+                self._delete_btn.set_tooltip_text('Delete selected row(s)')
+            else:
+                self._edit_btn.set_tooltip_text('Edit row (no primary key)')
+                self._delete_btn.set_tooltip_text('Delete row (no primary key)')
 
         if stats_row:
             n_live_tup, total_bytes = stats_row
@@ -723,6 +772,223 @@ class TablePanel(Gtk.Box):
         self._data_page_label.set_label(f'Error: {error_msg}')
         self._data_prev_btn.set_sensitive(self._data_page > 0)
         self._data_next_btn.set_sensitive(False)
+
+    def _on_data_selection_changed(self, _sel, _pos, _n):
+        if not self._column_view:
+            return
+        bitset = self._column_view.get_model().get_selection()
+        n = bitset.get_size()
+        has_pk = bool(self._pk_cols)
+        self._edit_btn.set_sensitive(n == 1 and has_pk)
+        self._delete_btn.set_sensitive(n >= 1 and has_pk)
+
+    def _on_data_row_activate(self, col_view, position):
+        if not self._pk_cols:
+            return
+        row = col_view.get_model().get_item(position)
+        if row is None:
+            return
+        initial = {col: row.raw(i) for i, col in enumerate(self._all_data_cols)}
+        self._show_edit_dialog(initial)
+
+    def _show_edit_dialog(self, initial_values):
+        from row_edit_dialog import RowEditDialog
+        conn, schema, table = self._conn, self._current_schema, self._current_table
+        pk_cols, page = list(self._pk_cols), self._data_page
+
+        def on_save(values):
+            threading.Thread(
+                target=self._exec_update,
+                args=(conn, schema, table, values, initial_values, pk_cols, page),
+                daemon=True,
+            ).start()
+
+        RowEditDialog(
+            mode='edit',
+            columns=self._all_data_cols,
+            schema_info=self._schema_info,
+            pk_cols=pk_cols,
+            initial_values=initial_values,
+            on_save=on_save,
+        ).present(self.get_root())
+
+    def _on_insert_clicked(self, _btn):
+        from row_edit_dialog import RowEditDialog
+        conn, schema, table = self._conn, self._current_schema, self._current_table
+        schema_info, page = list(self._schema_info), self._data_page
+
+        def on_save(values):
+            info_by_col = {r[0]: r for r in schema_info}
+            cols, vals = [], []
+            for col, val in values.items():
+                if val is None:
+                    info = info_by_col.get(col)
+                    if info and info[3]:  # has default_val → let DB use it
+                        continue
+                cols.append(col)
+                vals.append(val)
+            threading.Thread(
+                target=self._exec_insert,
+                args=(conn, schema, table, cols, vals, page),
+                daemon=True,
+            ).start()
+
+        RowEditDialog(
+            mode='insert',
+            columns=self._all_data_cols,
+            schema_info=schema_info,
+            pk_cols=self._pk_cols,
+            initial_values=None,
+            on_save=on_save,
+        ).present(self.get_root())
+
+    def _on_edit_clicked(self, _btn):
+        if not self._column_view:
+            return
+        bitset = self._column_view.get_model().get_selection()
+        if bitset.get_size() != 1:
+            return
+        valid, pos, _ = Gtk.BitsetIter.init_first(bitset)
+        if not valid:
+            return
+        row = self._column_view.get_model().get_item(pos)
+        initial = {col: row.raw(i) for i, col in enumerate(self._all_data_cols)}
+        self._show_edit_dialog(initial)
+
+    def _on_delete_clicked(self, _btn):
+        if not self._column_view:
+            return
+        selection = self._column_view.get_model()
+        bitset = selection.get_selection()
+        n = bitset.get_size()
+        if n == 0:
+            return
+        rows_to_delete = []
+        valid, pos, it = Gtk.BitsetIter.init_first(bitset)
+        while valid:
+            row = selection.get_item(pos)
+            rows_to_delete.append({col: row.raw(i) for i, col in enumerate(self._all_data_cols)})
+            valid, pos = Gtk.BitsetIter.next(it)
+
+        conn, schema, table = self._conn, self._current_schema, self._current_table
+        pk_cols, page = list(self._pk_cols), self._data_page
+
+        msg = f'Delete {n} row{"s" if n > 1 else ""}?'
+        dialog = Adw.AlertDialog(heading=msg, body='This action cannot be undone.')
+        dialog.add_response('cancel', 'Cancel')
+        dialog.add_response('delete', 'Delete')
+        dialog.set_response_appearance('delete', Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response('cancel')
+        dialog.set_close_response('cancel')
+
+        def on_response(_d, response):
+            if response == 'delete':
+                threading.Thread(
+                    target=self._exec_delete,
+                    args=(conn, schema, table, rows_to_delete, pk_cols, page),
+                    daemon=True,
+                ).start()
+
+        dialog.connect('response', on_response)
+        dialog.present(self.get_root())
+
+    def _exec_insert(self, conn, schema, table, cols, vals, page):
+        try:
+            import psycopg
+            from psycopg import sql as pgsql
+            from tunnel import open_tunnel
+
+            with open_tunnel(conn) as (host, port), psycopg.connect(
+                host=host, port=port,
+                dbname=conn['database'], user=conn['username'], password=conn['password'],
+                connect_timeout=10,
+            ) as db:
+                with db.cursor() as cur:
+                    query = pgsql.SQL('INSERT INTO {}.{} ({}) VALUES ({})').format(
+                        pgsql.Identifier(schema),
+                        pgsql.Identifier(table),
+                        pgsql.SQL(', ').join(pgsql.Identifier(c) for c in cols),
+                        pgsql.SQL(', ').join(pgsql.Placeholder() for _ in cols),
+                    )
+                    cur.execute(query, vals)
+                db.commit()
+            GLib.idle_add(self._reload_data_page, page)
+        except Exception as e:
+            GLib.idle_add(self._show_edit_error, str(e))
+
+    def _exec_update(self, conn, schema, table, new_values, original_values, pk_cols, page):
+        try:
+            import psycopg
+            from psycopg import sql as pgsql
+            from tunnel import open_tunnel
+
+            set_cols = list(new_values.keys())
+            set_vals = list(new_values.values())
+            where_vals = [original_values[c] for c in pk_cols]
+
+            with open_tunnel(conn) as (host, port), psycopg.connect(
+                host=host, port=port,
+                dbname=conn['database'], user=conn['username'], password=conn['password'],
+                connect_timeout=10,
+            ) as db:
+                with db.cursor() as cur:
+                    query = pgsql.SQL('UPDATE {}.{} SET {} WHERE {}').format(
+                        pgsql.Identifier(schema),
+                        pgsql.Identifier(table),
+                        pgsql.SQL(', ').join(
+                            pgsql.SQL('{} = {}').format(pgsql.Identifier(c), pgsql.Placeholder())
+                            for c in set_cols
+                        ),
+                        pgsql.SQL(' AND ').join(
+                            pgsql.SQL('{} = {}').format(pgsql.Identifier(c), pgsql.Placeholder())
+                            for c in pk_cols
+                        ),
+                    )
+                    cur.execute(query, set_vals + where_vals)
+                db.commit()
+            GLib.idle_add(self._reload_data_page, page)
+        except Exception as e:
+            GLib.idle_add(self._show_edit_error, str(e))
+
+    def _exec_delete(self, conn, schema, table, rows_to_delete, pk_cols, page):
+        try:
+            import psycopg
+            from psycopg import sql as pgsql
+            from tunnel import open_tunnel
+
+            where_clause = pgsql.SQL(' AND ').join(
+                pgsql.SQL('{} = {}').format(pgsql.Identifier(c), pgsql.Placeholder())
+                for c in pk_cols
+            )
+            query = pgsql.SQL('DELETE FROM {}.{} WHERE {}').format(
+                pgsql.Identifier(schema),
+                pgsql.Identifier(table),
+                where_clause,
+            )
+            with open_tunnel(conn) as (host, port), psycopg.connect(
+                host=host, port=port,
+                dbname=conn['database'], user=conn['username'], password=conn['password'],
+                connect_timeout=10,
+            ) as db:
+                with db.cursor() as cur:
+                    for row_vals in rows_to_delete:
+                        cur.execute(query, [row_vals[c] for c in pk_cols])
+                db.commit()
+            GLib.idle_add(self._reload_data_page, page)
+        except Exception as e:
+            GLib.idle_add(self._show_edit_error, str(e))
+
+    def _reload_data_page(self, page):
+        threading.Thread(
+            target=self._fetch_data_page,
+            args=(self._conn, self._current_schema, self._current_table, page),
+            daemon=True,
+        ).start()
+
+    def _show_edit_error(self, msg):
+        dialog = Adw.AlertDialog(heading='Error', body=msg)
+        dialog.add_response('ok', 'OK')
+        dialog.present(self.get_root())
 
     def _show_error(self, error_msg, gen):
         if gen != self._load_gen:
