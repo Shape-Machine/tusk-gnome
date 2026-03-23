@@ -37,6 +37,7 @@ tusk_sources = [
   'prefs.py',
   'prefs_dialog.py',
   'sponsor_dialog.py',
+  'row_edit_dialog.py',
   'tunnel.py',
 ]
 
