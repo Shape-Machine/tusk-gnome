@@ -1,84 +1,90 @@
 # Features
 
+_Generated from source: v2026.03.23-00_
+
 ## Connections
-- Named connection profiles stored locally
-- Passwords stored securely in GNOME Keyring
-- Warning shown if the secrets service is unavailable
-- Field validation — Name, Host, and Username are required before saving
-- SSH tunnel support with key-based auth and optional passphrase
-- Browse button to pick the SSH private key file
+
+- Named connection profiles stored locally (`~/.config/tusk/connections.json`)
+- Passwords stored securely in GNOME Keyring; warning shown if keyring is unavailable
+- SSH tunnel support: host, port, user, private key file (file picker), optional passphrase
 - Test connection before saving
 - Edit and delete connections
 - Active connection highlighted with a dot indicator in the sidebar
 - Active connection name shown above the database browser
 - Disconnect option in the connection row menu
 
-## Database Browser
-- Browse schemas, tables, and views in a tree sidebar
+## Schema Browser
+
+- Tree sidebar with schemas, tables, views, sequences, enums, and functions
 - Tables and views grouped separately per schema
-- Live filter bar — type to narrow tables and views by name; tree expands to show matches and restores previous expansion on clear
-- Spinner shown while connecting
-- Press Enter to open the selected table or view
-- Switching connections closes table tabs from the previous connection
+- Live filter bar — type to narrow by name; tree expands to show matches and restores on clear
+- Spinner shown while connecting; switching connections closes table tabs from the previous connection
 
 ## Table Inspector
-Tabs available for each object type:
 
-| Tab | Tables | Views |
-|-----|--------|-------|
-| Schema | ✓ | ✓ |
-| Keys | ✓ | |
-| Relations | ✓ | |
-| Triggers | ✓ | ✓ |
-| Indexes | ✓ | |
-| DDL | ✓ | |
-| Definition | | ✓ |
-| Data | ✓ | ✓ |
+- Eight tabs per table: Schema, Keys, Relations, Triggers, Indexes, DDL, Definition (views only), Data
+- **Schema** — column name, type, length, nullable, default value
+- **Keys** — constraint name, type (PRIMARY KEY / UNIQUE), column list
+- **Relations** — foreign key constraints with column, referenced table and column, ON UPDATE/DELETE actions
+- **Triggers** — name, event, timing, orientation, statement
+- **Indexes** — name and full `CREATE INDEX` definition
+- **DDL** — full `CREATE TABLE` statement (read-only)
+- **Definition** — view definition SQL (views only)
+- **Data** — paginated data browser with inline insert, edit, and delete (see Data Browser section)
+- All tabs lazy-load on first access; refresh button reloads all tabs (Ctrl+R)
+- Row count estimate and total size on disk shown in a status bar (tables only)
 
-- Data tab is paginated — 100, 500, or 1000 rows per page (configurable); Prev/Next buttons navigate between pages; current row range shown
-- Filter bar above the data grid — type to instantly filter visible rows by any cell value (client-side, no extra query)
-- Columns are sortable — click a column header to sort ascending/descending; numeric values sort numerically, NULLs sort first
-- NULL values are shown distinctly (greyed "NULL" label)
-- Right-click on a data cell to copy the cell value
-- Right-click on selected rows to copy as CSV, JSON, or INSERT SQL (tables only)
-- Right-click anywhere to copy all visible rows as CSV, JSON, or INSERT SQL (tables only)
-- Right-click to export the current page to a file as CSV, JSON, or INSERT SQL
-- Export button in the nav bar exports the full table (all rows, no page limit) as CSV, JSON, or INSERT SQL (tables only)
-- Row count estimate and total size on disk shown in a status bar at the bottom of the panel (tables only; sourced from PostgreSQL statistics, no extra query needed)
-- Empty state shown per tab when there is no data to display
-- Refresh button reloads all tabs for the current table (also Ctrl+R)
+## Data Browser
+
+- Configurable pagination: 100, 500, or 1,000 rows per page; Prev/Next navigation; current range shown
+- Client-side filter bar — type to instantly narrow visible rows by any cell value
+- Sortable columns — click header for ascending/descending; numeric values sort numerically; NULLs sort first
+- NULL values shown distinctly with a greyed "NULL" label
+- Insert new rows via modal form with type-aware inputs and NULL/default handling (tables with a primary key only)
+- Edit existing rows via modal form; generates `UPDATE` via primary key (tables with a primary key only)
+- Delete selected rows with confirmation; navigates back a page if the current page becomes empty (tables with a primary key only)
+- Right-click a cell to copy its value
+- Right-click selected rows to copy as CSV, JSON, or INSERT SQL
+- Export button exports the full table (all rows, no page limit) as CSV, JSON, or INSERT SQL
 
 ## SQL Editor
-- Syntax highlighting (GtkSourceView, respects dark mode)
+
+- Syntax highlighting via GtkSourceView; respects system dark/light mode
 - Line numbers and current-line highlight
-- Auto-save with 800ms debounce; unsaved-changes dot indicator shown in toolbar
-- Manual save with Ctrl+S; brief "Saved" confirmation shown after saving
-- Active connection name shown in the editor toolbar; run buttons disabled when no connection is active
+- Auto-save with 800 ms debounce; unsaved-changes indicator shown in toolbar; manual save with Ctrl+S
 - **Run All** (F5) — executes the entire buffer as one or more statements
-- **Run Selected** (Ctrl+Enter) — executes the selected text, or the statement at the cursor if nothing is selected
-- **Cancel** — stops a running query mid-execution; shown in place of the run buttons while a query is active
-- Single-statement queries show results inline in the resizable results pane
-- Multi-statement scripts show a results log listing each statement's outcome (rows affected, row count, error, or cancelled); SELECT results open as additional closeable tabs
-- Row count shown after each query
-- Spinner shown while a query is running
-- Right-click on results to copy the cell value, copy selected rows as CSV or JSON, or copy all rows as CSV or JSON
-- Connected to the active database connection
+- **Run Selected** (Ctrl+Enter) — executes selected text, or the statement at the cursor
+- **Cancel** — stops a running query mid-execution
+- Custom multi-statement parser: splits on semicolons while respecting string literals, dollar-quoting, and comments
+- Multi-statement results: a log lists each statement's outcome; SELECT results open as additional closeable tabs
+- Row count shown after each query; spinner shown while a query is running
+- Right-click results to copy a cell value, copy selected rows as CSV or JSON, or copy all rows as CSV or JSON
 
 ## File Explorer
-- Navigate the filesystem from a sidebar pane; current path shown in the toolbar
-- Up button and Home button for quick navigation; double-click a folder to enter it
-- Shows folders and `.sql` files only; other file types are listed but not selectable
-- Create new folders and `.sql` files inline (`.sql` extension appended automatically if omitted)
-- New `.sql` files open automatically in the editor on creation
+
+- Filesystem sidebar; current path shown in the toolbar
+- Up and Home buttons for quick navigation; double-click a folder to enter it
+- Shows folders and `.sql` files only
+- Create new folders and `.sql` files inline; new files open automatically in the editor
 - Double-click to open `.sql` files in the editor
-- Right-click to rename or delete files and folders
-- Deleting a file closes its open editor tab
-- Renaming a file updates its open editor tab title
+- Right-click to rename or delete files and folders; deleting a file closes its open editor tab
 - Remembers last visited folder across sessions
 
-## GNOME Integration
-- GTK4 + libadwaita, follows system dark/light mode
-- Font preferences — family (system/sans/serif/mono) and size, separately for sidebar and main content
-- Keyboard shortcuts (Ctrl+W, Ctrl+Tab, Ctrl+Shift+Tab, Alt+1–9, Ctrl+R, F5, Ctrl+Enter, Ctrl+S, Ctrl+Q, Ctrl+,, Ctrl+?)
+## Appearance
+
+- Font preferences: family (system default, sans-serif, serif, monospace) and size (8–20 pt), separately for sidebar and main content
+- GTK4 + libadwaita; follows system dark/light mode automatically
 - Resizable panes with persisted positions
-- Empty state shown when no tabs are open
+
+## Keyboard Shortcuts
+
+- `Ctrl+,` — Preferences
+- `Ctrl+Q` — Quit
+- `Ctrl+W` — Close Tab
+- `Ctrl+Tab` / `Ctrl+Shift+Tab` — Next / Previous Tab
+- `Alt+1`–`Alt+9` — Go to Tab N
+- `Ctrl+R` — Refresh Tab
+- `F5` — Run All (SQL editor)
+- `Ctrl+Enter` — Run Selected (SQL editor)
+- `Ctrl+S` — Save file (SQL editor)
+- `Ctrl+?` — Keyboard shortcuts reference
