@@ -8,7 +8,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Gtk, Adw, GLib, Gio
+from gi.repository import Gtk, Adw, GLib, Gio, GObject, Pango, Gdk
 
 import prefs
 from data_grid import make_column_view, update_column_view
@@ -172,6 +172,28 @@ _DDL_SQL = """
 """
 
 
+class _SchemaRow(GObject.Object):
+    """GObject wrapper for a schema column row, used in the schema ColumnView."""
+    __gtype_name__ = 'TuskSchemaRow'
+
+    def __init__(self, row_tuple):
+        super().__init__()
+        self._data = row_tuple  # (col_name, data_type, length, is_nullable, default_val)
+
+    def get(self, i):
+        v = self._data[i]
+        return '' if v is None else str(v)
+
+    @property
+    def col_name(self):    return self._data[0]
+    @property
+    def data_type(self):   return self._data[1]
+    @property
+    def is_nullable(self): return self._data[3]
+    @property
+    def default_val(self): return self._data[4] or ''
+
+
 class TablePanel(Gtk.Box):
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
@@ -206,8 +228,38 @@ class TablePanel(Gtk.Box):
         self._view_stack.set_vexpand(True)
 
         self._schema_scroll = self._make_tab_scroll()
+
+        # Schema toolbar (tables only — hidden for views)
+        self._schema_toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self._schema_toolbar.set_margin_start(6)
+        self._schema_toolbar.set_margin_end(6)
+        self._schema_toolbar.set_margin_top(2)
+        self._schema_toolbar.set_margin_bottom(2)
+        self._schema_toolbar.set_visible(False)
+
+        _schema_spacer = Gtk.Box()
+        _schema_spacer.set_hexpand(True)
+        self._schema_toolbar.append(_schema_spacer)
+
+        _reorder_btn = Gtk.Button(icon_name='view-sort-descending-symbolic')
+        _reorder_btn.add_css_class('flat')
+        _reorder_btn.set_tooltip_text('Reorder columns…')
+        _reorder_btn.connect('clicked', self._on_reorder_clicked)
+        self._schema_toolbar.append(_reorder_btn)
+
+        _add_col_btn = Gtk.Button(icon_name='list-add-symbolic')
+        _add_col_btn.add_css_class('flat')
+        _add_col_btn.set_tooltip_text('Add column')
+        _add_col_btn.connect('clicked', self._on_add_column_clicked)
+        self._schema_toolbar.append(_add_col_btn)
+
+        _schema_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        _schema_box.append(self._schema_toolbar)
+        _schema_box.append(Gtk.Separator())
+        _schema_box.append(self._schema_scroll)
+
         self._page_schema = self._view_stack.add_titled_with_icon(
-            self._schema_scroll, 'schema', 'Schema', 'view-list-symbolic'
+            _schema_box, 'schema', 'Schema', 'view-list-symbolic'
         )
 
         self._keys_scroll = self._make_tab_scroll()
@@ -422,8 +474,484 @@ class TablePanel(Gtk.Box):
             empty.set_vexpand(True)
             scroll.set_child(empty)
 
+    def _fill_schema_scroll(self, schema_rows):
+        """Build/refresh the schema ColumnView with a per-row right-click action menu."""
+        if not schema_rows:
+            empty = Adw.StatusPage(title='No columns')
+            empty.set_vexpand(True)
+            self._schema_scroll.set_child(empty)
+            return
+
+        self._schema_raw_rows = schema_rows  # (col_name, data_type, length, is_nullable, default_val)
+
+        store = Gio.ListStore(item_type=_SchemaRow)
+        for row in schema_rows:
+            store.append(_SchemaRow(row))
+
+        col_view = Gtk.ColumnView()
+        col_view.set_show_row_separators(True)
+        col_view.set_show_column_separators(True)
+        col_view.set_hexpand(True)
+
+        _right_clicked_row = [None]
+
+        for i, col_name in enumerate(_SCHEMA_COLS):
+            factory = Gtk.SignalListItemFactory()
+
+            def on_setup(_factory, list_item):
+                label = Gtk.Label()
+                label.set_xalign(0)
+                label.set_ellipsize(Pango.EllipsizeMode.END)
+                label.set_max_width_chars(40)
+                cell_gesture = Gtk.GestureClick(button=3)
+                def _on_cell_rclick(_g, _n, _x, _y, lbl=label):
+                    _right_clicked_row[0] = getattr(lbl, '_item', None)
+                cell_gesture.connect('pressed', _on_cell_rclick)
+                label.add_controller(cell_gesture)
+                list_item.set_child(label)
+
+            def on_bind(_factory, list_item, idx=i):
+                label = list_item.get_child()
+                item = list_item.get_item()
+                label._item = item
+                label.set_text(item.get(idx))
+
+            factory.connect('setup', on_setup)
+            factory.connect('bind', on_bind)
+
+            col = Gtk.ColumnViewColumn(title=col_name, factory=factory)
+            col.set_resizable(True)
+            col.set_expand(True)
+            col_view.append_column(col)
+
+        col_view.set_model(Gtk.NoSelection(model=store))
+
+        # ── Schema action context menu ──────────────────────────────────────
+        ag = Gio.SimpleActionGroup()
+
+        def make_action(name, handler):
+            action = Gio.SimpleAction.new(name, None)
+            action.connect('activate', handler)
+            ag.add_action(action)
+
+        make_action('change-type', lambda *_: self._on_change_type(_right_clicked_row[0]))
+        make_action('set-default', lambda *_: self._on_set_default(_right_clicked_row[0]))
+        make_action('toggle-null', lambda *_: self._on_toggle_nullable(_right_clicked_row[0]))
+        make_action('set-pk',      lambda *_: self._on_set_primary_key(_right_clicked_row[0]))
+        make_action('drop-column', lambda *_: self._on_drop_column(_right_clicked_row[0]))
+
+        col_view.insert_action_group('schema', ag)
+
+        section1 = Gio.Menu()
+        section1.append('Change Type…',       'schema.change-type')
+        section1.append('Set Default…',       'schema.set-default')
+        section1.append('Toggle NOT NULL',    'schema.toggle-null')
+        section1.append('Set as Primary Key', 'schema.set-pk')
+        section2 = Gio.Menu()
+        section2.append('Drop Column…', 'schema.drop-column')
+        menu = Gio.Menu()
+        menu.append_section(None, section1)
+        menu.append_section(None, section2)
+
+        popover = Gtk.PopoverMenu(menu_model=menu)
+        popover.set_has_arrow(False)
+        popover.set_parent(col_view)
+
+        def on_right_click(_gesture, _n, x, y):
+            if _right_clicked_row[0] is None:
+                return
+            rect = Gdk.Rectangle()
+            rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
+            popover.set_pointing_to(rect)
+            popover.popup()
+
+        gesture = Gtk.GestureClick(button=3)
+        gesture.connect('pressed', on_right_click)
+        col_view.add_controller(gesture)
+
+        self._schema_scroll.set_child(col_view)
+
+    # ── Schema toolbar actions ──────────────────────────────────────────────
+
+    def _on_add_column_clicked(self, _btn):
+        from column_dialogs import AddColumnDialog
+        col_names = [r[0] for r in getattr(self, '_schema_raw_rows', [])]
+        conn, schema, table = self._conn, self._current_schema, self._current_table
+
+        def on_save(name, pg_type, nullable, default, after_col):
+            import psycopg
+            from psycopg import sql as pgsql
+
+            parts = [
+                pgsql.SQL('ALTER TABLE {}.{} ADD COLUMN {} {}').format(
+                    pgsql.Identifier(schema),
+                    pgsql.Identifier(table),
+                    pgsql.Identifier(name),
+                    pgsql.SQL(pg_type),
+                )
+            ]
+            if not nullable:
+                parts.append(pgsql.SQL('NOT NULL'))
+            if default is not None:
+                parts.append(pgsql.SQL('DEFAULT ') + pgsql.SQL(default))
+            ddl = pgsql.SQL(' ').join(parts)
+
+            def run():
+                try:
+                    from tunnel import open_tunnel
+                    with open_tunnel(conn) as (host, port), psycopg.connect(
+                        host=host, port=port,
+                        dbname=conn['database'], user=conn['username'],
+                        password=conn['password'], connect_timeout=10,
+                    ) as db:
+                        with db.cursor() as cur:
+                            cur.execute(ddl)
+                            if after_col:
+                                comment_sql = pgsql.SQL(
+                                    'COMMENT ON COLUMN {}.{}.{} IS {}'
+                                ).format(
+                                    pgsql.Identifier(schema),
+                                    pgsql.Identifier(table),
+                                    pgsql.Identifier(name),
+                                    pgsql.Literal(f'position:after:{after_col}'),
+                                )
+                                cur.execute(comment_sql)
+                        db.commit()
+                    GLib.idle_add(self._reload_schema_tab)
+                except Exception as e:
+                    GLib.idle_add(self._show_edit_error, str(e))
+
+            threading.Thread(target=run, daemon=True).start()
+
+        AddColumnDialog(col_names, on_save).present(self.get_root())
+
+    def _on_reorder_clicked(self, _btn):
+        from column_dialogs import ReorderColumnsDialog
+        col_names = [r[0] for r in getattr(self, '_schema_raw_rows', [])]
+        conn, schema, table = self._conn, self._current_schema, self._current_table
+
+        def on_execute(sql):
+            def run():
+                try:
+                    import psycopg
+                    from tunnel import open_tunnel
+                    with open_tunnel(conn) as (host, port), psycopg.connect(
+                        host=host, port=port,
+                        dbname=conn['database'], user=conn['username'],
+                        password=conn['password'], connect_timeout=10,
+                        autocommit=False,
+                    ) as db:
+                        with db.cursor() as cur:
+                            cur.execute(sql)
+                        db.commit()
+                    GLib.idle_add(self._reload_schema_tab)
+                except Exception as e:
+                    GLib.idle_add(self._show_edit_error, str(e))
+
+            threading.Thread(target=run, daemon=True).start()
+
+        ReorderColumnsDialog(schema, table, col_names, on_execute).present(self.get_root())
+
+    # ── Per-column context menu actions ────────────────────────────────────
+
+    def _on_change_type(self, item):
+        if item is None:
+            return
+        from column_dialogs import ChangeTypeDialog
+        conn, schema, table = self._conn, self._current_schema, self._current_table
+
+        def on_save(new_type, using_expr):
+            import psycopg
+            from psycopg import sql as pgsql
+
+            if using_expr:
+                ddl = pgsql.SQL(
+                    'ALTER TABLE {}.{} ALTER COLUMN {} TYPE {} USING {}'
+                ).format(
+                    pgsql.Identifier(schema), pgsql.Identifier(table),
+                    pgsql.Identifier(item.col_name),
+                    pgsql.SQL(new_type),
+                    pgsql.SQL(using_expr),
+                )
+            else:
+                ddl = pgsql.SQL(
+                    'ALTER TABLE {}.{} ALTER COLUMN {} TYPE {}'
+                ).format(
+                    pgsql.Identifier(schema), pgsql.Identifier(table),
+                    pgsql.Identifier(item.col_name),
+                    pgsql.SQL(new_type),
+                )
+            self._exec_ddl_and_reload_schema(conn, ddl)
+
+        ChangeTypeDialog(item.col_name, item.data_type, on_save).present(self.get_root())
+
+    def _on_set_default(self, item):
+        if item is None:
+            return
+        from column_dialogs import SetDefaultDialog
+        conn, schema, table = self._conn, self._current_schema, self._current_table
+
+        def on_save(expr):
+            import psycopg
+            from psycopg import sql as pgsql
+
+            if expr:
+                ddl = pgsql.SQL(
+                    'ALTER TABLE {}.{} ALTER COLUMN {} SET DEFAULT {}'
+                ).format(
+                    pgsql.Identifier(schema), pgsql.Identifier(table),
+                    pgsql.Identifier(item.col_name),
+                    pgsql.SQL(expr),
+                )
+            else:
+                ddl = pgsql.SQL(
+                    'ALTER TABLE {}.{} ALTER COLUMN {} DROP DEFAULT'
+                ).format(
+                    pgsql.Identifier(schema), pgsql.Identifier(table),
+                    pgsql.Identifier(item.col_name),
+                )
+            self._exec_ddl_and_reload_schema(conn, ddl)
+
+        SetDefaultDialog(item.col_name, item.default_val, on_save).present(self.get_root())
+
+    def _on_toggle_nullable(self, item):
+        if item is None:
+            return
+        conn, schema, table = self._conn, self._current_schema, self._current_table
+        is_nullable = item.is_nullable == 'YES'
+
+        if is_nullable:
+            # Setting NOT NULL — pre-check for existing NULLs
+            def check():
+                try:
+                    import psycopg
+                    from psycopg import sql as pgsql
+                    from tunnel import open_tunnel
+                    with open_tunnel(conn) as (host, port), psycopg.connect(
+                        host=host, port=port,
+                        dbname=conn['database'], user=conn['username'],
+                        password=conn['password'], connect_timeout=10,
+                    ) as db:
+                        with db.cursor() as cur:
+                            cur.execute(
+                                pgsql.SQL('SELECT COUNT(*) FROM {}.{} WHERE {} IS NULL').format(
+                                    pgsql.Identifier(schema), pgsql.Identifier(table),
+                                    pgsql.Identifier(item.col_name),
+                                )
+                            )
+                            null_count = cur.fetchone()[0]
+                    GLib.idle_add(_show_confirm, null_count)
+                except Exception as e:
+                    GLib.idle_add(self._show_edit_error, str(e))
+
+            def _show_confirm(null_count):
+                body = f'Set column "{item.col_name}" to NOT NULL?'
+                if null_count > 0:
+                    body += f'\n\nWarning: {null_count} existing NULL value{"s" if null_count != 1 else ""} will prevent this change.'
+                dialog = Adw.AlertDialog(heading='Toggle NOT NULL', body=body)
+                dialog.add_response('cancel', 'Cancel')
+                dialog.add_response('apply', 'Set NOT NULL')
+                dialog.set_response_appearance('apply', Adw.ResponseAppearance.SUGGESTED)
+                dialog.set_default_response('cancel')
+                dialog.set_close_response('cancel')
+
+                def on_response(_d, response):
+                    if response == 'apply':
+                        import psycopg
+                        from psycopg import sql as pgsql
+                        ddl = pgsql.SQL(
+                            'ALTER TABLE {}.{} ALTER COLUMN {} SET NOT NULL'
+                        ).format(
+                            pgsql.Identifier(schema), pgsql.Identifier(table),
+                            pgsql.Identifier(item.col_name),
+                        )
+                        self._exec_ddl_and_reload_schema(conn, ddl)
+
+                dialog.connect('response', on_response)
+                dialog.present(self.get_root())
+
+            threading.Thread(target=check, daemon=True).start()
+        else:
+            # Dropping NOT NULL — just confirm
+            dialog = Adw.AlertDialog(
+                heading='Toggle NOT NULL',
+                body=f'Allow NULL values in column "{item.col_name}"?',
+            )
+            dialog.add_response('cancel', 'Cancel')
+            dialog.add_response('apply', 'Drop NOT NULL')
+            dialog.set_response_appearance('apply', Adw.ResponseAppearance.SUGGESTED)
+            dialog.set_default_response('cancel')
+            dialog.set_close_response('cancel')
+
+            def on_response(_d, response):
+                if response == 'apply':
+                    import psycopg
+                    from psycopg import sql as pgsql
+                    ddl = pgsql.SQL(
+                        'ALTER TABLE {}.{} ALTER COLUMN {} DROP NOT NULL'
+                    ).format(
+                        pgsql.Identifier(schema), pgsql.Identifier(table),
+                        pgsql.Identifier(item.col_name),
+                    )
+                    self._exec_ddl_and_reload_schema(conn, ddl)
+
+            dialog.connect('response', on_response)
+            dialog.present(self.get_root())
+
+    def _on_drop_column(self, item):
+        if item is None:
+            return
+        conn, schema, table = self._conn, self._current_schema, self._current_table
+
+        dialog = Adw.AlertDialog(
+            heading=f'Drop column "{item.col_name}"?',
+            body='This action cannot be undone. Any indexes, constraints, or '
+                 'foreign keys that reference this column will also be dropped.',
+        )
+        dialog.add_response('cancel', 'Cancel')
+        dialog.add_response('drop', 'Drop Column')
+        dialog.set_response_appearance('drop', Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response('cancel')
+        dialog.set_close_response('cancel')
+
+        def on_response(_d, response):
+            if response == 'drop':
+                import psycopg
+                from psycopg import sql as pgsql
+                ddl = pgsql.SQL('ALTER TABLE {}.{} DROP COLUMN {}').format(
+                    pgsql.Identifier(schema), pgsql.Identifier(table),
+                    pgsql.Identifier(item.col_name),
+                )
+                self._exec_ddl_and_reload_schema(conn, ddl)
+
+        dialog.connect('response', on_response)
+        dialog.present(self.get_root())
+
+    def _on_set_primary_key(self, item):
+        if item is None:
+            return
+        conn, schema, table = self._conn, self._current_schema, self._current_table
+        existing_pk = self._pk_cols
+
+        if existing_pk:
+            body = (
+                f'Set "{item.col_name}" as primary key?\n\n'
+                f'The existing primary key ({", ".join(existing_pk)}) will be '
+                f'dropped first.'
+            )
+        else:
+            body = f'Set "{item.col_name}" as the primary key for this table?'
+
+        dialog = Adw.AlertDialog(heading='Set as Primary Key', body=body)
+        dialog.add_response('cancel', 'Cancel')
+        dialog.add_response('apply', 'Set Primary Key')
+        dialog.set_response_appearance('apply', Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response('cancel')
+        dialog.set_close_response('cancel')
+
+        def on_response(_d, response):
+            if response != 'apply':
+                return
+            def run():
+                try:
+                    import psycopg
+                    from psycopg import sql as pgsql
+                    from tunnel import open_tunnel
+                    with open_tunnel(conn) as (host, port), psycopg.connect(
+                        host=host, port=port,
+                        dbname=conn['database'], user=conn['username'],
+                        password=conn['password'], connect_timeout=10,
+                    ) as db:
+                        with db.cursor() as cur:
+                            if existing_pk:
+                                # Find the PK constraint name
+                                cur.execute(
+                                    """SELECT constraint_name
+                                       FROM information_schema.table_constraints
+                                       WHERE table_schema = %s AND table_name = %s
+                                         AND constraint_type = 'PRIMARY KEY'""",
+                                    [schema, table],
+                                )
+                                row = cur.fetchone()
+                                if row:
+                                    cur.execute(
+                                        pgsql.SQL('ALTER TABLE {}.{} DROP CONSTRAINT {}').format(
+                                            pgsql.Identifier(schema),
+                                            pgsql.Identifier(table),
+                                            pgsql.Identifier(row[0]),
+                                        )
+                                    )
+                            cur.execute(
+                                pgsql.SQL('ALTER TABLE {}.{} ADD PRIMARY KEY ({})').format(
+                                    pgsql.Identifier(schema),
+                                    pgsql.Identifier(table),
+                                    pgsql.Identifier(item.col_name),
+                                )
+                            )
+                        db.commit()
+                    GLib.idle_add(self._reload_schema_tab)
+                except Exception as e:
+                    GLib.idle_add(self._show_edit_error, str(e))
+
+            threading.Thread(target=run, daemon=True).start()
+
+        dialog.connect('response', on_response)
+        dialog.present(self.get_root())
+
+    def _exec_ddl_and_reload_schema(self, conn, ddl):
+        """Execute a DDL statement in a background thread and reload the schema tab."""
+        def run():
+            try:
+                import psycopg
+                from tunnel import open_tunnel
+                with open_tunnel(conn) as (host, port), psycopg.connect(
+                    host=host, port=port,
+                    dbname=conn['database'], user=conn['username'],
+                    password=conn['password'], connect_timeout=10,
+                ) as db:
+                    with db.cursor() as cur:
+                        cur.execute(ddl)
+                    db.commit()
+                GLib.idle_add(self._reload_schema_tab)
+            except Exception as e:
+                GLib.idle_add(self._show_edit_error, str(e))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _reload_schema_tab(self):
+        """Re-fetch schema and keys data and refresh those tab views."""
+        conn, schema, table = self._conn, self._current_schema, self._current_table
+
+        def run():
+            try:
+                import psycopg
+                from tunnel import open_tunnel
+                with open_tunnel(conn) as (host, port), psycopg.connect(
+                    host=host, port=port,
+                    dbname=conn['database'], user=conn['username'],
+                    password=conn['password'], connect_timeout=10,
+                ) as db:
+                    with db.cursor() as cur:
+                        cur.execute(_SCHEMA_SQL, [schema, table])
+                        schema_rows = cur.fetchall()
+                        cur.execute(_KEYS_SQL, [schema, table])
+                        keys_rows = cur.fetchall()
+                GLib.idle_add(self._update_schema_view, schema_rows, keys_rows)
+            except Exception as e:
+                GLib.idle_add(self._show_edit_error, str(e))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _update_schema_view(self, schema_rows, keys_rows):
+        self._schema_info = [(r[0], r[1], r[3], r[4]) for r in schema_rows]
+        pk_entry = next((r for r in keys_rows if r[1] == 'PRIMARY KEY'), None)
+        self._pk_cols = pk_entry[2].split(', ') if pk_entry else []
+        self._fill_schema_scroll(schema_rows)
+        self._fill_scroll(self._keys_scroll, _KEYS_COLS, keys_rows, 'No keys')
+
     def _set_tabs_for_type(self, item_type):
         is_table = item_type == 'table'
+        self._schema_toolbar.set_visible(is_table)
         self._page_keys.set_visible(is_table)
         self._page_relations.set_visible(is_table)
         self._page_indexes.set_visible(is_table)
@@ -687,7 +1215,7 @@ class TablePanel(Gtk.Box):
             self._stats_label.set_visible(False)
             self._stats_separator.set_visible(False)
 
-        self._fill_scroll(self._schema_scroll,    _SCHEMA_COLS,    schema_rows,    'No columns')
+        self._fill_schema_scroll(schema_rows)
         self._fill_scroll(self._keys_scroll,      _KEYS_COLS,      keys_rows,      'No keys')
         self._fill_scroll(self._relations_scroll, _RELATIONS_COLS, relations_rows, 'No relations')
         self._fill_scroll(self._triggers_scroll,  _TRIGGERS_COLS,  triggers_rows,  'No triggers')
