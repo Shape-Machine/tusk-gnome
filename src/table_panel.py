@@ -172,6 +172,21 @@ _DDL_SQL = """
 """
 
 
+def _validate_sql_fragment(text):
+    """Reject SQL fragments that contain statement-terminating or comment characters.
+
+    Returns an error string if invalid, or None if the fragment is safe to embed.
+    User-supplied type names, default expressions, and USING clauses are passed
+    through pgsql.SQL() as literal SQL text, so we guard against multi-statement
+    injection at the application level.
+    """
+    forbidden = (';', '--', '/*', '*/', '\x00')
+    for token in forbidden:
+        if token in text:
+            return f'Invalid SQL fragment: "{token}" is not allowed in this field.'
+    return None
+
+
 class _SchemaRow(GObject.Object):
     """GObject wrapper for a schema column row, used in the schema ColumnView."""
     __gtype_name__ = 'TuskSchemaRow'
@@ -494,6 +509,7 @@ class TablePanel(Gtk.Box):
         col_view.set_hexpand(True)
 
         _right_clicked_row = [None]
+        _cell_hit = [False]
 
         for i, col_name in enumerate(_SCHEMA_COLS):
             factory = Gtk.SignalListItemFactory()
@@ -506,6 +522,7 @@ class TablePanel(Gtk.Box):
                 cell_gesture = Gtk.GestureClick(button=3)
                 def _on_cell_rclick(_g, _n, _x, _y, lbl=label):
                     _right_clicked_row[0] = getattr(lbl, '_item', None)
+                    _cell_hit[0] = True
                 cell_gesture.connect('pressed', _on_cell_rclick)
                 label.add_controller(cell_gesture)
                 list_item.set_child(label)
@@ -558,8 +575,9 @@ class TablePanel(Gtk.Box):
         popover.set_parent(col_view)
 
         def on_right_click(_gesture, _n, x, y):
-            if _right_clicked_row[0] is None:
+            if not _cell_hit[0]:
                 return
+            _cell_hit[0] = False
             rect = Gdk.Rectangle()
             rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
             popover.set_pointing_to(rect)
@@ -581,6 +599,13 @@ class TablePanel(Gtk.Box):
         def on_save(name, pg_type, nullable, default, after_col):
             import psycopg
             from psycopg import sql as pgsql
+
+            for fragment, label in [(pg_type, 'Type'), (default, 'Default')]:
+                if fragment is not None:
+                    err = _validate_sql_fragment(fragment)
+                    if err:
+                        self._show_edit_error(f'{label}: {err}')
+                        return
 
             parts = [
                 pgsql.SQL('ALTER TABLE {}.{} ADD COLUMN {} {}').format(
@@ -628,29 +653,8 @@ class TablePanel(Gtk.Box):
     def _on_reorder_clicked(self, _btn):
         from column_dialogs import ReorderColumnsDialog
         col_names = [r[0] for r in getattr(self, '_schema_raw_rows', [])]
-        conn, schema, table = self._conn, self._current_schema, self._current_table
-
-        def on_execute(sql):
-            def run():
-                try:
-                    import psycopg
-                    from tunnel import open_tunnel
-                    with open_tunnel(conn) as (host, port), psycopg.connect(
-                        host=host, port=port,
-                        dbname=conn['database'], user=conn['username'],
-                        password=conn['password'], connect_timeout=10,
-                        autocommit=False,
-                    ) as db:
-                        with db.cursor() as cur:
-                            cur.execute(sql)
-                        db.commit()
-                    GLib.idle_add(self._reload_schema_tab)
-                except Exception as e:
-                    GLib.idle_add(self._show_edit_error, str(e))
-
-            threading.Thread(target=run, daemon=True).start()
-
-        ReorderColumnsDialog(schema, table, col_names, on_execute).present(self.get_root())
+        schema, table = self._current_schema, self._current_table
+        ReorderColumnsDialog(schema, table, col_names).present(self.get_root())
 
     # ── Per-column context menu actions ────────────────────────────────────
 
@@ -663,6 +667,13 @@ class TablePanel(Gtk.Box):
         def on_save(new_type, using_expr):
             import psycopg
             from psycopg import sql as pgsql
+
+            for fragment, label in [(new_type, 'Type'), (using_expr, 'USING expression')]:
+                if fragment is not None:
+                    err = _validate_sql_fragment(fragment)
+                    if err:
+                        self._show_edit_error(f'{label}: {err}')
+                        return
 
             if using_expr:
                 ddl = pgsql.SQL(
@@ -696,6 +707,10 @@ class TablePanel(Gtk.Box):
             from psycopg import sql as pgsql
 
             if expr:
+                err = _validate_sql_fragment(expr)
+                if err:
+                    self._show_edit_error(f'Default expression: {err}')
+                    return
                 ddl = pgsql.SQL(
                     'ALTER TABLE {}.{} ALTER COLUMN {} SET DEFAULT {}'
                 ).format(

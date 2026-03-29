@@ -325,19 +325,22 @@ class SetDefaultDialog(Adw.Dialog):
 class ReorderColumnsDialog(Adw.Dialog):
     """Dialog for reordering table columns and generating a migration script.
 
-    schema       – schema name
-    table        – table name
-    columns      – list of column names in current order
-    on_execute(sql) – callback called when user confirms execution of migration
+    schema  – schema name
+    table   – table name
+    columns – list of column names in current order
+
+    The dialog only generates and copies the migration SQL; it does not execute
+    it directly.  The generated CREATE TABLE ... AS SELECT script does not
+    preserve constraints, indexes, triggers, or defaults, so it must be reviewed
+    and augmented before running.
     """
 
-    def __init__(self, schema, table, columns, on_execute):
+    def __init__(self, schema, table, columns, on_execute=None):
         super().__init__(title='Reorder Columns', content_width=500)
         self._schema = schema
         self._table = table
         self._original_order = list(columns)
         self._current_order = list(columns)
-        self._on_execute = on_execute
 
         header = Adw.HeaderBar()
         toolbar_view = Adw.ToolbarView()
@@ -414,12 +417,7 @@ class ReorderColumnsDialog(Adw.Dialog):
         copy_btn = Gtk.Button(label='Copy SQL')
         copy_btn.connect('clicked', self._copy_sql)
 
-        self._exec_btn = Gtk.Button(label='Execute Migration…')
-        self._exec_btn.add_css_class('destructive-action')
-        self._exec_btn.connect('clicked', self._confirm_execute)
-
         action_box.append(copy_btn)
-        action_box.append(self._exec_btn)
         outer.append(action_box)
 
         scroll = Gtk.ScrolledWindow()
@@ -487,6 +485,9 @@ class ReorderColumnsDialog(Adw.Dialog):
         tmp = f'{table}_reorder_tmp'
         col_list = ', '.join(qi(c) for c in cols)
         sql = (
+            f'-- WARNING: This script does NOT preserve constraints, indexes,\n'
+            f'-- triggers, defaults, sequences, or grants. Review and add them\n'
+            f'-- back manually before executing.\n\n'
             f'BEGIN;\n\n'
             f'-- Step 1: rename original table to a temp name\n'
             f'ALTER TABLE {qi(schema)}.{qi(table)} RENAME TO {qi(tmp)};\n\n'
@@ -512,29 +513,3 @@ class ReorderColumnsDialog(Adw.Dialog):
         )
         Gdk.Display.get_default().get_clipboard().set(text)
 
-    def _confirm_execute(self, _btn):
-        sql = self._sql_buf.get_text(
-            self._sql_buf.get_start_iter(),
-            self._sql_buf.get_end_iter(),
-            False,
-        )
-        dialog = Adw.AlertDialog(
-            heading=f'Execute migration on "{self._table}"?',
-            body='This will rename the original table, create a new one with the '
-                 'desired column order, then drop the original. '
-                 'The operation runs in a transaction and will be rolled back on failure. '
-                 'This cannot be undone if it succeeds.',
-        )
-        dialog.add_response('cancel', 'Cancel')
-        dialog.add_response('execute', 'Execute Migration')
-        dialog.set_response_appearance('execute', Adw.ResponseAppearance.DESTRUCTIVE)
-        dialog.set_default_response('cancel')
-        dialog.set_close_response('cancel')
-
-        def on_response(_d, response):
-            if response == 'execute':
-                self.close()
-                self._on_execute(sql)
-
-        dialog.connect('response', on_response)
-        dialog.present(self.get_root())
