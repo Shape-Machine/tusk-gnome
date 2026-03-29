@@ -709,7 +709,7 @@ class SqlEditor(Gtk.Box):
         # Collect line texts
         lines = []
         for ln in range(start_line, end_line + 1):
-            it = buf.get_iter_at_line(ln)
+            _, it = buf.get_iter_at_line(ln)
             end_it = it.copy()
             if not end_it.ends_line():
                 end_it.forward_to_line_end()
@@ -721,7 +721,7 @@ class SqlEditor(Gtk.Box):
 
         buf.begin_user_action()
         for i, (ln, line_text) in enumerate(zip(range(start_line, end_line + 1), lines)):
-            it = buf.get_iter_at_line(ln)
+            _, it = buf.get_iter_at_line(ln)
             end_it = it.copy()
             if not end_it.ends_line():
                 end_it.forward_to_line_end()
@@ -741,7 +741,7 @@ class SqlEditor(Gtk.Box):
                 leading = len(line_text) - len(stripped)
                 new_line = line_text[:leading] + '-- ' + stripped
             buf.delete(it, end_it)
-            insert_it = buf.get_iter_at_line(ln)
+            _, insert_it = buf.get_iter_at_line(ln)
             buf.insert(insert_it, new_line)
         buf.end_user_action()
 
