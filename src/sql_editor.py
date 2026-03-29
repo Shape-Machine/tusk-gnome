@@ -715,20 +715,20 @@ class SqlEditor(Gtk.Box):
                 end_it.forward_to_line_end()
             lines.append(buf.get_text(it, end_it, False))
 
-        # If all non-empty lines are commented, remove comments; otherwise add
+        # Determine toggle direction:
+        # - All non-empty lines commented → remove comments from all
+        # - Otherwise → add comments only to uncommented lines (never double-comment)
         non_empty = [l for l in lines if l.strip()]
         all_commented = non_empty and all(l.lstrip().startswith('--') for l in non_empty)
 
         buf.begin_user_action()
         for i, (ln, line_text) in enumerate(zip(range(start_line, end_line + 1), lines)):
-            _, it = buf.get_iter_at_line(ln)
-            end_it = it.copy()
-            if not end_it.ends_line():
-                end_it.forward_to_line_end()
+            stripped = line_text.lstrip()
+            is_commented = stripped.startswith('--')
+            leading = len(line_text) - len(stripped)
+
             if all_commented:
                 # Remove leading '--' (with optional space after)
-                stripped = line_text.lstrip()
-                leading = len(line_text) - len(stripped)
                 if stripped.startswith('-- '):
                     new_line = line_text[:leading] + stripped[3:]
                 elif stripped.startswith('--'):
@@ -736,10 +736,16 @@ class SqlEditor(Gtk.Box):
                 else:
                     new_line = line_text
             else:
-                # Add '-- ' at the start of leading whitespace
-                stripped = line_text.lstrip()
-                leading = len(line_text) - len(stripped)
-                new_line = line_text[:leading] + '-- ' + stripped
+                # Add '-- ' only to lines that are not already commented
+                if is_commented or not stripped:
+                    new_line = line_text  # leave commented/empty lines unchanged
+                else:
+                    new_line = line_text[:leading] + '-- ' + stripped
+
+            _, it = buf.get_iter_at_line(ln)
+            end_it = it.copy()
+            if not end_it.ends_line():
+                end_it.forward_to_line_end()
             buf.delete(it, end_it)
             _, insert_it = buf.get_iter_at_line(ln)
             buf.insert(insert_it, new_line)
@@ -1206,8 +1212,10 @@ class SqlEditor(Gtk.Box):
                     db.rollback()
                 self._explain_json_cache = plan_json
                 text = json.dumps(plan_json, indent=2)
-                GLib.idle_add(Gdk.Display.get_default().get_clipboard().set, text)
-                GLib.idle_add(self._show_explain_copy_confirm, 'Copied JSON')
+                def _copy_and_confirm(t=text):
+                    Gdk.Display.get_default().get_clipboard().set(t)
+                    self._show_explain_copy_confirm('Copied JSON')
+                GLib.idle_add(_copy_and_confirm)
             except Exception as e:
                 GLib.idle_add(self._show_explain_copy_confirm, f'Error: {e}')
 
@@ -1295,18 +1303,21 @@ class SqlEditor(Gtk.Box):
                 parts.append(f'{actual_time:.2f} ms')
             subtitle = '  ·  '.join(parts)
 
+            is_expensive = total_cost >= max_cost[0] * 0.9 and max_cost[0] > 0
             children = node.get('Plans', [])
             if children:
                 expander = Adw.ExpanderRow(title=title, subtitle=subtitle)
-                # Auto-expand if this is the most expensive node
-                if total_cost >= max_cost[0] * 0.9:
+                if is_expensive:
                     expander.set_expanded(True)
+                    expander.add_css_class('error')
                 for child in children:
                     child_row = _build_row(child, depth + 1)
                     expander.add_row(child_row)
                 return expander
             else:
                 row = Adw.ActionRow(title=title, subtitle=subtitle)
+                if is_expensive:
+                    row.add_css_class('error')
                 return row
 
         page = Adw.PreferencesPage()
@@ -1378,5 +1389,7 @@ class SqlEditor(Gtk.Box):
         self._buffer.set_text(sql)
 
     def _history_rerun(self, sql):
+        if not self._connection:
+            return
         self._buffer.set_text(sql)
         self._start_run(sql)
