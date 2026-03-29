@@ -67,16 +67,23 @@ _SCHEMA_SQL = """
 
 _KEYS_SQL = """
     SELECT tc.constraint_name, tc.constraint_type,
-           string_agg(kcu.column_name, ', '
-                      ORDER BY kcu.ordinal_position) AS columns
+           COALESCE(
+               string_agg(kcu.column_name, ', '
+                          ORDER BY kcu.ordinal_position),
+               cc.check_clause
+           ) AS columns
     FROM information_schema.table_constraints tc
-    JOIN information_schema.key_column_usage kcu
+    LEFT JOIN information_schema.key_column_usage kcu
       ON tc.constraint_name = kcu.constraint_name
      AND tc.table_schema    = kcu.table_schema
      AND tc.table_name      = kcu.table_name
+    LEFT JOIN information_schema.check_constraints cc
+      ON tc.constraint_name = cc.constraint_name
+     AND tc.constraint_schema = cc.constraint_schema
     WHERE tc.table_schema = %s AND tc.table_name = %s
-      AND tc.constraint_type IN ('PRIMARY KEY', 'UNIQUE')
-    GROUP BY tc.constraint_name, tc.constraint_type
+      AND tc.constraint_type IN ('PRIMARY KEY', 'UNIQUE', 'CHECK', 'FOREIGN KEY')
+      AND NOT (tc.constraint_type = 'CHECK' AND cc.check_clause LIKE '%%IS NOT NULL')
+    GROUP BY tc.constraint_name, tc.constraint_type, cc.check_clause
     ORDER BY tc.constraint_type, tc.constraint_name
 """
 
@@ -1061,7 +1068,7 @@ class TablePanel(Gtk.Box):
                 itype=pgsql.SQL(idx_type),
                 cols=col_sql,
             )
-            self._exec_ddl_and_reload_indexes(conn, ddl)
+            self._exec_ddl_and_reload_indexes(conn, ddl, autocommit=concurrently)
 
         AddIndexDialog(table, col_names, on_save).present(self.get_root())
 
@@ -1089,12 +1096,13 @@ class TablePanel(Gtk.Box):
                     pgsql.Identifier(schema),
                     pgsql.Identifier(item.name),
                 )
-                self._exec_ddl_and_reload_indexes(conn, ddl)
+                # DROP INDEX CONCURRENTLY cannot run inside a transaction
+                self._exec_ddl_and_reload_indexes(conn, ddl, autocommit=True)
 
         dialog.connect('response', on_response)
         dialog.present(self.get_root())
 
-    def _exec_ddl_and_reload_indexes(self, conn, ddl):
+    def _exec_ddl_and_reload_indexes(self, conn, ddl, autocommit=False):
         def run():
             try:
                 import psycopg
@@ -1103,10 +1111,12 @@ class TablePanel(Gtk.Box):
                     host=host, port=port,
                     dbname=conn['database'], user=conn['username'],
                     password=conn['password'], connect_timeout=10,
+                    autocommit=autocommit,
                 ) as db:
                     with db.cursor() as cur:
                         cur.execute(ddl)
-                    db.commit()
+                    if not autocommit:
+                        db.commit()
                 GLib.idle_add(self._reload_indexes_tab)
             except Exception as e:
                 GLib.idle_add(self._show_edit_error, str(e))
@@ -1166,6 +1176,11 @@ class TablePanel(Gtk.Box):
             err = _validate_sql_fragment(name)
             if err:
                 self._show_edit_error(f'Constraint name: {err}')
+                return
+
+            err = _validate_sql_fragment(constraint_sql)
+            if err:
+                self._show_edit_error(f'Constraint definition: {err}')
                 return
 
             ddl = pgsql.SQL(
