@@ -513,3 +513,284 @@ class ReorderColumnsDialog(Adw.Dialog):
         )
         Gdk.Display.get_default().get_clipboard().set(text)
 
+
+# ---------------------------------------------------------------------------
+# Add Index dialog  (#98)
+# ---------------------------------------------------------------------------
+
+_INDEX_TYPES = ['btree', 'hash', 'gin', 'gist', 'brin']
+
+_FK_ACTIONS = ['NO ACTION', 'RESTRICT', 'CASCADE', 'SET NULL', 'SET DEFAULT']
+
+
+class AddIndexDialog(Adw.Dialog):
+    """Dialog for creating a new index on a table.
+
+    table_name   – bare table name (used for name suggestion)
+    col_names    – ordered list of column names from the schema
+    on_save(name, cols, idx_type, unique, concurrently) – callback on confirm
+        cols is an ordered list of selected column names
+    """
+
+    def __init__(self, table_name, col_names, on_save):
+        super().__init__(title='Add Index', content_width=420)
+        self._on_save = on_save
+        self._col_names = col_names
+        self._table_name = table_name
+
+        header = Adw.HeaderBar()
+        self._create_btn = Gtk.Button(label='Create')
+        self._create_btn.add_css_class('suggested-action')
+        self._create_btn.set_sensitive(False)
+        self._create_btn.connect('clicked', self._on_create_clicked)
+        header.pack_end(self._create_btn)
+
+        toolbar_view = Adw.ToolbarView()
+        toolbar_view.add_top_bar(header)
+
+        page = Adw.PreferencesPage()
+
+        # ── Index definition ────────────────────────────────────────────────
+        def_group = Adw.PreferencesGroup(title='Index Definition')
+
+        self._name_row = Adw.EntryRow(title='Index name')
+        self._name_row.connect('changed', self._update_create_btn)
+        def_group.add(self._name_row)
+
+        type_model = Gtk.StringList.new(_INDEX_TYPES)
+        self._type_row = Adw.ComboRow(title='Index type', model=type_model)
+        def_group.add(self._type_row)
+
+        self._unique_row = Adw.SwitchRow(title='Unique')
+        def_group.add(self._unique_row)
+
+        self._concurrent_row = Adw.SwitchRow(
+            title='CONCURRENTLY',
+            subtitle='Avoids locking the table during creation',
+        )
+        self._concurrent_row.set_active(True)
+        def_group.add(self._concurrent_row)
+
+        page.add(def_group)
+
+        # ── Column selection ────────────────────────────────────────────────
+        col_group = Adw.PreferencesGroup(
+            title='Columns',
+            description='Columns are included in the order they appear here.',
+        )
+        self._col_checks = {}
+        for col in col_names:
+            row = Adw.SwitchRow(title=col)
+            row.connect('notify::active', self._on_col_toggled)
+            col_group.add(row)
+            self._col_checks[col] = row
+
+        page.add(col_group)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_propagate_natural_height(True)
+        scroll.set_child(page)
+
+        toolbar_view.set_content(scroll)
+        self.set_child(toolbar_view)
+
+    def _on_col_toggled(self, row, _param):
+        # Auto-suggest name from first selected column
+        selected = [c for c in self._col_names if self._col_checks[c].get_active()]
+        if selected and not self._name_row.get_text().strip():
+            self._name_row.set_text(f'idx_{self._table_name}_{selected[0]}')
+        self._update_create_btn()
+
+    def _update_create_btn(self, *_):
+        name = self._name_row.get_text().strip()
+        selected = [c for c in self._col_names if self._col_checks[c].get_active()]
+        self._create_btn.set_sensitive(bool(name) and bool(selected))
+
+    def _on_create_clicked(self, _btn):
+        name = self._name_row.get_text().strip()
+        cols = [c for c in self._col_names if self._col_checks[c].get_active()]
+        idx_type = _INDEX_TYPES[self._type_row.get_selected()]
+        unique = self._unique_row.get_active()
+        concurrently = self._concurrent_row.get_active()
+        self.close()
+        self._on_save(name, cols, idx_type, unique, concurrently)
+
+
+# ---------------------------------------------------------------------------
+# Add Constraint dialog  (#99)
+# ---------------------------------------------------------------------------
+
+_CONSTRAINT_TYPES = ['PRIMARY KEY', 'UNIQUE', 'CHECK', 'FOREIGN KEY']
+
+
+class AddConstraintDialog(Adw.Dialog):
+    """Dialog for adding a constraint to a table.
+
+    table_name  – bare table name (used for name suggestion)
+    col_names   – ordered list of column names from the schema
+    on_save(name, constraint_sql) – callback; constraint_sql is the fragment
+        after ADD CONSTRAINT <name>, e.g. 'PRIMARY KEY (id)'
+    """
+
+    def __init__(self, table_name, col_names, on_save):
+        super().__init__(title='Add Constraint', content_width=440)
+        self._on_save = on_save
+        self._table_name = table_name
+        self._col_names = col_names
+
+        header = Adw.HeaderBar()
+        self._add_btn = Gtk.Button(label='Add')
+        self._add_btn.add_css_class('suggested-action')
+        self._add_btn.set_sensitive(False)
+        self._add_btn.connect('clicked', self._on_add_clicked)
+        header.pack_end(self._add_btn)
+
+        toolbar_view = Adw.ToolbarView()
+        toolbar_view.add_top_bar(header)
+
+        self._page = Adw.PreferencesPage()
+
+        # ── Type & name ─────────────────────────────────────────────────────
+        top_group = Adw.PreferencesGroup()
+
+        type_model = Gtk.StringList.new(_CONSTRAINT_TYPES)
+        self._type_row = Adw.ComboRow(title='Type', model=type_model)
+        self._type_row.connect('notify::selected', self._on_type_changed)
+        top_group.add(self._type_row)
+
+        self._name_row = Adw.EntryRow(title='Constraint name')
+        self._name_row.connect('changed', self._update_add_btn)
+        top_group.add(self._name_row)
+
+        self._page.add(top_group)
+
+        # ── Type-specific groups (only one visible at a time) ───────────────
+
+        # PK / UNIQUE columns
+        self._pk_col_group = Adw.PreferencesGroup(
+            title='Columns',
+            description='Columns are included in the order they appear here.',
+        )
+        self._col_checks = {}
+        for col in col_names:
+            row = Adw.SwitchRow(title=col)
+            row.connect('notify::active', lambda *_: self._update_add_btn())
+            self._pk_col_group.add(row)
+            self._col_checks[col] = row
+        self._page.add(self._pk_col_group)
+
+        # CHECK expression
+        self._check_group = Adw.PreferencesGroup(title='CHECK Expression')
+        self._check_row = Adw.EntryRow(title='Expression')
+        self._check_row.set_tooltip_text('e.g.  price > 0  or  length(name) > 0')
+        self._check_row.connect('changed', self._update_add_btn)
+        self._check_group.add(self._check_row)
+        self._page.add(self._check_group)
+        self._check_group.set_visible(False)
+
+        # FOREIGN KEY
+        self._fk_group = Adw.PreferencesGroup(title='Foreign Key')
+
+        fk_col_model = Gtk.StringList.new(col_names)
+        self._fk_local_row = Adw.ComboRow(title='Local column', model=fk_col_model)
+        self._fk_group.add(self._fk_local_row)
+
+        self._fk_ref_table_row = Adw.EntryRow(title='Referenced table')
+        self._fk_ref_table_row.set_tooltip_text('e.g.  public.users  or just  users')
+        self._fk_ref_table_row.connect('changed', self._update_add_btn)
+        self._fk_group.add(self._fk_ref_table_row)
+
+        self._fk_ref_col_row = Adw.EntryRow(title='Referenced column')
+        self._fk_ref_col_row.connect('changed', self._update_add_btn)
+        self._fk_group.add(self._fk_ref_col_row)
+
+        on_update_model = Gtk.StringList.new(_FK_ACTIONS)
+        self._fk_on_update_row = Adw.ComboRow(title='ON UPDATE', model=on_update_model)
+        self._fk_group.add(self._fk_on_update_row)
+
+        on_delete_model = Gtk.StringList.new(_FK_ACTIONS)
+        self._fk_on_delete_row = Adw.ComboRow(title='ON DELETE', model=on_delete_model)
+        self._fk_group.add(self._fk_on_delete_row)
+
+        self._page.add(self._fk_group)
+        self._fk_group.set_visible(False)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_propagate_natural_height(True)
+        scroll.set_child(self._page)
+
+        toolbar_view.set_content(scroll)
+        self.set_child(toolbar_view)
+
+        # Set initial name suggestion
+        self._suggest_name()
+
+    def _on_type_changed(self, _row, _param):
+        idx = self._type_row.get_selected()
+        ct = _CONSTRAINT_TYPES[idx]
+        self._pk_col_group.set_visible(ct in ('PRIMARY KEY', 'UNIQUE'))
+        self._check_group.set_visible(ct == 'CHECK')
+        self._fk_group.set_visible(ct == 'FOREIGN KEY')
+        self._suggest_name()
+        self._update_add_btn()
+
+    def _suggest_name(self):
+        if self._name_row.get_text().strip():
+            return
+        idx = self._type_row.get_selected()
+        ct = _CONSTRAINT_TYPES[idx]
+        prefix = {
+            'PRIMARY KEY': 'pk',
+            'UNIQUE': 'uq',
+            'CHECK': 'chk',
+            'FOREIGN KEY': 'fk',
+        }.get(ct, 'con')
+        self._name_row.set_text(f'{prefix}_{self._table_name}')
+
+    def _update_add_btn(self, *_):
+        idx = self._type_row.get_selected()
+        ct = _CONSTRAINT_TYPES[idx]
+        name = self._name_row.get_text().strip()
+        if not name:
+            self._add_btn.set_sensitive(False)
+            return
+        if ct in ('PRIMARY KEY', 'UNIQUE'):
+            ok = any(r.get_active() for r in self._col_checks.values())
+        elif ct == 'CHECK':
+            ok = bool(self._check_row.get_text().strip())
+        else:  # FOREIGN KEY
+            ok = (bool(self._fk_ref_table_row.get_text().strip()) and
+                  bool(self._fk_ref_col_row.get_text().strip()))
+        self._add_btn.set_sensitive(ok)
+
+    def _on_add_clicked(self, _btn):
+        idx = self._type_row.get_selected()
+        ct = _CONSTRAINT_TYPES[idx]
+        name = self._name_row.get_text().strip()
+
+        def qi(n):
+            return '"' + n.replace('"', '""') + '"'
+
+        if ct in ('PRIMARY KEY', 'UNIQUE'):
+            cols = [c for c in self._col_names if self._col_checks[c].get_active()]
+            col_list = ', '.join(qi(c) for c in cols)
+            constraint_sql = f'{ct} ({col_list})'
+        elif ct == 'CHECK':
+            expr = self._check_row.get_text().strip()
+            constraint_sql = f'CHECK ({expr})'
+        else:  # FOREIGN KEY
+            local_col = self._col_names[self._fk_local_row.get_selected()]
+            ref_table = self._fk_ref_table_row.get_text().strip()
+            ref_col = self._fk_ref_col_row.get_text().strip()
+            on_upd = _FK_ACTIONS[self._fk_on_update_row.get_selected()]
+            on_del = _FK_ACTIONS[self._fk_on_delete_row.get_selected()]
+            constraint_sql = (
+                f'FOREIGN KEY ({qi(local_col)}) REFERENCES {ref_table} ({qi(ref_col)})'
+                f' ON UPDATE {on_upd} ON DELETE {on_del}'
+            )
+
+        self.close()
+        self._on_save(name, constraint_sql)
+

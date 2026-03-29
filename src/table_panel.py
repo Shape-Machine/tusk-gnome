@@ -187,6 +187,23 @@ def _validate_sql_fragment(text):
     return None
 
 
+class _NamedRow(GObject.Object):
+    """Generic GObject wrapper for rows whose first column is a name used in DDL actions."""
+    __gtype_name__ = 'TuskNamedRow'
+
+    def __init__(self, row_tuple):
+        super().__init__()
+        self._data = row_tuple
+
+    def get(self, i):
+        v = self._data[i]
+        return '' if v is None else str(v)
+
+    @property
+    def name(self):
+        return self._data[0]
+
+
 class _SchemaRow(GObject.Object):
     """GObject wrapper for a schema column row, used in the schema ColumnView."""
     __gtype_name__ = 'TuskSchemaRow'
@@ -278,8 +295,15 @@ class TablePanel(Gtk.Box):
         )
 
         self._keys_scroll = self._make_tab_scroll()
+        self._keys_toolbar = self._make_action_toolbar(
+            'Add Constraint', self._on_add_constraint_clicked
+        )
+        _keys_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        _keys_box.append(self._keys_toolbar)
+        _keys_box.append(Gtk.Separator())
+        _keys_box.append(self._keys_scroll)
         self._page_keys = self._view_stack.add_titled_with_icon(
-            self._keys_scroll, 'keys', 'Keys', 'changes-prevent-symbolic'
+            _keys_box, 'keys', 'Keys', 'changes-prevent-symbolic'
         )
 
         self._relations_scroll = self._make_tab_scroll()
@@ -293,8 +317,15 @@ class TablePanel(Gtk.Box):
         )
 
         self._indexes_scroll = self._make_tab_scroll()
+        self._indexes_toolbar = self._make_action_toolbar(
+            'Add Index', self._on_add_index_clicked
+        )
+        _indexes_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        _indexes_box.append(self._indexes_toolbar)
+        _indexes_box.append(Gtk.Separator())
+        _indexes_box.append(self._indexes_scroll)
         self._page_indexes = self._view_stack.add_titled_with_icon(
-            self._indexes_scroll, 'indexes', 'Indexes', 'edit-find-symbolic'
+            _indexes_box, 'indexes', 'Indexes', 'edit-find-symbolic'
         )
 
         # DDL tab (tables only)
@@ -476,6 +507,24 @@ class TablePanel(Gtk.Box):
         scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         scroll.set_vexpand(True)
         return scroll
+
+    def _make_action_toolbar(self, tooltip, handler):
+        """Create a right-aligned single-button toolbar for tab action buttons."""
+        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        toolbar.set_margin_start(6)
+        toolbar.set_margin_end(6)
+        toolbar.set_margin_top(2)
+        toolbar.set_margin_bottom(2)
+        toolbar.set_visible(False)
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        toolbar.append(spacer)
+        btn = Gtk.Button(icon_name='list-add-symbolic')
+        btn.add_css_class('flat')
+        btn.set_tooltip_text(tooltip)
+        btn.connect('clicked', handler)
+        toolbar.append(btn)
+        return toolbar
 
     def _fill_scroll(self, scroll, cols, rows, empty_text):
         if rows:
@@ -962,11 +1011,330 @@ class TablePanel(Gtk.Box):
         pk_entry = next((r for r in keys_rows if r[1] == 'PRIMARY KEY'), None)
         self._pk_cols = pk_entry[2].split(', ') if pk_entry else []
         self._fill_schema_scroll(schema_rows)
-        self._fill_scroll(self._keys_scroll, _KEYS_COLS, keys_rows, 'No keys')
+        self._fill_keys_scroll(keys_rows)
+
+    # ── Indexes tab ─────────────────────────────────────────────────────────
+
+    def _fill_indexes_scroll(self, indexes_rows):
+        """Build/refresh the Indexes ColumnView with a per-row Drop Index context menu."""
+        if not indexes_rows:
+            empty = Adw.StatusPage(title='No indexes')
+            empty.set_vexpand(True)
+            self._indexes_scroll.set_child(empty)
+            return
+
+        store = Gio.ListStore(item_type=_NamedRow)
+        for row in indexes_rows:
+            store.append(_NamedRow(row))
+
+        col_view = self._make_named_col_view(
+            _INDEXES_COLS, store,
+            context_items=[('Drop Index…', self._on_drop_index)],
+        )
+        self._indexes_scroll.set_child(col_view)
+
+    def _on_add_index_clicked(self, _btn):
+        from column_dialogs import AddIndexDialog
+        col_names = [r[0] for r in getattr(self, '_schema_raw_rows', [])]
+        conn, schema, table = self._conn, self._current_schema, self._current_table
+
+        def on_save(name, cols, idx_type, unique, concurrently):
+            import psycopg
+            from psycopg import sql as pgsql
+
+            err = _validate_sql_fragment(name)
+            if err:
+                self._show_edit_error(f'Index name: {err}')
+                return
+
+            unique_kw = pgsql.SQL('UNIQUE ') if unique else pgsql.SQL('')
+            conc_kw = pgsql.SQL('CONCURRENTLY ') if concurrently else pgsql.SQL('')
+            col_sql = pgsql.SQL(', ').join(pgsql.Identifier(c) for c in cols)
+            ddl = pgsql.SQL(
+                'CREATE {unique}INDEX {conc}{name} ON {schema}.{table} USING {itype} ({cols})'
+            ).format(
+                unique=unique_kw,
+                conc=conc_kw,
+                name=pgsql.Identifier(name),
+                schema=pgsql.Identifier(schema),
+                table=pgsql.Identifier(table),
+                itype=pgsql.SQL(idx_type),
+                cols=col_sql,
+            )
+            self._exec_ddl_and_reload_indexes(conn, ddl)
+
+        AddIndexDialog(table, col_names, on_save).present(self.get_root())
+
+    def _on_drop_index(self, item):
+        if item is None:
+            return
+        conn, schema = self._conn, self._current_schema
+
+        dialog = Adw.AlertDialog(
+            heading=f'Drop index "{item.name}"?',
+            body='This action cannot be undone.',
+        )
+        dialog.add_response('cancel', 'Cancel')
+        dialog.add_response('drop', 'Drop Index')
+        dialog.set_response_appearance('drop', Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response('cancel')
+        dialog.set_close_response('cancel')
+
+        def on_response(_d, response):
+            if response == 'drop':
+                import psycopg
+                from psycopg import sql as pgsql
+                # DROP INDEX is schema-qualified, not table-qualified
+                ddl = pgsql.SQL('DROP INDEX CONCURRENTLY {}.{}').format(
+                    pgsql.Identifier(schema),
+                    pgsql.Identifier(item.name),
+                )
+                self._exec_ddl_and_reload_indexes(conn, ddl)
+
+        dialog.connect('response', on_response)
+        dialog.present(self.get_root())
+
+    def _exec_ddl_and_reload_indexes(self, conn, ddl):
+        def run():
+            try:
+                import psycopg
+                from tunnel import open_tunnel
+                with open_tunnel(conn) as (host, port), psycopg.connect(
+                    host=host, port=port,
+                    dbname=conn['database'], user=conn['username'],
+                    password=conn['password'], connect_timeout=10,
+                ) as db:
+                    with db.cursor() as cur:
+                        cur.execute(ddl)
+                    db.commit()
+                GLib.idle_add(self._reload_indexes_tab)
+            except Exception as e:
+                GLib.idle_add(self._show_edit_error, str(e))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _reload_indexes_tab(self):
+        conn, schema, table = self._conn, self._current_schema, self._current_table
+
+        def run():
+            try:
+                import psycopg
+                from tunnel import open_tunnel
+                with open_tunnel(conn) as (host, port), psycopg.connect(
+                    host=host, port=port,
+                    dbname=conn['database'], user=conn['username'],
+                    password=conn['password'], connect_timeout=10,
+                ) as db:
+                    with db.cursor() as cur:
+                        cur.execute(_INDEXES_SQL, [schema, table])
+                        rows = cur.fetchall()
+                GLib.idle_add(self._fill_indexes_scroll, rows)
+            except Exception as e:
+                GLib.idle_add(self._show_edit_error, str(e))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    # ── Keys tab ────────────────────────────────────────────────────────────
+
+    def _fill_keys_scroll(self, keys_rows):
+        """Build/refresh the Keys ColumnView with a per-row Drop Constraint context menu."""
+        if not keys_rows:
+            empty = Adw.StatusPage(title='No keys')
+            empty.set_vexpand(True)
+            self._keys_scroll.set_child(empty)
+            return
+
+        store = Gio.ListStore(item_type=_NamedRow)
+        for row in keys_rows:
+            store.append(_NamedRow(row))
+
+        col_view = self._make_named_col_view(
+            _KEYS_COLS, store,
+            context_items=[('Drop Constraint…', self._on_drop_constraint)],
+        )
+        self._keys_scroll.set_child(col_view)
+
+    def _on_add_constraint_clicked(self, _btn):
+        from column_dialogs import AddConstraintDialog
+        col_names = [r[0] for r in getattr(self, '_schema_raw_rows', [])]
+        conn, schema, table = self._conn, self._current_schema, self._current_table
+
+        def on_save(name, constraint_sql):
+            import psycopg
+            from psycopg import sql as pgsql
+
+            err = _validate_sql_fragment(name)
+            if err:
+                self._show_edit_error(f'Constraint name: {err}')
+                return
+
+            ddl = pgsql.SQL(
+                'ALTER TABLE {}.{} ADD CONSTRAINT {} {}'
+            ).format(
+                pgsql.Identifier(schema),
+                pgsql.Identifier(table),
+                pgsql.Identifier(name),
+                pgsql.SQL(constraint_sql),
+            )
+            self._exec_ddl_and_reload_keys(conn, ddl)
+
+        AddConstraintDialog(table, col_names, on_save).present(self.get_root())
+
+    def _on_drop_constraint(self, item):
+        if item is None:
+            return
+        conn, schema, table = self._conn, self._current_schema, self._current_table
+
+        dialog = Adw.AlertDialog(
+            heading=f'Drop constraint "{item.name}"?',
+            body='This action cannot be undone. Dropping a primary key referenced '
+                 'by foreign keys in other tables will also fail with an error.',
+        )
+        dialog.add_response('cancel', 'Cancel')
+        dialog.add_response('drop', 'Drop Constraint')
+        dialog.set_response_appearance('drop', Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response('cancel')
+        dialog.set_close_response('cancel')
+
+        def on_response(_d, response):
+            if response == 'drop':
+                import psycopg
+                from psycopg import sql as pgsql
+                ddl = pgsql.SQL('ALTER TABLE {}.{} DROP CONSTRAINT {}').format(
+                    pgsql.Identifier(schema),
+                    pgsql.Identifier(table),
+                    pgsql.Identifier(item.name),
+                )
+                self._exec_ddl_and_reload_keys(conn, ddl)
+
+        dialog.connect('response', on_response)
+        dialog.present(self.get_root())
+
+    def _exec_ddl_and_reload_keys(self, conn, ddl):
+        def run():
+            try:
+                import psycopg
+                from tunnel import open_tunnel
+                with open_tunnel(conn) as (host, port), psycopg.connect(
+                    host=host, port=port,
+                    dbname=conn['database'], user=conn['username'],
+                    password=conn['password'], connect_timeout=10,
+                ) as db:
+                    with db.cursor() as cur:
+                        cur.execute(ddl)
+                    db.commit()
+                GLib.idle_add(self._reload_keys_tab)
+            except Exception as e:
+                GLib.idle_add(self._show_edit_error, str(e))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _reload_keys_tab(self):
+        conn, schema, table = self._conn, self._current_schema, self._current_table
+
+        def run():
+            try:
+                import psycopg
+                from tunnel import open_tunnel
+                with open_tunnel(conn) as (host, port), psycopg.connect(
+                    host=host, port=port,
+                    dbname=conn['database'], user=conn['username'],
+                    password=conn['password'], connect_timeout=10,
+                ) as db:
+                    with db.cursor() as cur:
+                        cur.execute(_KEYS_SQL, [schema, table])
+                        keys_rows = cur.fetchall()
+                GLib.idle_add(self._fill_keys_scroll, keys_rows)
+            except Exception as e:
+                GLib.idle_add(self._show_edit_error, str(e))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    # ── Shared helper for named-row ColumnViews with context menu ────────────
+
+    def _make_named_col_view(self, col_names, store, context_items):
+        """Build a ColumnView from a _NamedRow ListStore with a right-click context menu.
+
+        context_items – list of (label, handler(item)) tuples for the context menu.
+        """
+        col_view = Gtk.ColumnView()
+        col_view.set_show_row_separators(True)
+        col_view.set_show_column_separators(True)
+        col_view.set_hexpand(True)
+
+        _right_clicked_item = [None]
+        _cell_hit = [False]
+
+        for i, name in enumerate(col_names):
+            factory = Gtk.SignalListItemFactory()
+
+            def on_setup(_factory, list_item):
+                label = Gtk.Label()
+                label.set_xalign(0)
+                label.set_ellipsize(Pango.EllipsizeMode.END)
+                label.set_max_width_chars(60)
+                cell_gesture = Gtk.GestureClick(button=3)
+                def _on_cell_rclick(_g, _n, _x, _y, lbl=label):
+                    _right_clicked_item[0] = getattr(lbl, '_item', None)
+                    _cell_hit[0] = True
+                cell_gesture.connect('pressed', _on_cell_rclick)
+                label.add_controller(cell_gesture)
+                list_item.set_child(label)
+
+            def on_bind(_factory, list_item, idx=i):
+                label = list_item.get_child()
+                item = list_item.get_item()
+                label._item = item
+                label.set_text(item.get(idx))
+
+            factory.connect('setup', on_setup)
+            factory.connect('bind', on_bind)
+
+            col = Gtk.ColumnViewColumn(title=name, factory=factory)
+            col.set_resizable(True)
+            col.set_expand(True)
+            col_view.append_column(col)
+
+        col_view.set_model(Gtk.NoSelection(model=store))
+
+        ag = Gio.SimpleActionGroup()
+        menu = Gio.Menu()
+        section = Gio.Menu()
+
+        for label, handler in context_items:
+            action_name = label.lower().replace(' ', '-').replace('…', '')
+            action = Gio.SimpleAction.new(action_name, None)
+            action.connect('activate', lambda _a, _p, h=handler: h(_right_clicked_item[0]))
+            ag.add_action(action)
+            section.append(label, f'ctx.{action_name}')
+
+        menu.append_section(None, section)
+        col_view.insert_action_group('ctx', ag)
+
+        popover = Gtk.PopoverMenu(menu_model=menu)
+        popover.set_has_arrow(False)
+        popover.set_parent(col_view)
+
+        def on_right_click(_gesture, _n, x, y):
+            if not _cell_hit[0]:
+                return
+            _cell_hit[0] = False
+            rect = Gdk.Rectangle()
+            rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
+            popover.set_pointing_to(rect)
+            popover.popup()
+
+        gesture = Gtk.GestureClick(button=3)
+        gesture.connect('pressed', on_right_click)
+        col_view.add_controller(gesture)
+
+        return col_view
 
     def _set_tabs_for_type(self, item_type):
         is_table = item_type == 'table'
         self._schema_toolbar.set_visible(is_table)
+        self._keys_toolbar.set_visible(is_table)
+        self._indexes_toolbar.set_visible(is_table)
         self._page_keys.set_visible(is_table)
         self._page_relations.set_visible(is_table)
         self._page_indexes.set_visible(is_table)
@@ -1231,10 +1599,10 @@ class TablePanel(Gtk.Box):
             self._stats_separator.set_visible(False)
 
         self._fill_schema_scroll(schema_rows)
-        self._fill_scroll(self._keys_scroll,      _KEYS_COLS,      keys_rows,      'No keys')
+        self._fill_keys_scroll(keys_rows)
         self._fill_scroll(self._relations_scroll, _RELATIONS_COLS, relations_rows, 'No relations')
         self._fill_scroll(self._triggers_scroll,  _TRIGGERS_COLS,  triggers_rows,  'No triggers')
-        self._fill_scroll(self._indexes_scroll,   _INDEXES_COLS,   indexes_rows,   'No indexes')
+        self._fill_indexes_scroll(indexes_rows)
 
         self._ddl_buffer.set_text(ddl)
 
