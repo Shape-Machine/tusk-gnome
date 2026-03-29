@@ -52,7 +52,7 @@ def _attach_type_picker(entry_row):
     type fills the entry and closes the popover.  The entry still accepts any
     free-form text for custom types.
     """
-    btn = Gtk.Button(icon_name='pan-down-symbolic')
+    btn = Gtk.MenuButton(icon_name='pan-down-symbolic')
     btn.add_css_class('flat')
     btn.set_tooltip_text('Pick a PostgreSQL type')
     btn.set_valign(Gtk.Align.CENTER)
