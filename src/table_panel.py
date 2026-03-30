@@ -704,11 +704,9 @@ class TablePanel(Gtk.Box):
 
             threading.Thread(target=run, daemon=True).start()
 
-        oi_callback = getattr(self.get_root(), '_open_in_editor', None)
         AddColumnDialog(
             col_names, on_save,
             schema=schema, table=table,
-            on_open_in_editor=oi_callback,
         ).present(self.get_root())
 
     def _on_reorder_clicked(self, _btn):

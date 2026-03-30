@@ -254,7 +254,7 @@ class AddColumnDialog(Adw.Dialog):
         after_col is None if not specified
     """
 
-    def __init__(self, existing_columns, on_save, schema=None, table=None, on_open_in_editor=None):
+    def __init__(self, existing_columns, on_save, schema=None, table=None):
         super().__init__(title='Add Column', content_width=420)
         self._on_save = on_save
         self._preview_buf = None
@@ -312,7 +312,7 @@ class AddColumnDialog(Adw.Dialog):
         if schema and table:
             self._schema = schema
             self._table = table
-            self._preview_buf, preview_widget = self._build_preview_section(on_open_in_editor)
+            self._preview_buf, preview_widget = self._build_preview_section()
             self._name_row.connect('changed', self._update_preview)
             self._type_row.connect('changed', self._update_preview)
             self._nullable_row.connect('notify::active', self._update_preview)
@@ -329,7 +329,7 @@ class AddColumnDialog(Adw.Dialog):
             toolbar_view.set_content(page)
         self.set_child(toolbar_view)
 
-    def _build_preview_section(self, on_open_in_editor):
+    def _build_preview_section(self):
         buf, view = _make_sql_preview_view()
 
         preview_scroll = Gtk.ScrolledWindow()
@@ -350,14 +350,6 @@ class AddColumnDialog(Adw.Dialog):
             buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
         ))
         btn_box.append(copy_btn)
-
-        if on_open_in_editor:
-            open_btn = Gtk.Button(label='Open in editor')
-            open_btn.set_tooltip_text('Send SQL to the SQL editor without executing')
-            open_btn.connect('clicked', lambda _: on_open_in_editor(
-                buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
-            ))
-            btn_box.append(open_btn)
 
         inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         inner.set_margin_top(8)
@@ -1005,13 +997,11 @@ class CreateTableDialog(Adw.Dialog):
     schemas        – list of schema names available on the connection
     default_schema – schema to pre-select
     on_save(ddl)   – called with the full CREATE TABLE SQL string on confirm
-    on_open_in_editor(sql) – optional; sends DDL to the SQL editor
     """
 
-    def __init__(self, schemas, default_schema, on_save, on_open_in_editor=None):
+    def __init__(self, schemas, default_schema, on_save):
         super().__init__(title='Create Table', content_width=540, content_height=520)
         self._on_save = on_save
-        self._on_open_in_editor = on_open_in_editor
         self._schemas = schemas if schemas else ['public']
         self._col_rows = []
         self._pk_updating = False
@@ -1107,12 +1097,6 @@ class CreateTableDialog(Adw.Dialog):
         copy_btn.set_tooltip_text('Copy SQL to clipboard')
         copy_btn.connect('clicked', self._copy_preview)
         preview_btn_box.append(copy_btn)
-
-        if on_open_in_editor:
-            open_btn = Gtk.Button(label='Open in editor')
-            open_btn.set_tooltip_text('Send SQL to the SQL editor without executing')
-            open_btn.connect('clicked', self._open_in_editor)
-            preview_btn_box.append(open_btn)
 
         preview_inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         preview_inner.set_margin_top(8)
@@ -1295,15 +1279,6 @@ class CreateTableDialog(Adw.Dialog):
             False,
         )
         Gdk.Display.get_default().get_clipboard().set(text)
-
-    def _open_in_editor(self, _btn):
-        if self._on_open_in_editor:
-            text = self._preview_buf.get_text(
-                self._preview_buf.get_start_iter(),
-                self._preview_buf.get_end_iter(),
-                False,
-            )
-            self._on_open_in_editor(text)
 
     def _on_create_clicked(self, _btn):
         forbidden = (';', '--', '/*', '*/', '\x00')
