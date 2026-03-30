@@ -256,10 +256,10 @@ class ConnectionDialog(Adw.Window):
         left_col.set_hexpand(True)
         left_col.append(name_group)
         left_col.append(details_group)
+        left_col.append(auth_group)
 
         right_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
         right_col.set_hexpand(True)
-        right_col.append(auth_group)
         right_col.append(options_group)
         right_col.append(ssh_group)
 
@@ -291,15 +291,15 @@ class ConnectionDialog(Adw.Window):
         status_box.append(self._test_spinner)
         status_box.append(self._test_label)
 
-        self._test_bar.set_start_widget(self._test_btn)
-        self._test_bar.set_end_widget(status_box)
-        content.append(self._test_bar)
-
         self._save_btn = Gtk.Button(label='Save Connection')
         self._save_btn.add_css_class('suggested-action')
         self._save_btn.add_css_class('pill')
         self._save_btn.connect('clicked', self._on_save)
-        content.append(self._save_btn)
+
+        self._test_bar.set_start_widget(self._test_btn)
+        self._test_bar.set_center_widget(status_box)
+        self._test_bar.set_end_widget(self._save_btn)
+        content.append(self._test_bar)
 
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
