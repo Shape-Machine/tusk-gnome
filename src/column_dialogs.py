@@ -1380,7 +1380,7 @@ class CreateTableDialog(Adw.Dialog):
             return ''
 
         col_defs = []
-        pk_col = None
+        pk_cols = []
         for row in self._col_rows:
             name = row._name_entry.get_text().strip()
             pg_type = row._type_entry.get_text().strip() or 'text'
@@ -1396,10 +1396,10 @@ class CreateTableDialog(Adw.Dialog):
                 parts.append(f'DEFAULT {default}')
             col_defs.append('    ' + ' '.join(parts))
             if is_pk:
-                pk_col = name
+                pk_cols.append(name)
 
-        if pk_col:
-            col_defs.append(f'    PRIMARY KEY ({qi(pk_col)})')
+        if pk_cols:
+            col_defs.append(f'    PRIMARY KEY ({", ".join(qi(c) for c in pk_cols)})')
 
         if not col_defs:
             return f'CREATE TABLE {qi(schema)}.{qi(table)}\n(\n);'

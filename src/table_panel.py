@@ -611,13 +611,17 @@ class TablePanel(Gtk.Box):
         make_action('set-default',    lambda *_: self._on_set_default(_right_clicked_row[0]))
         make_action('toggle-null',    lambda *_: self._on_toggle_nullable(_right_clicked_row[0]))
         make_action('set-pk',         lambda *_: self._on_set_primary_key(_right_clicked_row[0]))
-        make_action('rename-column',  lambda *_: self._on_rename_column(_right_clicked_row[0]))
         make_action('drop-column',    lambda *_: self._on_drop_column(_right_clicked_row[0]))
+
+        is_table = self._item_type == 'table'
+        if is_table:
+            make_action('rename-column', lambda *_: self._on_rename_column(_right_clicked_row[0]))
 
         col_view.insert_action_group('schema', ag)
 
         section1 = Gio.Menu()
-        section1.append('Rename Column…',     'schema.rename-column')
+        if is_table:
+            section1.append('Rename Column…', 'schema.rename-column')
         section1.append('Change Type…',       'schema.change-type')
         section1.append('Set Default…',       'schema.set-default')
         section1.append('Toggle NOT NULL',    'schema.toggle-null')

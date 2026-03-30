@@ -672,10 +672,7 @@ class TuskWindow(Adw.ApplicationWindow):
         dialog.set_default_response('cancel')
         dialog.set_close_response('cancel')
 
-        def on_response(_d, response):
-            if response != 'drop':
-                return
-            cascade = (not is_view) and cascade_check.get_active()
+        def execute_drop(cascade):
             obj_type = 'VIEW' if is_view else 'TABLE'
             qi = lambda n: '"' + n.replace('"', '""') + '"'
             ddl = f'DROP {obj_type} {qi(schema)}.{qi(table)}'
@@ -699,9 +696,14 @@ class TuskWindow(Adw.ApplicationWindow):
                     GLib.idle_add(self._close_tab_by_id, tab_id)
                     GLib.idle_add(self._browser.load, conn)
                 except Exception as e:
-                    GLib.idle_add(self._show_browser_error, 'Drop Failed', str(e))
+                    GLib.idle_add(self._show_drop_error, e, conn, schema, table, item_type)
 
             threading.Thread(target=run, daemon=True).start()
+
+        def on_response(_d, response):
+            if response != 'drop':
+                return
+            execute_drop(cascade=(not is_view) and cascade_check.get_active())
 
         dialog.connect('response', on_response)
         dialog.present(self)
@@ -893,6 +895,62 @@ class TuskWindow(Adw.ApplicationWindow):
             page.set_title(new_title)
             if isinstance(page.get_child(), TablePanel):
                 page.get_child().load(conn, schema, new_name, 'table')
+
+    def _show_drop_error(self, exc, conn, schema, table, item_type):
+        """Show a drop error dialog. For dependency errors, offer a Try with CASCADE button."""
+        err_str = str(exc)
+        is_dependency = 'depends on' in err_str or (
+            hasattr(exc, 'sqlstate') and exc.sqlstate == '2BP01'
+        )
+        is_view = item_type == 'view'
+
+        if is_dependency and not is_view:
+            dialog = Adw.AlertDialog(
+                heading='Drop Failed — Dependent Objects Exist',
+                body=f'{err_str}\n\nUse "Drop with CASCADE" to also drop all dependent objects.',
+            )
+            dialog.add_response('cancel', 'Cancel')
+            dialog.add_response('cascade', 'Drop with CASCADE')
+            dialog.set_response_appearance('cascade', Adw.ResponseAppearance.DESTRUCTIVE)
+            dialog.set_default_response('cancel')
+            dialog.set_close_response('cancel')
+
+            def on_cascade(_d, response):
+                if response == 'cascade':
+                    self._on_drop_table_requested_cascade(conn, schema, table, item_type)
+
+            dialog.connect('response', on_cascade)
+        else:
+            dialog = Adw.AlertDialog(heading='Drop Failed', body=err_str)
+            dialog.add_response('ok', 'OK')
+
+        dialog.present(self)
+
+    def _on_drop_table_requested_cascade(self, conn, schema, table, item_type):
+        """Re-run drop with CASCADE after user confirms from the error dialog."""
+        obj_type = 'VIEW' if item_type == 'view' else 'TABLE'
+        qi = lambda n: '"' + n.replace('"', '""') + '"'
+        ddl = f'DROP {obj_type} {qi(schema)}.{qi(table)} CASCADE;'
+
+        def run():
+            try:
+                import psycopg
+                from tunnel import open_tunnel
+                with open_tunnel(conn) as (host, port), psycopg.connect(
+                    host=host, port=port,
+                    dbname=conn['database'], user=conn['username'],
+                    password=conn['password'], connect_timeout=10,
+                ) as db:
+                    with db.cursor() as cur:
+                        cur.execute(ddl)
+                    db.commit()
+                tab_id = f'table:{conn["id"]}:{schema}.{table}'
+                GLib.idle_add(self._close_tab_by_id, tab_id)
+                GLib.idle_add(self._browser.load, conn)
+            except Exception as e:
+                GLib.idle_add(self._show_browser_error, 'Drop Failed', str(e))
+
+        threading.Thread(target=run, daemon=True).start()
 
     def _show_browser_error(self, heading, body):
         dialog = Adw.AlertDialog(heading=heading, body=body)
