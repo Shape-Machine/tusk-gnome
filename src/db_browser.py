@@ -130,6 +130,7 @@ class DbBrowser(Gtk.Box):
         self._ctx_item_type = None
         self._expansion_snapshot = None
         self._last_conn = None
+        self._read_only = False
 
         icon_renderer = Gtk.CellRendererPixbuf()
         text_renderer = Gtk.CellRendererText()
@@ -260,6 +261,8 @@ class DbBrowser(Gtk.Box):
         self._load_gen += 1
         gen = self._load_gen
         self._last_conn = conn
+        self._read_only = conn.get('read_only', False)
+        self._new_schema_btn.set_visible(not self._read_only)
         self._saved_expansion = None
         self._expansion_snapshot = self._snapshot_expansion()
         hint = getattr(self, '_rename_hint', None)
@@ -279,7 +282,7 @@ class DbBrowser(Gtk.Box):
     def _fetch_schema(self, conn, gen):
         try:
             import psycopg
-            from tunnel import open_tunnel
+            from tunnel import open_tunnel, apply_conn_settings
 
             with open_tunnel(conn) as (host, port), psycopg.connect(
                 host=host,
@@ -289,6 +292,7 @@ class DbBrowser(Gtk.Box):
                 password=conn['password'],
                 connect_timeout=10,
             ) as db:
+                apply_conn_settings(db, conn)
                 with db.cursor() as cur:
                     cur.execute("""
                         SELECT table_schema, table_name, table_type
@@ -527,6 +531,8 @@ class DbBrowser(Gtk.Box):
 
     def _show_schema_context_menu(self, x, y):
         """Context menu for the Tables group node — just Create Table."""
+        if self._read_only:
+            return
         ag = Gio.SimpleActionGroup()
         action = Gio.SimpleAction.new('create-table', None)
         action.connect('activate', lambda *_: self.emit(
@@ -541,6 +547,8 @@ class DbBrowser(Gtk.Box):
 
     def _show_schema_node_context_menu(self, x, y):
         """Context menu for a schema node — Create Table, Rename Schema, Drop Schema."""
+        if self._read_only:
+            return
         ag = Gio.SimpleActionGroup()
 
         def add_action(name, cb):
@@ -571,6 +579,8 @@ class DbBrowser(Gtk.Box):
 
     def _show_views_group_context_menu(self, x, y):
         """Context menu for the Views group node — New View."""
+        if self._read_only:
+            return
         ag = Gio.SimpleActionGroup()
         action = Gio.SimpleAction.new('create-view', None)
         action.connect('activate', lambda *_: self.emit(
@@ -593,6 +603,8 @@ class DbBrowser(Gtk.Box):
         popover.popup()
 
     def _show_table_context_menu(self, x, y, item_type):
+        if self._read_only:
+            return
         ag = Gio.SimpleActionGroup()
 
         def add_action(name, cb):

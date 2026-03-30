@@ -358,6 +358,13 @@ class TuskWindow(Adw.ApplicationWindow):
         row.set_activatable(True)
         row._conn = conn
 
+        if conn.get('read_only'):
+            lock = Gtk.Image.new_from_icon_name('changes-prevent-symbolic')
+            lock.set_tooltip_text('Read-only connection')
+            lock.set_valign(Gtk.Align.CENTER)
+            lock.add_css_class('dim-label')
+            row.add_suffix(lock)
+
         dot = Gtk.Label(label='●')
         dot.add_css_class('accent')
         dot.set_visible(False)
@@ -515,7 +522,10 @@ class TuskWindow(Adw.ApplicationWindow):
 
         # Update active connection label above DB browser
         if conn:
-            self._active_conn_label.set_label(f'Connected: {conn["name"]}')
+            label = conn['name']
+            if conn.get('read_only'):
+                label += '  🔒'
+            self._active_conn_label.set_label(f'Connected: {label}')
             self._active_conn_label.set_visible(True)
         else:
             self._active_conn_label.set_label('')
@@ -538,7 +548,7 @@ class TuskWindow(Adw.ApplicationWindow):
             return
 
         panel = TablePanel()
-        panel.load(conn, schema, table, item_type)
+        panel.load(conn, schema, table, item_type, read_only=conn.get('read_only', False))
 
         icon_name = 'x-office-spreadsheet-symbolic' if item_type == 'table' else 'view-grid-symbolic'
         page = self._tab_view.append(panel)
