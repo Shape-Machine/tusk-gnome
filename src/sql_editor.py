@@ -882,32 +882,16 @@ class SqlEditor(Gtk.Box):
             return
 
         # Multiple statements — collect results then show log
+        # If any statement requires autocommit (e.g. CREATE/DROP DATABASE),
+        # open the whole connection in autocommit mode so each statement
+        # commits independently. Otherwise use a single transaction.
+        use_autocommit = any(_AUTOCOMMIT_RE.match(s) for s in stmts)
         results = []  # list of dicts: {stmt, kind, data}
         try:
             import psycopg
             from tunnel import open_db
 
-            def _run_stmt(cur_or_db, stmt, autocommit):
-                """Execute one statement; return result dict."""
-                if autocommit:
-                    # Needs its own autocommit connection
-                    with open_db(conn, autocommit=True) as ac_db:
-                        with ac_db.cursor() as ac_cur:
-                            ac_cur.execute(stmt)
-                            if ac_cur.description:
-                                cols = [d.name for d in ac_cur.description]
-                                rows = ac_cur.fetchall()
-                                return {'stmt': stmt, 'kind': 'select', 'cols': cols, 'rows': rows}
-                            return {'stmt': stmt, 'kind': 'status', 'count': ac_cur.rowcount}
-                else:
-                    cur_or_db.execute(stmt)
-                    if cur_or_db.description:
-                        cols = [d.name for d in cur_or_db.description]
-                        rows = cur_or_db.fetchall()
-                        return {'stmt': stmt, 'kind': 'select', 'cols': cols, 'rows': rows}
-                    return {'stmt': stmt, 'kind': 'status', 'count': cur_or_db.rowcount}
-
-            with open_db(conn) as db:
+            with open_db(conn, autocommit=use_autocommit) as db:
                 self._active_conn = db
                 cancelled = False
                 try:
@@ -917,11 +901,17 @@ class SqlEditor(Gtk.Box):
                                 results.append({'stmt': stmt, 'kind': 'cancelled'})
                                 cancelled = True
                                 break
-                            needs_ac = bool(_AUTOCOMMIT_RE.match(stmt))
                             try:
-                                if needs_ac:
-                                    db.commit()  # flush any pending work first
-                                results.append(_run_stmt(cur, stmt, needs_ac))
+                                cur.execute(stmt)
+                                if cur.description:
+                                    cols = [d.name for d in cur.description]
+                                    rows = cur.fetchall()
+                                    results.append({'stmt': stmt, 'kind': 'select',
+                                                    'cols': cols, 'rows': rows})
+                                else:
+                                    count = cur.rowcount
+                                    results.append({'stmt': stmt, 'kind': 'status',
+                                                    'count': count})
                             except psycopg.errors.QueryCanceled:
                                 results.append({'stmt': stmt, 'kind': 'cancelled'})
                                 cancelled = True
@@ -934,10 +924,11 @@ class SqlEditor(Gtk.Box):
                                     msg += f'\nHint: {e.diag.message_hint}'
                                 results.append({'stmt': stmt, 'kind': 'error', 'msg': msg})
                                 break  # transaction is aborted; stop here
-                    if cancelled:
-                        db.rollback()
-                    else:
-                        db.commit()
+                    if not use_autocommit:
+                        if cancelled:
+                            db.rollback()
+                        else:
+                            db.commit()
                 finally:
                     self._active_conn = None
         except Exception as e:
