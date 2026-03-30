@@ -100,6 +100,7 @@ class DbBrowser(Gtk.Box):
         self._ctx_schema = None
         self._ctx_table = None
         self._ctx_item_type = None
+        self._expansion_snapshot = None
 
         icon_renderer = Gtk.CellRendererPixbuf()
         text_renderer = Gtk.CellRendererText()
@@ -174,6 +175,42 @@ class DbBrowser(Gtk.Box):
         for path in paths:
             self._tree.expand_row(path, False)
 
+    def _snapshot_expansion(self):
+        """Return a set of (schema, label) keys for currently expanded nodes."""
+        keys = set()
+        def visit(_tree, path):
+            it = self._filter.get_iter(path)
+            if it is None:
+                return
+            schema = self._filter.get_value(it, COL_SCHEMA)
+            label  = self._filter.get_value(it, COL_LABEL)
+            keys.add((schema, label))
+        self._tree.map_expanded_rows(visit)
+        return keys
+
+    def _restore_expansion(self, keys):
+        """Re-expand nodes whose (schema, label) key is in *keys*."""
+        if not keys:
+            return
+        it = self._store.get_iter_first()
+        while it:
+            self._restore_expansion_node(it, keys)
+            it = self._store.iter_next(it)
+
+    def _restore_expansion_node(self, it, keys):
+        schema = self._store.get_value(it, COL_SCHEMA)
+        label  = self._store.get_value(it, COL_LABEL)
+        if (schema, label) in keys:
+            path = self._store.get_path(it)
+            # Convert store path to filter path before expanding
+            fpath = self._filter.convert_child_path_to_path(path)
+            if fpath:
+                self._tree.expand_row(fpath, False)
+        child = self._store.iter_children(it)
+        while child:
+            self._restore_expansion_node(child, keys)
+            child = self._store.iter_next(child)
+
     def clear(self):
         self._load_gen += 1
         self._loading_spinner.stop()
@@ -186,6 +223,7 @@ class DbBrowser(Gtk.Box):
         self._load_gen += 1
         gen = self._load_gen
         self._saved_expansion = None
+        self._expansion_snapshot = self._snapshot_expansion()
         self._store.clear()
         self._search_entry.set_text('')
         self._loading_bar.set_visible(True)
@@ -362,6 +400,10 @@ class DbBrowser(Gtk.Box):
 
         self._saved_expansion = None
         self._search_entry.set_visible(True)
+        snapshot = getattr(self, '_expansion_snapshot', None)
+        if snapshot:
+            self._restore_expansion(snapshot)
+            self._expansion_snapshot = None
 
     def _show_error(self, error_msg, gen):
         if gen != self._load_gen:
