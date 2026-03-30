@@ -1,29 +1,31 @@
 #!/usr/bin/env bash
-# Usage: ./scripts/release.sh <version> [--skip-flatpak] [--skip-appimage] [--skip-deb] [--skip-rpm] [--skip-github]
+# Usage: ./scripts/release.sh <version> [--skip-flatpak] [--skip-appimage] [--skip-deb] [--skip-rpm] [--skip-pacman] [--skip-aur] [--skip-github]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-# Use venv meson/ninja if system ones aren't on PATH
-[[ -f "$ROOT/.venv/bin/meson" ]] && export PATH="$ROOT/.venv/bin:$PATH"
+# Use venv tools (pip, meson/ninja) if available
+[[ -d "$ROOT/.venv/bin" ]] && export PATH="$ROOT/.venv/bin:$PATH"
 
 # ── Args ──────────────────────────────────────────────────────────────────────
 
 VERSION="${1:-}"
 if [[ -z "$VERSION" ]]; then
-    echo "Usage: $0 <version> [--skip-flatpak] [--skip-appimage] [--skip-deb] [--skip-rpm] [--skip-github]"
+    echo "Usage: $0 <version> [--skip-flatpak] [--skip-appimage] [--skip-deb] [--skip-rpm] [--skip-pacman] [--skip-aur] [--skip-github]"
     exit 1
 fi
 shift
 
-DO_FLATPAK=1 DO_APPIMAGE=1 DO_DEB=1 DO_RPM=1 DO_GITHUB=1
+DO_FLATPAK=1 DO_APPIMAGE=1 DO_DEB=1 DO_RPM=1 DO_PACMAN=1 DO_AUR=1 DO_GITHUB=1
 for arg in "$@"; do
     case "$arg" in
         --skip-flatpak)  DO_FLATPAK=0  ;;
         --skip-appimage) DO_APPIMAGE=0 ;;
         --skip-deb)      DO_DEB=0      ;;
         --skip-rpm)      DO_RPM=0      ;;
+        --skip-pacman)   DO_PACMAN=0   ;;
+        --skip-aur)      DO_AUR=0      ;;
         --skip-github)   DO_GITHUB=0   ;;
     esac
 done
@@ -46,6 +48,9 @@ check() {
 [[ $DO_APPIMAGE == 1 ]] && check appimagetool    "download from https://github.com/AppImage/appimagetool/releases"
 [[ $DO_DEB      == 1 ]] && check fpm             "sudo gem install fpm"
 [[ $DO_RPM      == 1 ]] && check fpm             "sudo gem install fpm"
+[[ $DO_PACMAN   == 1 ]] && check fpm             "sudo gem install fpm"
+[[ $DO_AUR      == 1 ]] && check makepkg        "install base-devel (Arch only)"
+[[ $DO_AUR      == 1 ]] && check git            "sudo apt install git"
 [[ $DO_GITHUB   == 1 ]] && check gh              "sudo apt install gh"
 
 # ── 1. Patch version in meson.build ──────────────────────────────────────────
@@ -68,7 +73,7 @@ for f in "$ROOT"/src/*.py; do
 done
 
 # Vendor psycopg (not in most distro repos) into the package
-pip3 install --quiet --target="$STAGING/usr/local/share/tusk-gnome/vendor" "psycopg[binary]"
+python3 -m pip install --quiet --target="$STAGING/usr/local/share/tusk-gnome/vendor" "psycopg[binary]"
 
 # Launcher script
 mkdir -p "$STAGING/usr/local/bin"
@@ -210,7 +215,74 @@ else
     skip ".rpm"
 fi
 
-# ── 7. GitHub release ─────────────────────────────────────────────────────────
+# ── 7. .pkg.tar.zst (Arch / CachyOS) ─────────────────────────────────────────
+
+if [[ $DO_PACMAN == 1 ]]; then
+    log "Building Arch package (.pkg.tar.zst)"
+    fpm \
+        -s dir \
+        -t pacman \
+        -n tusk-gnome \
+        -v "$VERSION" \
+        --architecture any \
+        --description "PostgreSQL client for GNOME" \
+        --url "https://shapemachine.xyz/tusk" \
+        --maintainer "Shape Machine <tusk.gnome@shapemachine.xyz>" \
+        --depends "python" \
+        --depends "python-gobject" \
+        --depends "gtk4" \
+        --depends "libadwaita" \
+        --depends "python-keyring" \
+        --depends "gtksourceview5" \
+        --depends "python-paramiko" \
+        --package "$DIST/tusk-gnome-$VERSION-any.pkg.tar.zst" \
+        -C "$STAGING" \
+        usr
+
+    ok "Arch package → $DIST/tusk-gnome-$VERSION-any.pkg.tar.zst"
+else
+    skip "Arch package"
+fi
+
+# ── 8. AUR (tusk-gnome-bin) ───────────────────────────────────────────────────
+
+if [[ $DO_AUR == 1 ]]; then
+    log "Publishing AUR package (tusk-gnome-bin)"
+
+    PKG_FILE="$DIST/tusk-gnome-$VERSION-any.pkg.tar.zst"
+    if [[ ! -f "$PKG_FILE" ]]; then
+        echo "✗ AUR publish requires the pacman package — re-run without --skip-pacman"
+        exit 1
+    fi
+
+    SHA256=$(sha256sum "$PKG_FILE" | awk '{print $1}')
+
+    AUR_TMP=$(mktemp -d)
+    trap 'rm -rf "$AUR_TMP"' EXIT
+
+    log "Cloning AUR repo"
+    git clone ssh://aur@aur.archlinux.org/tusk-gnome-bin.git "$AUR_TMP"
+
+    # Substitute version and checksum into PKGBUILD template
+    # pkgver cannot contain hyphens — replace with dots
+    PKGVER="${VERSION//-/.}"
+    sed "s/@VERSION@/$VERSION/g; s/@PKGVER@/$PKGVER/g; s/@SHA256SUM@/$SHA256/g" \
+        "$ROOT/packaging/aur/PKGBUILD" > "$AUR_TMP/PKGBUILD"
+
+    # Generate .SRCINFO
+    (cd "$AUR_TMP" && makepkg --printsrcinfo > .SRCINFO)
+
+    # Commit and push
+    git -C "$AUR_TMP" add PKGBUILD .SRCINFO
+    git -C "$AUR_TMP" commit -m "Update to v$VERSION"
+    git -C "$AUR_TMP" push
+
+    ok "AUR published → https://aur.archlinux.org/packages/tusk-gnome-bin"
+else
+    skip "AUR"
+fi
+
+# ── 9. GitHub release ─────────────────────────────────────────────────────────
 
 if [[ $DO_GITHUB == 1 ]]; then
     log "Publishing GitHub release v$VERSION"

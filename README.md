@@ -6,10 +6,10 @@
 <p align="center">A minimal, clean PostgreSQL client for GNOME.</p>
 
 <p align="center">
-  <a href="https://github.com/Shape-Machine/tusk-gnome/releases/latest/download/xyz.shapemachine.tusk-gnome-2026.03.23-00.flatpak"><img src="https://img.shields.io/badge/Download-Flatpak-4A90D9?style=for-the-badge&logo=flatpak" alt="Download Flatpak"/></a>
-  <a href="https://github.com/Shape-Machine/tusk-gnome/releases/latest/download/Tusk-2026.03.23-00-x86_64.AppImage"><img src="https://img.shields.io/badge/Download-AppImage-blue?style=for-the-badge&logo=linux" alt="Download AppImage"/></a>
-  <a href="https://github.com/Shape-Machine/tusk-gnome/releases/latest/download/tusk-gnome-2026.03.23-00.deb"><img src="https://img.shields.io/badge/Download-.deb-orange?style=for-the-badge&logo=debian" alt="Download .deb"/></a>
-  <a href="https://github.com/Shape-Machine/tusk-gnome/releases/latest/download/tusk-gnome-2026.03.23-00.rpm"><img src="https://img.shields.io/badge/Download-.rpm-red?style=for-the-badge&logo=fedora" alt="Download .rpm"/></a>
+  <a href="https://github.com/Shape-Machine/tusk-gnome/releases/latest/download/xyz.shapemachine.tusk-gnome-2026.03.30-00.flatpak"><img src="https://img.shields.io/badge/Download-Flatpak-4A90D9?style=for-the-badge&logo=flatpak" alt="Download Flatpak"/></a>
+  <a href="https://github.com/Shape-Machine/tusk-gnome/releases/latest/download/Tusk-2026.03.30-00-x86_64.AppImage"><img src="https://img.shields.io/badge/Download-AppImage-blue?style=for-the-badge&logo=linux" alt="Download AppImage"/></a>
+  <a href="https://github.com/Shape-Machine/tusk-gnome/releases/latest/download/tusk-gnome-2026.03.30-00.deb"><img src="https://img.shields.io/badge/Download-.deb-orange?style=for-the-badge&logo=debian" alt="Download .deb"/></a>
+  <a href="https://github.com/Shape-Machine/tusk-gnome/releases/latest/download/tusk-gnome-2026.03.30-00.rpm"><img src="https://img.shields.io/badge/Download-.rpm-red?style=for-the-badge&logo=fedora" alt="Download .rpm"/></a>
 </p>
 
 ---
