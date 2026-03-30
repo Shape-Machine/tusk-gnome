@@ -381,14 +381,18 @@ class DbBrowser(Gtk.Box):
                 'folder-symbolic', schema, 'schema', conn, schema, ''
             ])
 
+            tables_it = self._store.append(schema_it, [
+                'x-office-spreadsheet-symbolic', 'Tables', 'group', conn, schema, ''
+            ])
             if items['tables']:
-                tables_it = self._store.append(schema_it, [
-                    'x-office-spreadsheet-symbolic', 'Tables', 'group', conn, schema, ''
-                ])
                 for table in items['tables']:
                     self._store.append(tables_it, [
                         'x-office-spreadsheet-symbolic', table, 'table', conn, schema, table
                     ])
+            else:
+                self._store.append(tables_it, [
+                    'dialog-information-symbolic', 'No tables in this schema', 'info', conn, schema, ''
+                ])
 
             views_it = self._store.append(schema_it, [
                 'view-grid-symbolic', 'Views', 'group', conn, schema, ''
