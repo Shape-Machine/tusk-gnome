@@ -21,6 +21,10 @@ class DbBrowser(Gtk.Box):
             GObject.SignalFlags.RUN_FIRST, None,
             (GObject.TYPE_PYOBJECT, str),  # conn, new_dbname
         ),
+        'drop-database-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str),  # conn, dbname
+        ),
         'table-selected': (
             GObject.SignalFlags.RUN_FIRST, None,
             (GObject.TYPE_PYOBJECT, str, str, str),  # conn, schema, table, item_type
@@ -107,6 +111,16 @@ class DbBrowser(Gtk.Box):
             'notify::selected', self._on_db_selected
         )
         db_switcher_bar.append(self._db_dropdown)
+
+        db_menu = Gio.Menu()
+        db_menu.append('Drop Database…', 'dbmenu.drop-database')
+        self._db_menu_btn = Gtk.MenuButton()
+        self._db_menu_btn.set_icon_name('view-more-symbolic')
+        self._db_menu_btn.set_menu_model(db_menu)
+        self._db_menu_btn.add_css_class('flat')
+        self._db_menu_btn.set_valign(Gtk.Align.CENTER)
+        self._db_menu_btn.set_tooltip_text('Database options')
+        db_switcher_bar.append(self._db_menu_btn)
 
         self.append(db_switcher_bar)
 
@@ -306,6 +320,21 @@ class DbBrowser(Gtk.Box):
         if self._last_conn and new_db != self._last_conn.get('database', ''):
             self.emit('database-switched', self._last_conn, new_db)
 
+    def _update_db_menu_actions(self):
+        """Rebuild the action group for the database menu button."""
+        ag = Gio.SimpleActionGroup()
+        action = Gio.SimpleAction.new('drop-database', None)
+        action.connect('activate', self._on_drop_database_activated)
+        ag.add_action(action)
+        self.insert_action_group('dbmenu', ag)
+
+    def _on_drop_database_activated(self, _action, _param):
+        if self._last_conn is None:
+            return
+        dbname = self._last_conn.get('database', '')
+        if dbname:
+            self.emit('drop-database-requested', self._last_conn, dbname)
+
     def clear(self):
         self._load_gen += 1
         self._loading_spinner.stop()
@@ -330,6 +359,7 @@ class DbBrowser(Gtk.Box):
         self._last_conn = conn
         self._read_only = conn.get('read_only', False)
         self._new_schema_btn.set_visible(not self._read_only)
+        self._db_menu_btn.set_visible(not self._read_only)
         self._saved_expansion = None
         self._expansion_snapshot = self._snapshot_expansion()
         hint = getattr(self, '_rename_hint', None)
@@ -475,6 +505,7 @@ class DbBrowser(Gtk.Box):
         self._db_dropdown.set_selected(selected_idx)
         self._db_switch_inhibit = False
         self._db_switcher_bar.set_visible(bool(all_databases))
+        self._update_db_menu_actions()
 
         # Show schema warning if default schema not found
         if schema_warning:
