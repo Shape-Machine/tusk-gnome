@@ -531,7 +531,7 @@ class DbBrowser(Gtk.Box):
             'create-table-requested', self._ctx_conn, self._ctx_schema
         ))
         ag.add_action(action)
-        self._tree.insert_action_group('browser', ag)
+        self.insert_action_group('browser', ag)
 
         menu = Gio.Menu()
         menu.append('Create Table…', 'browser.create-table')
@@ -557,7 +557,7 @@ class DbBrowser(Gtk.Box):
         add_action('drop-schema', lambda: self.emit(
             'drop-schema-requested', self._ctx_conn, self._ctx_schema
         ))
-        self._tree.insert_action_group('schm', ag)
+        self.insert_action_group('schm', ag)
 
         section1 = Gio.Menu()
         section1.append('Create Table…', 'schm.create-table')
@@ -579,7 +579,7 @@ class DbBrowser(Gtk.Box):
             'create-view-requested', self._ctx_conn, self._ctx_schema
         ))
         ag.add_action(action)
-        self._tree.insert_action_group('views', ag)
+        self.insert_action_group('views', ag)
 
         menu = Gio.Menu()
         menu.append('New View…', 'views.create-view')
@@ -626,7 +626,7 @@ class DbBrowser(Gtk.Box):
             self._ctx_table, self._ctx_item_type
         ))
 
-        self._tree.insert_action_group('tbl', ag)
+        self.insert_action_group('tbl', ag)
 
         section1 = Gio.Menu()
         section1.append('Create Table…', 'tbl.create-table')
