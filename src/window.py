@@ -271,6 +271,7 @@ class TuskWindow(Adw.ApplicationWindow):
         self._browser.connect('drop-schema-requested', self._on_drop_schema_requested)
         self._browser.connect('create-view-requested', self._on_create_view_requested)
         self._browser.connect('database-switched', self._on_database_switched)
+        self._browser.connect('drop-database-requested', self._on_drop_database_requested)
         sidebar_paned.set_start_child(self._browser)
 
         self._file_explorer = FileExplorer()
@@ -512,6 +513,66 @@ class TuskWindow(Adw.ApplicationWindow):
             label += '  🔒'
         self._active_conn_label.set_label(f'Connected: {label} — {new_dbname}')
 
+        self._browser.load(new_conn)
+
+    def _on_drop_database_requested(self, _browser, conn, dbname):
+        dialog = Adw.AlertDialog(
+            heading=f'Drop database "{dbname}"?',
+            body='All data in this database will be permanently deleted. This cannot be undone.',
+        )
+        dialog.add_response('cancel', 'Cancel')
+        dialog.add_response('drop', 'Drop Database')
+        dialog.set_response_appearance('drop', Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response('cancel')
+        dialog.set_close_response('cancel')
+        dialog.connect('response', self._on_drop_database_response, conn, dbname)
+        dialog.present(self)
+
+    def _on_drop_database_response(self, _dialog, response, conn, dbname):
+        if response != 'drop':
+            return
+
+        def run():
+            try:
+                import psycopg
+                from psycopg import sql as pgsql
+                from tunnel import open_db
+
+                # Must not be connected to the database we're dropping.
+                # Connect to 'postgres' as a safe fallback.
+                fallback_conn = {**conn, 'database': 'postgres'}
+                with open_db(fallback_conn, autocommit=True) as db:
+                    with db.cursor() as cur:
+                        cur.execute(
+                            pgsql.SQL('DROP DATABASE {}').format(pgsql.Identifier(dbname))
+                        )
+
+                GLib.idle_add(self._after_drop_database, conn, dbname)
+            except Exception as e:
+                GLib.idle_add(self._show_browser_error, 'Drop Database Failed', str(e))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _after_drop_database(self, conn, dropped_dbname):
+        # Close all table tabs from the dropped database
+        if self._active_conn_id:
+            prefix = f'table:{self._active_conn_id}:'
+            pages = self._tab_view.get_pages()
+            to_close = [
+                pages.get_item(i)
+                for i in range(pages.get_n_items())
+                if getattr(pages.get_item(i), '_tab_id', '').startswith(prefix)
+            ]
+            for page in to_close:
+                self._tab_view.close_page(page)
+
+        # Switch active connection to postgres fallback and reload browser
+        new_conn = {**conn, 'database': 'postgres'}
+        self._active_conn = new_conn
+        label = new_conn['name']
+        if new_conn.get('read_only'):
+            label += '  🔒'
+        self._active_conn_label.set_label(f'Connected: {label} — postgres')
         self._browser.load(new_conn)
 
     def _on_disconnect(self, row):
