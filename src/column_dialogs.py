@@ -321,7 +321,7 @@ class AddColumnDialog(Adw.Dialog):
             self._default_row.connect('changed', self._update_preview)
 
             preview_scroll = Gtk.ScrolledWindow()
-            preview_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+            preview_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
             preview_scroll.set_min_content_height(56)
             preview_scroll.set_child(preview_view)
 
@@ -1108,7 +1108,7 @@ class CreateTableDialog(Adw.Dialog):
         self._preview_buf, preview_view = _make_sql_preview_view()
 
         preview_scroll = Gtk.ScrolledWindow()
-        preview_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        preview_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         preview_scroll.set_min_content_height(120)
         preview_scroll.set_child(preview_view)
 
@@ -1183,7 +1183,7 @@ class CreateTableDialog(Adw.Dialog):
     def _get_schema(self):
         if self._schema_combo is not None:
             idx = self._schema_combo.get_selected()
-            return self._schemas[idx] if idx < len(self._schemas) else self._schemas[0]
+            return self._schemas[idx] if 0 <= idx < len(self._schemas) else self._schemas[0]
         return self._schemas[0]
 
     def _add_col_row(self):
@@ -1218,6 +1218,12 @@ class CreateTableDialog(Adw.Dialog):
         pk_btn.add_css_class('flat')
         pk_btn.connect('toggled', self._on_pk_toggled, row)
 
+        default_entry = Gtk.Entry()
+        default_entry.set_placeholder_text('default')
+        default_entry.set_width_chars(7)
+        default_entry.set_tooltip_text('DEFAULT value (optional)')
+        default_entry.connect('changed', self._on_form_changed)
+
         rm_btn = Gtk.Button(icon_name='list-remove-symbolic')
         rm_btn.add_css_class('flat')
         rm_btn.set_tooltip_text('Remove column')
@@ -1228,6 +1234,7 @@ class CreateTableDialog(Adw.Dialog):
         box.append(type_btn)
         box.append(null_btn)
         box.append(pk_btn)
+        box.append(default_entry)
         box.append(rm_btn)
         row.set_child(box)
 
@@ -1235,6 +1242,7 @@ class CreateTableDialog(Adw.Dialog):
         row._type_entry = type_entry
         row._null_btn = null_btn
         row._pk_btn = pk_btn
+        row._default_entry = default_entry
 
         self._col_list.append(row)
         self._col_rows.append(row)
@@ -1305,11 +1313,14 @@ class CreateTableDialog(Adw.Dialog):
             pg_type = row._type_entry.get_text().strip() or 'text'
             nullable = row._null_btn.get_active()
             is_pk = row._pk_btn.get_active()
+            default = row._default_entry.get_text().strip()
             if not name:
                 continue
             parts = [f'{qi(name)} {pg_type}']
             if not nullable:
                 parts.append('NOT NULL')
+            if default:
+                parts.append(f'DEFAULT {default}')
             col_defs.append('    ' + ' '.join(parts))
             if is_pk:
                 pk_col = name
@@ -1354,5 +1365,14 @@ class CreateTableDialog(Adw.Dialog):
                     dlg.present(self)
                     return
         ddl = self._generate_ddl()
-        self.close()
-        self._on_save(ddl)
+        self._create_btn.set_sensitive(False)
+        self._on_save(ddl, self._on_execute_done)
+
+    def _on_execute_done(self, error=None):
+        if error is None:
+            self.close()
+        else:
+            self._create_btn.set_sensitive(True)
+            err_dlg = Adw.AlertDialog(heading='Create Table Failed', body=error)
+            err_dlg.add_response('ok', 'OK')
+            err_dlg.present(self)

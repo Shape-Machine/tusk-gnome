@@ -624,7 +624,7 @@ class TuskWindow(Adw.ApplicationWindow):
         if not schemas:
             schemas = [schema]
 
-        def on_save(ddl_sql):
+        def on_save(ddl_sql, on_done):
             def run():
                 try:
                     import psycopg
@@ -638,15 +638,11 @@ class TuskWindow(Adw.ApplicationWindow):
                             cur.execute(ddl_sql)
                         db.commit()
                     GLib.idle_add(self._browser.load, conn)
+                    GLib.idle_add(on_done)
                 except Exception as e:
-                    GLib.idle_add(self._show_ddl_error, 'Create Table Failed', str(e))
+                    GLib.idle_add(on_done, str(e))
             threading.Thread(target=run, daemon=True).start()
 
         dlg = CreateTableDialog(schemas, schema, on_save)
         dlg.present(self)
-
-    def _show_ddl_error(self, heading, body):
-        dialog = Adw.AlertDialog(heading=heading, body=body)
-        dialog.add_response('ok', 'OK')
-        dialog.present(self)
 
