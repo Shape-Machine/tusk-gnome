@@ -63,6 +63,25 @@ class ConnectionStore:
         self._save()
         return conn
 
+    def add_after(self, after_id, conn):
+        """Like add(), but inserts the new connection immediately after after_id."""
+        if 'id' not in conn:
+            conn['id'] = str(uuid.uuid4())
+        password = conn.pop('password', '')
+        ssh_passphrase = conn.pop('ssh_passphrase', '')
+        try:
+            keyring.set_password(KEYRING_SERVICE, conn['id'], password)
+            keyring.set_password(KEYRING_SERVICE, _ssh_key(conn['id']), ssh_passphrase)
+        except Exception as e:
+            raise KeyringUnavailableError(str(e)) from e
+        idx = next((i for i, c in enumerate(self._connections) if c['id'] == after_id), None)
+        if idx is not None:
+            self._connections.insert(idx + 1, conn)
+        else:
+            self._connections.append(conn)
+        self._save()
+        return conn
+
     def remove(self, conn_id):
         try:
             keyring.delete_password(KEYRING_SERVICE, conn_id)

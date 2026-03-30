@@ -17,15 +17,22 @@ class ConnectionDialog(Adw.Window):
         'connection-saved': (GObject.SignalFlags.RUN_FIRST, None, (GObject.TYPE_PYOBJECT,))
     }
 
-    def __init__(self, parent, connection=None):
+    def __init__(self, parent, connection=None, duplicate=False):
+        if duplicate:
+            title = 'Duplicate Connection'
+        elif connection is None:
+            title = 'New Connection'
+        else:
+            title = 'Edit Connection'
         super().__init__(
-            title='New Connection' if connection is None else 'Edit Connection',
+            title=title,
             transient_for=parent,
             modal=True,
             default_width=440,
             resizable=False,
         )
         self._connection = connection
+        self._duplicate = duplicate
         self._build_ui()
 
     def _build_ui(self):
@@ -54,6 +61,52 @@ class ConnectionDialog(Adw.Window):
         self._host_row = Adw.EntryRow(title='Host')
         self._port_row = Adw.EntryRow(title='Port')
         self._database_row = Adw.EntryRow(title='Database')
+
+        # Browse databases button
+        browse_db_btn = Gtk.Button(icon_name='folder-symbolic')
+        browse_db_btn.add_css_class('flat')
+        browse_db_btn.set_valign(Gtk.Align.CENTER)
+        browse_db_btn.set_tooltip_text('Browse available databases…')
+        browse_db_btn.connect('clicked', self._on_browse_database)
+        self._database_row.add_suffix(browse_db_btn)
+
+        # Popover for database list
+        self._db_popover = Gtk.Popover()
+        self._db_popover.set_parent(browse_db_btn)
+        self._db_popover.set_has_arrow(True)
+
+        db_popover_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        db_popover_box.set_margin_top(6)
+        db_popover_box.set_margin_bottom(6)
+        db_popover_box.set_margin_start(6)
+        db_popover_box.set_margin_end(6)
+
+        self._db_browse_spinner = Gtk.Spinner()
+        self._db_browse_spinner.set_halign(Gtk.Align.CENTER)
+
+        self._db_browse_error = Gtk.Label()
+        self._db_browse_error.add_css_class('error')
+        self._db_browse_error.set_wrap(True)
+        self._db_browse_error.set_max_width_chars(28)
+        self._db_browse_error.set_xalign(0)
+        self._db_browse_error.set_visible(False)
+
+        self._db_browse_list = Gtk.ListBox()
+        self._db_browse_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._db_browse_list.add_css_class('boxed-list')
+        self._db_browse_list.connect('row-activated', self._on_db_row_activated)
+        self._db_browse_list.set_visible(False)
+
+        db_scroll = Gtk.ScrolledWindow()
+        db_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        db_scroll.set_max_content_height(200)
+        db_scroll.set_propagate_natural_height(True)
+        db_scroll.set_child(self._db_browse_list)
+
+        db_popover_box.append(self._db_browse_spinner)
+        db_popover_box.append(self._db_browse_error)
+        db_popover_box.append(db_scroll)
+        self._db_popover.set_child(db_popover_box)
 
         details_group.add(self._host_row)
         details_group.add(self._port_row)
@@ -114,7 +167,10 @@ class ConnectionDialog(Adw.Window):
         ssh_group.add(self._ssh_row)
 
         # ── Populate values ───────────────────────────────────────────────────
-        self._name_row.set_text(conn['name'] if conn else '')
+        if conn and self._duplicate:
+            self._name_row.set_text(conn['name'] + ' copy')
+        else:
+            self._name_row.set_text(conn['name'] if conn else '')
         self._host_row.set_text(conn['host'] if conn else 'localhost')
         self._port_row.set_text(str(conn['port']) if conn else '5432')
         self._database_row.set_text(conn['database'] if conn else 'postgres')
@@ -215,6 +271,72 @@ class ConnectionDialog(Adw.Window):
     def _on_key_chosen(self, dialog, response):
         if response == Gtk.ResponseType.ACCEPT:
             self._ssh_key_row.set_text(dialog.get_file().get_path())
+
+    def _on_browse_database(self, _btn):
+        # Clear previous state
+        child = self._db_browse_list.get_first_child()
+        while child:
+            next_child = child.get_next_sibling()
+            self._db_browse_list.remove(child)
+            child = next_child
+        self._db_browse_list.set_visible(False)
+        self._db_browse_error.set_visible(False)
+        self._db_browse_spinner.start()
+        self._db_popover.popup()
+
+        params = self._current_params()
+        params['database'] = 'postgres'
+        threading.Thread(target=self._fetch_databases, args=(params,), daemon=True).start()
+
+    def _fetch_databases(self, params):
+        try:
+            import psycopg
+            from tunnel import open_tunnel
+
+            with open_tunnel(params) as (host, port):
+                with psycopg.connect(
+                    host=host,
+                    port=port,
+                    dbname='postgres',
+                    user=params['username'],
+                    password=params['password'],
+                    connect_timeout=10,
+                ) as db:
+                    with db.cursor() as cur:
+                        cur.execute("""
+                            SELECT datname FROM pg_database
+                            WHERE datistemplate = false
+                              AND datname NOT IN ('template0', 'template1')
+                              AND has_database_privilege(current_user, datname, 'CONNECT')
+                            ORDER BY datname
+                        """)
+                        databases = [r[0] for r in cur.fetchall()]
+            GLib.idle_add(self._on_databases_fetched, databases)
+        except Exception as e:
+            GLib.idle_add(self._on_databases_fetch_error, str(e))
+
+    def _on_databases_fetched(self, databases):
+        self._db_browse_spinner.stop()
+        for name in databases:
+            row = Gtk.ListBoxRow()
+            row._dbname = name
+            label = Gtk.Label(label=name, xalign=0)
+            label.set_margin_top(6)
+            label.set_margin_bottom(6)
+            label.set_margin_start(8)
+            label.set_margin_end(8)
+            row.set_child(label)
+            self._db_browse_list.append(row)
+        self._db_browse_list.set_visible(bool(databases))
+
+    def _on_databases_fetch_error(self, error):
+        self._db_browse_spinner.stop()
+        self._db_browse_error.set_label(error)
+        self._db_browse_error.set_visible(True)
+
+    def _on_db_row_activated(self, _listbox, row):
+        self._database_row.set_text(row._dbname)
+        self._db_popover.popdown()
 
     def _current_params(self):
         try:
@@ -318,7 +440,9 @@ class ConnectionDialog(Adw.Window):
             ssh_port = 22
 
         conn = {
-            'id': self._connection['id'] if self._connection else str(uuid.uuid4()),
+            'id': str(uuid.uuid4()) if self._duplicate else (
+                self._connection['id'] if self._connection else str(uuid.uuid4())
+            ),
             'name': name,
             'host': host,
             'port': port,
