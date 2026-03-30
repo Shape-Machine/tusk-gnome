@@ -1089,49 +1089,46 @@ class CreateTableDialog(Adw.Dialog):
         preview_frame = Gtk.Frame()
         preview_frame.set_child(preview_scroll)
 
-        preview_btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        preview_btn_box.set_halign(Gtk.Align.END)
-        preview_btn_box.set_margin_top(4)
-        preview_btn_box.set_margin_bottom(8)
-        preview_btn_box.set_margin_end(8)
-
-        copy_btn = Gtk.Button(label='Copy')
-        copy_btn.set_tooltip_text('Copy SQL to clipboard')
-        copy_btn.connect('clicked', self._copy_preview)
-        preview_btn_box.append(copy_btn)
-
-        preview_inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        preview_inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         preview_inner.set_margin_top(8)
         preview_inner.set_margin_start(8)
         preview_inner.set_margin_end(8)
+        preview_inner.set_margin_bottom(8)
         preview_inner.append(preview_frame)
-        preview_inner.append(preview_btn_box)
 
         self._preview_revealer = Gtk.Revealer()
         self._preview_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_UP)
         self._preview_revealer.set_reveal_child(False)
         self._preview_revealer.set_child(preview_inner)
 
-        # Toggle row pinned to the bottom bar
+        # Toggle bar — entire row is clickable via GestureClick on the box
         toggle_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         toggle_row.set_margin_start(12)
         toggle_row.set_margin_end(8)
-        toggle_row.set_margin_top(6)
-        toggle_row.set_margin_bottom(6)
+        toggle_row.set_margin_top(2)
+        toggle_row.set_margin_bottom(2)
 
         preview_toggle_lbl = Gtk.Label(label='Preview SQL')
         preview_toggle_lbl.set_xalign(0)
-        preview_toggle_lbl.set_hexpand(True)
         preview_toggle_lbl.add_css_class('caption')
         toggle_row.append(preview_toggle_lbl)
 
+        copy_btn = Gtk.Button(label='Copy')
+        copy_btn.set_tooltip_text('Copy SQL to clipboard')
+        copy_btn.add_css_class('flat')
+        copy_btn.connect('clicked', self._copy_preview)
+        toggle_row.append(copy_btn)
+
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        toggle_row.append(spacer)
+
         self._preview_chevron = Gtk.Image.new_from_icon_name('pan-up-symbolic')
-        toggle_btn = Gtk.Button()
-        toggle_btn.set_child(self._preview_chevron)
-        toggle_btn.add_css_class('flat')
-        toggle_btn.set_tooltip_text('Toggle SQL preview')
-        toggle_btn.connect('clicked', self._toggle_preview)
-        toggle_row.append(toggle_btn)
+        toggle_row.append(self._preview_chevron)
+
+        row_gesture = Gtk.GestureClick(button=1)
+        row_gesture.connect('released', lambda g, _n, _x, _y: self._toggle_preview(g))
+        toggle_row.add_controller(row_gesture)
 
         bottom_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         bottom_box.append(Gtk.Separator())
@@ -1150,7 +1147,7 @@ class CreateTableDialog(Adw.Dialog):
         # Start with one empty column row
         self._add_col_row()
 
-    def _toggle_preview(self, _btn):
+    def _toggle_preview(self, _):
         revealed = not self._preview_revealer.get_reveal_child()
         self._preview_revealer.set_reveal_child(revealed)
         self._preview_chevron.set_from_icon_name(
