@@ -270,6 +270,7 @@ class TuskWindow(Adw.ApplicationWindow):
         self._browser.connect('rename-schema-requested', self._on_rename_schema_requested)
         self._browser.connect('drop-schema-requested', self._on_drop_schema_requested)
         self._browser.connect('create-view-requested', self._on_create_view_requested)
+        self._browser.connect('database-switched', self._on_database_switched)
         sidebar_paned.set_start_child(self._browser)
 
         self._file_explorer = FileExplorer()
@@ -489,6 +490,29 @@ class TuskWindow(Adw.ApplicationWindow):
             return
         self._set_active_conn(conn)
         self._browser.load(conn)
+
+    def _on_database_switched(self, _browser, conn, new_dbname):
+        # Close all table tabs from the current database before switching
+        if self._active_conn_id:
+            prefix = f'table:{self._active_conn_id}:'
+            pages = self._tab_view.get_pages()
+            to_close = [
+                pages.get_item(i)
+                for i in range(pages.get_n_items())
+                if getattr(pages.get_item(i), '_tab_id', '').startswith(prefix)
+            ]
+            for page in to_close:
+                self._tab_view.close_page(page)
+
+        new_conn = {**conn, 'database': new_dbname}
+        self._active_conn = new_conn
+
+        label = new_conn['name']
+        if new_conn.get('read_only'):
+            label += '  🔒'
+        self._active_conn_label.set_label(f'Connected: {label} — {new_dbname}')
+
+        self._browser.load(new_conn)
 
     def _on_disconnect(self, row):
         if self._active_conn_id == row._conn['id']:
