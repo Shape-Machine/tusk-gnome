@@ -122,6 +122,10 @@ class DbBrowser(Gtk.Box):
         self._db_menu_btn.set_tooltip_text('Database options')
         db_switcher_bar.append(self._db_menu_btn)
 
+        # Insert the action group once at build time so the MenuButton
+        # can always resolve 'dbmenu.drop-database'.
+        self._setup_db_menu_actions()
+
         self.append(db_switcher_bar)
 
         # Schema warning bar
@@ -320,8 +324,8 @@ class DbBrowser(Gtk.Box):
         if self._last_conn and new_db != self._last_conn.get('database', ''):
             self.emit('database-switched', self._last_conn, new_db)
 
-    def _update_db_menu_actions(self):
-        """Rebuild the action group for the database menu button."""
+    def _setup_db_menu_actions(self):
+        """Insert the database menu action group once at build time."""
         ag = Gio.SimpleActionGroup()
         action = Gio.SimpleAction.new('drop-database', None)
         action.connect('activate', self._on_drop_database_activated)
@@ -505,7 +509,6 @@ class DbBrowser(Gtk.Box):
         self._db_dropdown.set_selected(selected_idx)
         self._db_switch_inhibit = False
         self._db_switcher_bar.set_visible(bool(all_databases))
-        self._update_db_menu_actions()
 
         # Show schema warning if default schema not found
         if schema_warning:
