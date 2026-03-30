@@ -352,7 +352,7 @@ class TuskWindow(Adw.ApplicationWindow):
     def _conn_subtitle(conn):
         return f"{conn['host']}:{conn['port']}/{conn['database']}"
 
-    def _add_connection_row(self, conn):
+    def _add_connection_row(self, conn, position=-1):
         row = Adw.ActionRow()
         row.set_title(conn['name'])
         row.set_subtitle(self._conn_subtitle(conn))
@@ -378,6 +378,7 @@ class TuskWindow(Adw.ApplicationWindow):
         menu = Gio.Menu()
         menu.append('Disconnect', 'row.disconnect')
         menu.append('Edit', 'row.edit')
+        menu.append('Duplicate', 'row.duplicate')
         menu.append('Delete', 'row.delete')
 
         menu_btn = Gtk.MenuButton()
@@ -397,12 +398,18 @@ class TuskWindow(Adw.ApplicationWindow):
         edit_action = Gio.SimpleAction.new('edit', None)
         edit_action.connect('activate', lambda a, p, r=row: self._on_edit_connection(r))
         ag.add_action(edit_action)
+        duplicate_action = Gio.SimpleAction.new('duplicate', None)
+        duplicate_action.connect('activate', lambda a, p, r=row: self._on_duplicate_connection(r))
+        ag.add_action(duplicate_action)
         delete_action = Gio.SimpleAction.new('delete', None)
         delete_action.connect('activate', lambda a, p, r=row: self._on_delete_connection(r))
         ag.add_action(delete_action)
         row.insert_action_group('row', ag)
 
-        self._conn_list.append(row)
+        if position == -1:
+            self._conn_list.append(row)
+        else:
+            self._conn_list.insert(row, position)
         return row
 
     def _on_add_connection(self, _btn):
@@ -433,6 +440,32 @@ class TuskWindow(Adw.ApplicationWindow):
         dlg = ConnectionDialog(parent=self, connection=row._conn)
         dlg.connect('connection-saved', self._on_connection_updated, row)
         dlg.present()
+
+    def _on_duplicate_connection(self, row):
+        try:
+            conn = self._conn_with_password(row._conn)
+        except KeyringUnavailableError as e:
+            self._show_keyring_error(str(e))
+            return
+        dlg = ConnectionDialog(parent=self, connection=conn, duplicate=True)
+        dlg.connect('connection-saved', self._on_connection_duplicated, row)
+        dlg.present()
+
+    def _on_connection_duplicated(self, _dlg, conn, source_row):
+        try:
+            self._store.add_after(source_row._conn['id'], conn)
+        except KeyringUnavailableError as e:
+            self._show_keyring_error(str(e))
+            return
+        # Find position of source_row in the listbox and insert after it
+        position = 0
+        child = self._conn_list.get_first_child()
+        while child:
+            position += 1
+            if child is source_row:
+                break
+            child = child.get_next_sibling()
+        self._add_connection_row(conn, position=position)
 
     def _on_connection_updated(self, _dlg, conn, old_row):
         try:
