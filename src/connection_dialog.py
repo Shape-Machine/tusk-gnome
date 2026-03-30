@@ -29,7 +29,7 @@ class ConnectionDialog(Adw.Window):
             title=title,
             transient_for=parent,
             modal=True,
-            default_width=440,
+            default_width=820,
             resizable=False,
         )
         self._connection = connection
@@ -49,8 +49,8 @@ class ConnectionDialog(Adw.Window):
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
         content.set_margin_top(12)
         content.set_margin_bottom(20)
-        content.set_margin_start(16)
-        content.set_margin_end(16)
+        content.set_margin_start(20)
+        content.set_margin_end(20)
 
         conn = self._connection
 
@@ -251,13 +251,25 @@ class ConnectionDialog(Adw.Window):
             row.connect('notify::text', self._update_uri_preview)
         self._update_uri_preview()
 
+        # ── 2-column layout ───────────────────────────────────────────────────
+        left_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        left_col.set_hexpand(True)
+        left_col.append(name_group)
+        left_col.append(details_group)
+
+        right_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        right_col.set_hexpand(True)
+        right_col.append(auth_group)
+        right_col.append(options_group)
+        right_col.append(ssh_group)
+
+        two_col = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=20)
+        two_col.append(left_col)
+        two_col.append(right_col)
+
         content.append(uri_group)
-        content.append(name_group)
-        content.append(details_group)
-        content.append(auth_group)
+        content.append(two_col)
         content.append(self._keyring_warning)
-        content.append(options_group)
-        content.append(ssh_group)
 
         # ── Test / Save ───────────────────────────────────────────────────────
         self._test_bar = Gtk.CenterBox()
@@ -272,7 +284,7 @@ class ConnectionDialog(Adw.Window):
         self._test_label = Gtk.Label()
         self._test_label.set_xalign(0)
         self._test_label.set_wrap(True)
-        self._test_label.set_max_width_chars(35)
+        self._test_label.set_max_width_chars(60)
 
         status_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         status_box.set_halign(Gtk.Align.CENTER)
@@ -292,10 +304,7 @@ class ConnectionDialog(Adw.Window):
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroll.set_propagate_natural_height(True)
-
-        clamp = Adw.Clamp(maximum_size=400)
-        clamp.set_child(content)
-        scroll.set_child(clamp)
+        scroll.set_child(content)
         box.append(scroll)
 
         self.set_content(box)
