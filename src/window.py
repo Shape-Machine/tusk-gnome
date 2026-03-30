@@ -434,7 +434,7 @@ class TuskWindow(Adw.ApplicationWindow):
         user = quote(conn['username'], safe='')
         host = conn['host']
         port = conn['port']
-        database = conn['database']
+        database = quote(conn['database'], safe='')
         uri = f'postgresql://{user}@{host}:{port}/{database}'
         Gdk.Display.get_default().get_clipboard().set(uri)
         toast = Adw.Toast(title='URI copied to clipboard')
@@ -456,14 +456,25 @@ class TuskWindow(Adw.ApplicationWindow):
             dialog.present()
             return
 
-        entries, warnings = parse_pgpass(pgpass_path)
+        try:
+            entries, warnings = parse_pgpass(pgpass_path)
+        except Exception as e:
+            dialog = Adw.MessageDialog(
+                transient_for=self,
+                heading='Could Not Read .pgpass',
+                body=str(e),
+            )
+            dialog.add_response('ok', 'OK')
+            dialog.present()
+            return
+
         if not entries:
             dialog = Adw.MessageDialog(
                 transient_for=self,
                 heading='No Importable Entries',
                 body=(
                     '~/.pgpass contains no importable entries. '
-                    'Entries with wildcard hostnames (*) are skipped.'
+                    'Entries with wildcards (*) in any field are skipped.'
                 ),
             )
             dialog.add_response('ok', 'OK')

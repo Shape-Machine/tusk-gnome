@@ -267,7 +267,14 @@ class ConnectionDialog(Adw.Window):
         two_col.append(left_col)
         two_col.append(right_col)
 
+        self._uri_error_label = Gtk.Label()
+        self._uri_error_label.add_css_class('error')
+        self._uri_error_label.set_xalign(0)
+        self._uri_error_label.set_wrap(True)
+        self._uri_error_label.set_visible(False)
+
         content.append(uri_group)
+        content.append(self._uri_error_label)
         content.append(two_col)
         content.append(self._keyring_warning)
 
@@ -332,14 +339,17 @@ class ConnectionDialog(Adw.Window):
                 raise ValueError('URI must start with postgresql:// or postgres://')
             host = parsed.hostname or 'localhost'
             port = parsed.port or 5432
-            database = parsed.path.lstrip('/') or 'postgres'
+            database = unquote(parsed.path.lstrip('/')) or 'postgres'
             username = unquote(parsed.username or '')
             password = unquote(parsed.password or '')
-        except Exception:
+        except Exception as e:
             self._uri_row.add_css_class('error')
+            self._uri_error_label.set_text(str(e))
+            self._uri_error_label.set_visible(True)
             return
 
         self._uri_row.remove_css_class('error')
+        self._uri_error_label.set_visible(False)
         self._host_row.set_text(host)
         self._port_row.set_text(str(port))
         self._database_row.set_text(database)
@@ -357,7 +367,7 @@ class ConnectionDialog(Adw.Window):
             port = int(self._port_row.get_text().strip())
         except ValueError:
             port = 5432
-        database = self._database_row.get_text().strip() or 'database'
+        database = quote(self._database_row.get_text().strip() or 'database', safe='')
         username = self._username_row.get_text().strip()
         if username:
             uri = f'postgresql://{quote(username, safe="")}@{host}:{port}/{database}'

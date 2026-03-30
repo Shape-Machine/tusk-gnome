@@ -42,41 +42,45 @@ def parse_pgpass(path):
     if not os.path.exists(path):
         return entries, warnings
 
-    # Warn if permissions are too open (psql refuses to use it if world-readable)
-    st = os.stat(path)
-    if st.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
-        mode_str = oct(stat.S_IMODE(st.st_mode))
-        warnings.append(
-            f'.pgpass permissions are {mode_str} — they should be 0600. '
-            'Credentials may be exposed to other users on this system.'
-        )
+    try:
+        # Warn if permissions are too open (psql refuses to use it if world-readable)
+        st = os.stat(path)
+        if st.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
+            mode_str = oct(stat.S_IMODE(st.st_mode))
+            warnings.append(
+                f'.pgpass permissions are {mode_str} — they should be 0600. '
+                'Credentials may be exposed to other users on this system.'
+            )
 
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-            fields = _split_pgpass_line(line)
-            if len(fields) != 5:
-                continue
-            hostname, port_str, database, username, password = fields
+        with open(path, encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                fields = _split_pgpass_line(line)
+                if len(fields) != 5:
+                    continue
+                hostname, port_str, database, username, password = fields
 
-            # Skip wildcard hostnames — they can't map to a specific connection
-            if hostname == '*':
-                continue
+                # Skip entries with wildcards in any field — they can't map to a
+                # specific connection without manual completion
+                if '*' in (hostname, port_str, database, username, password):
+                    continue
 
-            try:
-                port = int(port_str) if port_str != '*' else 5432
-            except ValueError:
-                port = 5432
+                try:
+                    port = int(port_str)
+                except ValueError:
+                    port = 5432
 
-            entries.append({
-                'hostname': hostname,
-                'port': port,
-                'database': database if database != '*' else 'postgres',
-                'username': username,
-                'password': password,
-            })
+                entries.append({
+                    'hostname': hostname,
+                    'port': port,
+                    'database': database,
+                    'username': username,
+                    'password': password,
+                })
+    except (OSError, UnicodeDecodeError) as e:
+        warnings.append(f'Could not read ~/.pgpass: {e}')
 
     return entries, warnings
 
