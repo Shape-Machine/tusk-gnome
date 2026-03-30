@@ -607,15 +607,17 @@ class TablePanel(Gtk.Box):
             action.connect('activate', handler)
             ag.add_action(action)
 
-        make_action('change-type', lambda *_: self._on_change_type(_right_clicked_row[0]))
-        make_action('set-default', lambda *_: self._on_set_default(_right_clicked_row[0]))
-        make_action('toggle-null', lambda *_: self._on_toggle_nullable(_right_clicked_row[0]))
-        make_action('set-pk',      lambda *_: self._on_set_primary_key(_right_clicked_row[0]))
-        make_action('drop-column', lambda *_: self._on_drop_column(_right_clicked_row[0]))
+        make_action('change-type',    lambda *_: self._on_change_type(_right_clicked_row[0]))
+        make_action('set-default',    lambda *_: self._on_set_default(_right_clicked_row[0]))
+        make_action('toggle-null',    lambda *_: self._on_toggle_nullable(_right_clicked_row[0]))
+        make_action('set-pk',         lambda *_: self._on_set_primary_key(_right_clicked_row[0]))
+        make_action('rename-column',  lambda *_: self._on_rename_column(_right_clicked_row[0]))
+        make_action('drop-column',    lambda *_: self._on_drop_column(_right_clicked_row[0]))
 
         col_view.insert_action_group('schema', ag)
 
         section1 = Gio.Menu()
+        section1.append('Rename Column…',     'schema.rename-column')
         section1.append('Change Type…',       'schema.change-type')
         section1.append('Set Default…',       'schema.set-default')
         section1.append('Toggle NOT NULL',    'schema.toggle-null')
@@ -900,6 +902,30 @@ class TablePanel(Gtk.Box):
 
         dialog.connect('response', on_response)
         dialog.present(self.get_root())
+
+    def _on_rename_column(self, item):
+        if item is None:
+            return
+        from column_dialogs import RenameDialog
+        conn, schema, table = self._conn, self._current_schema, self._current_table
+        existing_names = [r[0] for r in getattr(self, '_schema_raw_rows', [])]
+
+        def on_rename(new_name):
+            if new_name == item.col_name:
+                return
+            if new_name in existing_names:
+                self._show_edit_error(f'Column "{new_name}" already exists in this table.')
+                return
+            import psycopg
+            from psycopg import sql as pgsql
+            ddl = pgsql.SQL('ALTER TABLE {}.{} RENAME COLUMN {} TO {}').format(
+                pgsql.Identifier(schema), pgsql.Identifier(table),
+                pgsql.Identifier(item.col_name), pgsql.Identifier(new_name),
+            )
+            self._exec_ddl_and_reload_schema(conn, ddl)
+
+        dlg = RenameDialog(item.col_name, on_rename, title='Rename Column')
+        dlg.present(self.get_root())
 
     def _on_set_primary_key(self, item):
         if item is None:
