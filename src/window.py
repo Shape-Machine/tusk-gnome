@@ -1010,6 +1010,7 @@ class TuskWindow(Adw.ApplicationWindow):
                                 pgsql.Identifier(schema), pgsql.Identifier(new_name)
                             ))
                         db.commit()
+                    GLib.idle_add(self._browser.set_rename_hint, schema, new_name)
                     GLib.idle_add(self._browser.load, conn)
                 except Exception as e:
                     GLib.idle_add(self._show_browser_error, 'Rename Schema Failed', str(e))

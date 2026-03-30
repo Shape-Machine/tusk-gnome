@@ -248,12 +248,24 @@ class DbBrowser(Gtk.Box):
         self._search_bar.set_visible(False)
         self._store.clear()
 
+    def set_rename_hint(self, old_schema, new_schema):
+        """Call before load() after a schema rename so expansion state is preserved."""
+        self._rename_hint = (old_schema, new_schema)
+
     def load(self, conn):
         self._load_gen += 1
         gen = self._load_gen
         self._last_conn = conn
         self._saved_expansion = None
         self._expansion_snapshot = self._snapshot_expansion()
+        hint = getattr(self, '_rename_hint', None)
+        if hint:
+            old, new = hint
+            self._expansion_snapshot = {
+                (new if s == old else s, lbl)
+                for s, lbl in self._expansion_snapshot
+            }
+            self._rename_hint = None
         self._store.clear()
         self._search_entry.set_text('')
         self._loading_bar.set_visible(True)
