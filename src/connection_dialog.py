@@ -78,6 +78,12 @@ class ConnectionDialog(Adw.Window):
         self._readonly_row.set_active(conn.get('read_only', False) if conn else False)
         options_group.add(self._readonly_row)
 
+        self._default_schema_row = Adw.EntryRow(title='Default Schema')
+        self._default_schema_row.set_tooltip_text(
+            'Optional. Sets search_path on connect and expands this schema in the browser.'
+        )
+        options_group.add(self._default_schema_row)
+
         # ── SSH Tunnel ────────────────────────────────────────────────────────
         ssh_group = Adw.PreferencesGroup(title='SSH Tunnel')
 
@@ -139,6 +145,7 @@ class ConnectionDialog(Adw.Window):
             ssh_passphrase = ''
             keyring_failed = True
         self._ssh_passphrase_row.set_text(ssh_passphrase)
+        self._default_schema_row.set_text(conn.get('default_schema', '') if conn else '')
 
         self._keyring_warning = Gtk.Label(
             label='Could not load passwords from keyring. Make sure a secrets service is running.'
@@ -226,6 +233,7 @@ class ConnectionDialog(Adw.Window):
             'username': self._username_row.get_text().strip(),
             'password': self._password_row.get_text(),
             'read_only': self._readonly_row.get_active(),
+            'default_schema': self._default_schema_row.get_text().strip(),
             'ssh_enabled': self._ssh_row.get_enable_expansion(),
             'ssh_host': self._ssh_host_row.get_text().strip(),
             'ssh_port': ssh_port,
@@ -315,6 +323,7 @@ class ConnectionDialog(Adw.Window):
             'username': username,
             'password': self._password_row.get_text(),
             'read_only': self._readonly_row.get_active(),
+            'default_schema': self._default_schema_row.get_text().strip(),
             'ssh_enabled': self._ssh_row.get_enable_expansion(),
             'ssh_host': self._ssh_host_row.get_text().strip(),
             'ssh_port': ssh_port,

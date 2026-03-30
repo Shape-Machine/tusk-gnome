@@ -17,6 +17,10 @@ COL_TABLE = 5
 
 class DbBrowser(Gtk.Box):
     __gsignals__ = {
+        'database-switched': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str),  # conn, new_dbname
+        ),
         'table-selected': (
             GObject.SignalFlags.RUN_FIRST, None,
             (GObject.TYPE_PYOBJECT, str, str, str),  # conn, schema, table, item_type
@@ -81,6 +85,43 @@ class DbBrowser(Gtk.Box):
         self._loading_bar.set_visible(False)
         self.append(self._loading_bar)
 
+        # Database switcher bar
+        db_switcher_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        db_switcher_bar.set_margin_start(6)
+        db_switcher_bar.set_margin_end(6)
+        db_switcher_bar.set_margin_top(4)
+        db_switcher_bar.set_margin_bottom(2)
+        db_switcher_bar.set_visible(False)
+        self._db_switcher_bar = db_switcher_bar
+
+        db_label = Gtk.Label(label='Database:')
+        db_label.add_css_class('caption')
+        db_label.add_css_class('dim-label')
+        db_switcher_bar.append(db_label)
+
+        self._db_string_list = Gtk.StringList.new([])
+        self._db_dropdown = Gtk.DropDown.new(self._db_string_list, None)
+        self._db_dropdown.set_hexpand(True)
+        self._db_dropdown.add_css_class('flat')
+        self._db_dropdown_handler = self._db_dropdown.connect(
+            'notify::selected', self._on_db_selected
+        )
+        db_switcher_bar.append(self._db_dropdown)
+
+        self.append(db_switcher_bar)
+
+        # Schema warning bar
+        self._schema_warning_bar = Gtk.Label()
+        self._schema_warning_bar.add_css_class('caption')
+        self._schema_warning_bar.add_css_class('warning')
+        self._schema_warning_bar.set_xalign(0)
+        self._schema_warning_bar.set_margin_start(8)
+        self._schema_warning_bar.set_margin_end(6)
+        self._schema_warning_bar.set_margin_bottom(2)
+        self._schema_warning_bar.set_wrap(True)
+        self._schema_warning_bar.set_visible(False)
+        self.append(self._schema_warning_bar)
+
         # Search + New Schema toolbar
         search_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         search_bar.set_margin_start(6)
@@ -131,6 +172,7 @@ class DbBrowser(Gtk.Box):
         self._expansion_snapshot = None
         self._last_conn = None
         self._read_only = False
+        self._db_switch_inhibit = False
 
         icon_renderer = Gtk.CellRendererPixbuf()
         text_renderer = Gtk.CellRendererText()
@@ -241,10 +283,35 @@ class DbBrowser(Gtk.Box):
             self._restore_expansion_node(child, keys)
             child = self._store.iter_next(child)
 
+    def _expand_schema(self, schema_name):
+        """Expand the row for *schema_name* in the tree."""
+        it = self._store.get_iter_first()
+        while it:
+            if (self._store.get_value(it, COL_TYPE) == 'schema' and
+                    self._store.get_value(it, COL_SCHEMA) == schema_name):
+                path = self._store.get_path(it)
+                fpath = self._filter.convert_child_path_to_path(path)
+                if fpath:
+                    self._tree.expand_row(fpath, False)
+                return
+            it = self._store.iter_next(it)
+
+    def _on_db_selected(self, dropdown, _param):
+        if self._db_switch_inhibit:
+            return
+        idx = dropdown.get_selected()
+        if idx == Gtk.INVALID_LIST_POSITION:
+            return
+        new_db = self._db_string_list.get_string(idx)
+        if self._last_conn and new_db != self._last_conn.get('database', ''):
+            self.emit('database-switched', self._last_conn, new_db)
+
     def clear(self):
         self._load_gen += 1
         self._loading_spinner.stop()
         self._loading_bar.set_visible(False)
+        self._db_switcher_bar.set_visible(False)
+        self._schema_warning_bar.set_visible(False)
         self._search_entry.set_text('')
         self._search_bar.set_visible(False)
         self._store.clear()
@@ -343,6 +410,14 @@ class DbBrowser(Gtk.Box):
                     """)
                     all_schemas = [r[0] for r in cur.fetchall()]
 
+                    cur.execute("""
+                        SELECT datname FROM pg_database
+                        WHERE datistemplate = false
+                          AND datname NOT IN ('template0', 'template1')
+                        ORDER BY datname
+                    """)
+                    all_databases = [r[0] for r in cur.fetchall()]
+
             schema_items = {}
 
             def _schema(s):
@@ -370,23 +445,51 @@ class DbBrowser(Gtk.Box):
             for schema, name, args in function_rows:
                 _schema(schema)['functions'].append((name, args))
 
-            GLib.idle_add(self._populate, conn, schema_items, gen)
+            default_schema = conn.get('default_schema', '').strip()
+            schema_warning = None
+            if default_schema and default_schema not in all_schemas:
+                schema_warning = (
+                    f'Default schema "{default_schema}" not found on this server.'
+                )
+
+            GLib.idle_add(self._populate, conn, schema_items, all_databases, schema_warning, gen)
 
         except Exception as e:
             GLib.idle_add(self._show_error, str(e), gen)
 
-    def _populate(self, conn, schema_items, gen):
+    def _populate(self, conn, schema_items, all_databases, schema_warning, gen):
         if gen != self._load_gen:
             return
         self._loading_spinner.stop()
         self._loading_bar.set_visible(False)
         self._store.clear()
 
+        # Update database switcher
+        self._db_switch_inhibit = True
+        current_db = conn.get('database', '')
+        self._db_string_list.splice(0, self._db_string_list.get_n_items(), all_databases)
+        try:
+            selected_idx = all_databases.index(current_db)
+        except ValueError:
+            selected_idx = 0
+        self._db_dropdown.set_selected(selected_idx)
+        self._db_switch_inhibit = False
+        self._db_switcher_bar.set_visible(bool(all_databases))
+
+        # Show schema warning if default schema not found
+        if schema_warning:
+            self._schema_warning_bar.set_label(schema_warning)
+            self._schema_warning_bar.set_visible(True)
+        else:
+            self._schema_warning_bar.set_visible(False)
+
         if not schema_items:
             self._store.append(None, [
                 'dialog-information-symbolic', 'No tables found', 'info', conn, '', ''
             ])
             return
+
+        default_schema = conn.get('default_schema', '').strip()
 
         for schema, items in sorted(schema_items.items()):
             schema_it = self._store.append(None, [
@@ -465,6 +568,8 @@ class DbBrowser(Gtk.Box):
         if snapshot:
             self._restore_expansion(snapshot)
             self._expansion_snapshot = None
+        elif default_schema:
+            self._expand_schema(default_schema)
 
     def _show_error(self, error_msg, gen):
         if gen != self._load_gen:

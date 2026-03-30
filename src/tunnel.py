@@ -45,12 +45,19 @@ def apply_conn_settings(db, conn):
     """Apply session-level settings derived from the connection profile.
 
     Must be called after psycopg.connect() and before any user queries.
-    Currently handles: read-only mode.
+    Handles: read-only mode, default schema (search_path).
     """
-    if conn.get('read_only'):
-        with db.cursor() as cur:
+    from psycopg import sql as pgsql
+    with db.cursor() as cur:
+        if conn.get('read_only'):
             cur.execute('SET SESSION default_transaction_read_only = on')
-        db.commit()
+        if conn.get('default_schema'):
+            cur.execute(
+                pgsql.SQL('SET search_path TO {}').format(
+                    pgsql.Identifier(conn['default_schema'])
+                )
+            )
+    db.commit()
 
 
 @contextmanager
