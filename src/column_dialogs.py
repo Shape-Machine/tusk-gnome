@@ -1083,7 +1083,7 @@ class CreateTableDialog(Adw.Dialog):
 
         preview_scroll = Gtk.ScrolledWindow()
         preview_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
-        preview_scroll.set_min_content_height(100)
+        preview_scroll.set_min_content_height(120)
         preview_scroll.set_child(preview_view)
 
         preview_frame = Gtk.Frame()
@@ -1092,6 +1092,8 @@ class CreateTableDialog(Adw.Dialog):
         preview_btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         preview_btn_box.set_halign(Gtk.Align.END)
         preview_btn_box.set_margin_top(4)
+        preview_btn_box.set_margin_bottom(8)
+        preview_btn_box.set_margin_end(8)
 
         copy_btn = Gtk.Button(label='Copy')
         copy_btn.set_tooltip_text('Copy SQL to clipboard')
@@ -1100,14 +1102,41 @@ class CreateTableDialog(Adw.Dialog):
 
         preview_inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         preview_inner.set_margin_top(8)
-        preview_inner.set_margin_bottom(4)
+        preview_inner.set_margin_start(8)
+        preview_inner.set_margin_end(8)
         preview_inner.append(preview_frame)
         preview_inner.append(preview_btn_box)
 
-        preview_expander = Gtk.Expander(label='Preview SQL')
-        preview_expander.set_expanded(False)
-        preview_expander.set_child(preview_inner)
-        outer.append(preview_expander)
+        self._preview_revealer = Gtk.Revealer()
+        self._preview_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_UP)
+        self._preview_revealer.set_reveal_child(False)
+        self._preview_revealer.set_child(preview_inner)
+
+        # Toggle row pinned to the bottom bar
+        toggle_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        toggle_row.set_margin_start(12)
+        toggle_row.set_margin_end(8)
+        toggle_row.set_margin_top(6)
+        toggle_row.set_margin_bottom(6)
+
+        preview_toggle_lbl = Gtk.Label(label='Preview SQL')
+        preview_toggle_lbl.set_xalign(0)
+        preview_toggle_lbl.set_hexpand(True)
+        preview_toggle_lbl.add_css_class('caption')
+        toggle_row.append(preview_toggle_lbl)
+
+        self._preview_chevron = Gtk.Image.new_from_icon_name('pan-up-symbolic')
+        toggle_btn = Gtk.Button()
+        toggle_btn.set_child(self._preview_chevron)
+        toggle_btn.add_css_class('flat')
+        toggle_btn.set_tooltip_text('Toggle SQL preview')
+        toggle_btn.connect('clicked', self._toggle_preview)
+        toggle_row.append(toggle_btn)
+
+        bottom_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        bottom_box.append(Gtk.Separator())
+        bottom_box.append(self._preview_revealer)
+        bottom_box.append(toggle_row)
 
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -1115,10 +1144,18 @@ class CreateTableDialog(Adw.Dialog):
         scroll.set_child(outer)
 
         toolbar_view.set_content(scroll)
+        toolbar_view.add_bottom_bar(bottom_box)
         self.set_child(toolbar_view)
 
         # Start with one empty column row
         self._add_col_row()
+
+    def _toggle_preview(self, _btn):
+        revealed = not self._preview_revealer.get_reveal_child()
+        self._preview_revealer.set_reveal_child(revealed)
+        self._preview_chevron.set_from_icon_name(
+            'pan-down-symbolic' if revealed else 'pan-up-symbolic'
+        )
 
     def _get_schema(self):
         if self._schema_combo is not None:
