@@ -963,7 +963,8 @@ class SqlEditor(Gtk.Box):
                             count = cur.rowcount
                             msg = f'{count} row{"s" if count != 1 else ""} affected'
                             GLib.idle_add(self.show_message, msg)
-                    db.commit()
+                    if not db.autocommit:
+                        db.commit()
                 finally:
                     self._active_conn = None
         except Exception as e:
