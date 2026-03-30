@@ -1116,6 +1116,11 @@ class TuskWindow(Adw.ApplicationWindow):
 
         def on_save(schema, name, sql_def, on_done):
             def run():
+                from table_panel import _validate_sql_fragment
+                err = _validate_sql_fragment(sql_def)
+                if err:
+                    GLib.idle_add(on_done, err)
+                    return
                 try:
                     import psycopg
                     from psycopg import sql as pgsql

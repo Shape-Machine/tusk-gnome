@@ -247,6 +247,10 @@ class DbBrowser(Gtk.Box):
         self._search_entry.set_text('')
         self._search_bar.set_visible(False)
         self._store.clear()
+        self._ctx_conn = None
+        self._ctx_schema = None
+        self._ctx_table = None
+        self._ctx_item_type = None
 
     def set_rename_hint(self, old_schema, new_schema):
         """Call before load() after a schema rename so expansion state is preserved."""
@@ -517,7 +521,9 @@ class DbBrowser(Gtk.Box):
             self._show_views_group_context_menu(x, y)
 
     def _on_new_schema_clicked(self, _btn):
-        self.emit('create-schema-requested', self._ctx_conn or self._last_conn)
+        if self._last_conn is None:
+            return
+        self.emit('create-schema-requested', self._last_conn)
 
     def _show_schema_context_menu(self, x, y):
         """Context menu for the Tables group node — just Create Table."""
