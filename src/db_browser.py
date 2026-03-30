@@ -320,12 +320,27 @@ class DbBrowser(Gtk.Box):
                     """)
                     function_rows = cur.fetchall()
 
+                    cur.execute("""
+                        SELECT nspname FROM pg_namespace
+                        WHERE nspname NOT IN (
+                            'pg_catalog', 'information_schema',
+                            'pg_toast', 'pg_temp_1', 'pg_toast_temp_1'
+                        )
+                          AND nspname NOT LIKE 'pg_%'
+                        ORDER BY nspname
+                    """)
+                    all_schemas = [r[0] for r in cur.fetchall()]
+
             schema_items = {}
 
             def _schema(s):
                 return schema_items.setdefault(s, {
                     'tables': [], 'views': [], 'sequences': [], 'enums': [], 'functions': []
                 })
+
+            # Ensure all schemas appear even if empty
+            for s in all_schemas:
+                _schema(s)
 
             for schema, table, ttype in table_rows:
                 bucket = _schema(schema)
