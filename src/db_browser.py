@@ -592,9 +592,8 @@ class DbBrowser(Gtk.Box):
         # does not constrain the popover height to the tree's scroll area.
         popover.set_parent(self)
         # Translate click coordinates from tree-widget space to self space.
-        ok, tx, ty = self._tree.translate_coordinates(self, int(x), int(y))
-        if not ok:
-            tx, ty = int(x), int(y)
+        coords = self._tree.translate_coordinates(self, int(x), int(y))
+        tx, ty = coords if coords else (int(x), int(y))
         rect = Gdk.Rectangle()
         rect.x, rect.y, rect.width, rect.height = tx, ty, 1, 1
         popover.set_pointing_to(rect)
