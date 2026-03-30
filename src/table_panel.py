@@ -237,6 +237,7 @@ class TablePanel(Gtk.Box):
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._load_gen = 0
+        self._read_only = False
         self._build_ui()
 
     def _build_ui(self):
@@ -280,17 +281,17 @@ class TablePanel(Gtk.Box):
         _schema_spacer.set_hexpand(True)
         self._schema_toolbar.append(_schema_spacer)
 
-        _reorder_btn = Gtk.Button(icon_name='view-sort-descending-symbolic')
-        _reorder_btn.add_css_class('flat')
-        _reorder_btn.set_tooltip_text('Reorder columns…')
-        _reorder_btn.connect('clicked', self._on_reorder_clicked)
-        self._schema_toolbar.append(_reorder_btn)
+        self._reorder_btn = Gtk.Button(icon_name='view-sort-descending-symbolic')
+        self._reorder_btn.add_css_class('flat')
+        self._reorder_btn.set_tooltip_text('Reorder columns…')
+        self._reorder_btn.connect('clicked', self._on_reorder_clicked)
+        self._schema_toolbar.append(self._reorder_btn)
 
-        _add_col_btn = Gtk.Button(icon_name='list-add-symbolic')
-        _add_col_btn.add_css_class('flat')
-        _add_col_btn.set_tooltip_text('Add column')
-        _add_col_btn.connect('clicked', self._on_add_column_clicked)
-        self._schema_toolbar.append(_add_col_btn)
+        self._add_col_btn = Gtk.Button(icon_name='list-add-symbolic')
+        self._add_col_btn.add_css_class('flat')
+        self._add_col_btn.set_tooltip_text('Add column')
+        self._add_col_btn.connect('clicked', self._on_add_column_clicked)
+        self._schema_toolbar.append(self._add_col_btn)
 
         _schema_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         _schema_box.append(self._schema_toolbar)
@@ -302,7 +303,7 @@ class TablePanel(Gtk.Box):
         )
 
         self._keys_scroll = self._make_tab_scroll()
-        self._keys_toolbar = self._make_action_toolbar(
+        self._keys_toolbar, self._add_constraint_btn = self._make_action_toolbar(
             'Add Constraint', self._on_add_constraint_clicked
         )
         _keys_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -324,7 +325,7 @@ class TablePanel(Gtk.Box):
         )
 
         self._indexes_scroll = self._make_tab_scroll()
-        self._indexes_toolbar = self._make_action_toolbar(
+        self._indexes_toolbar, self._add_index_btn = self._make_action_toolbar(
             'Add Index', self._on_add_index_clicked
         )
         _indexes_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -516,7 +517,10 @@ class TablePanel(Gtk.Box):
         return scroll
 
     def _make_action_toolbar(self, tooltip, handler):
-        """Create a right-aligned single-button toolbar for tab action buttons."""
+        """Create a right-aligned single-button toolbar for tab action buttons.
+
+        Returns (toolbar, btn).
+        """
         toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         toolbar.set_margin_start(6)
         toolbar.set_margin_end(6)
@@ -531,7 +535,7 @@ class TablePanel(Gtk.Box):
         btn.set_tooltip_text(tooltip)
         btn.connect('clicked', handler)
         toolbar.append(btn)
-        return toolbar
+        return toolbar, btn
 
     def _fill_scroll(self, scroll, cols, rows, empty_text):
         if rows:
@@ -1524,11 +1528,12 @@ class TablePanel(Gtk.Box):
         if self._refresh_btn.get_sensitive():
             self.load(self._conn, self._current_schema, self._current_table, self._item_type)
 
-    def load(self, conn, schema, table, item_type='table'):
+    def load(self, conn, schema, table, item_type='table', read_only=False):
         self._conn = conn
         self._current_schema = schema
         self._current_table = table
         self._item_type = item_type
+        self._read_only = read_only
         self._data_page = 0
         self._schema_info = []
         self._pk_cols = []
@@ -1537,9 +1542,20 @@ class TablePanel(Gtk.Box):
         self._load_gen += 1
         self._refresh_btn.set_sensitive(False)
         self._export_btn.set_sensitive(False)
-        self._edit_bar.set_visible(item_type == 'table')
+        self._edit_bar.set_visible(item_type == 'table' and not read_only)
         self._edit_btn.set_sensitive(False)
         self._delete_btn.set_sensitive(False)
+        _ro_tip = 'This connection is read-only'
+        self._insert_btn.set_sensitive(not read_only)
+        self._insert_btn.set_tooltip_text(_ro_tip if read_only else 'Insert row')
+        self._reorder_btn.set_sensitive(not read_only)
+        self._reorder_btn.set_tooltip_text(_ro_tip if read_only else 'Reorder columns…')
+        self._add_col_btn.set_sensitive(not read_only)
+        self._add_col_btn.set_tooltip_text(_ro_tip if read_only else 'Add column')
+        self._add_constraint_btn.set_sensitive(not read_only)
+        self._add_constraint_btn.set_tooltip_text(_ro_tip if read_only else 'Add Constraint')
+        self._add_index_btn.set_sensitive(not read_only)
+        self._add_index_btn.set_tooltip_text(_ro_tip if read_only else 'Add Index')
         self._set_tabs_for_type(item_type)
         self._spinner.start()
         self._outer.set_visible_child_name('loading')
@@ -1553,7 +1569,7 @@ class TablePanel(Gtk.Box):
         try:
             import psycopg
             from psycopg import sql
-            from tunnel import open_tunnel
+            from tunnel import open_tunnel, apply_conn_settings
 
             with open_tunnel(conn) as (host, port), psycopg.connect(
                 host=host,
@@ -1563,6 +1579,7 @@ class TablePanel(Gtk.Box):
                 password=conn['password'],
                 connect_timeout=10,
             ) as db:
+                apply_conn_settings(db, conn)
                 with db.cursor() as cur:
                     cur.execute(_SCHEMA_SQL, [schema, table])
                     schema_rows = cur.fetchall()
@@ -1734,6 +1751,8 @@ class TablePanel(Gtk.Box):
 
     def _on_data_selection_changed(self, _sel, _pos, _n):
         if not self._column_view:
+            return
+        if self._read_only:
             return
         bitset = self._column_view.get_model().get_selection()
         n = bitset.get_size()

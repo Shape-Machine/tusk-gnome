@@ -68,6 +68,16 @@ class ConnectionDialog(Adw.Window):
         auth_group.add(self._username_row)
         auth_group.add(self._password_row)
 
+        # ── Options ───────────────────────────────────────────────────────────
+        options_group = Adw.PreferencesGroup(title='Options')
+
+        self._readonly_row = Adw.SwitchRow(
+            title='Read-only',
+            subtitle='Prevents accidental writes to this database',
+        )
+        self._readonly_row.set_active(conn.get('read_only', False) if conn else False)
+        options_group.add(self._readonly_row)
+
         # ── SSH Tunnel ────────────────────────────────────────────────────────
         ssh_group = Adw.PreferencesGroup(title='SSH Tunnel')
 
@@ -142,6 +152,7 @@ class ConnectionDialog(Adw.Window):
         content.append(details_group)
         content.append(auth_group)
         content.append(self._keyring_warning)
+        content.append(options_group)
         content.append(ssh_group)
 
         # ── Test / Save ───────────────────────────────────────────────────────
@@ -214,6 +225,7 @@ class ConnectionDialog(Adw.Window):
             'database': self._database_row.get_text().strip() or 'postgres',
             'username': self._username_row.get_text().strip(),
             'password': self._password_row.get_text(),
+            'read_only': self._readonly_row.get_active(),
             'ssh_enabled': self._ssh_row.get_enable_expansion(),
             'ssh_host': self._ssh_host_row.get_text().strip(),
             'ssh_port': ssh_port,
@@ -302,6 +314,7 @@ class ConnectionDialog(Adw.Window):
             'database': self._database_row.get_text().strip() or 'postgres',
             'username': username,
             'password': self._password_row.get_text(),
+            'read_only': self._readonly_row.get_active(),
             'ssh_enabled': self._ssh_row.get_enable_expansion(),
             'ssh_host': self._ssh_host_row.get_text().strip(),
             'ssh_port': ssh_port,

@@ -41,6 +41,18 @@ def _forward(local_sock, transport, remote_host, remote_port):
         channel.close()
 
 
+def apply_conn_settings(db, conn):
+    """Apply session-level settings derived from the connection profile.
+
+    Must be called after psycopg.connect() and before any user queries.
+    Currently handles: read-only mode.
+    """
+    if conn.get('read_only'):
+        with db.cursor() as cur:
+            cur.execute('SET SESSION default_transaction_read_only = on')
+        db.commit()
+
+
 @contextmanager
 def open_tunnel(conn):
     """
