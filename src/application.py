@@ -3,7 +3,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Adw, Gio
+from gi.repository import Adw, Gio, Gtk, Gdk
 
 import config
 from window import TuskWindow
@@ -27,11 +27,26 @@ class TuskApplication(Adw.Application):
             self.set_accels_for_action(f'win.goto-tab-{i}', [f'<Alt>{i}'])
 
     def _on_activate(self, app):
+        self._apply_css()
         win = self.props.active_window
         if not win:
             win = TuskWindow(application=self)
             self._add_app_actions(win)
         win.present()
+
+    def _apply_css(self):
+        # GtkPopoverMenu adds an internal GtkScrolledWindow that gets a
+        # non-zero min-height from the theme when the popover's parent widget
+        # is inside a GtkScrolledWindow, causing spurious scrollbars in
+        # right-click context menus and MenuButton popovers. Reset it to 0.
+        css = b'popover > contents scrolledwindow { min-height: 0; }'
+        provider = Gtk.CssProvider()
+        provider.load_from_data(css)
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(),
+            provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+        )
 
     def _add_app_actions(self, win):
         quit_action = Gio.SimpleAction.new('quit', None)
