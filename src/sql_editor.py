@@ -753,6 +753,10 @@ class SqlEditor(Gtk.Box):
 
     # ── Connection ────────────────────────────────────────────────────────────
 
+    def insert_sql(self, sql):
+        """Set the editor buffer content to sql without executing it."""
+        self._buffer.set_text(sql)
+
     def set_connection(self, conn):
         self._connection = conn
         if conn:

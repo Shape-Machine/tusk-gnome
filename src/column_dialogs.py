@@ -3,7 +3,14 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Gtk, Adw, Gio, GObject, Pango
+from gi.repository import Gtk, Adw, Gio, GObject, Pango, Gdk
+
+try:
+    gi.require_version('GtkSource', '5')
+    from gi.repository import GtkSource
+    _HAS_SOURCE = True
+except (ValueError, ImportError):
+    _HAS_SOURCE = False
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +137,112 @@ def _attach_type_picker(entry_row):
 
 
 # ---------------------------------------------------------------------------
+# SQL preview helpers (shared by CreateTableDialog and AddColumnDialog)
+# ---------------------------------------------------------------------------
+
+def _make_sql_preview_view():
+    """Create a read-only SQL text view. Returns (buffer, view)."""
+    if _HAS_SOURCE:
+        buf = GtkSource.Buffer()
+        lang = GtkSource.LanguageManager.get_default().get_language('sql')
+        if lang:
+            buf.set_language(lang)
+        mgr = GtkSource.StyleSchemeManager.get_default()
+        from gi.repository import Adw as _Adw
+        dark = _Adw.StyleManager.get_default().get_dark()
+        scheme = mgr.get_scheme('Adwaita-dark' if dark else 'Adwaita') or mgr.get_scheme('classic')
+        if scheme:
+            buf.set_style_scheme(scheme)
+        view = GtkSource.View.new_with_buffer(buf)
+        view.set_show_line_numbers(False)
+        view.set_tab_width(4)
+    else:
+        buf = Gtk.TextBuffer()
+        view = Gtk.TextView(buffer=buf)
+    view.set_editable(False)
+    view.set_monospace(True)
+    view.set_wrap_mode(Gtk.WrapMode.NONE)
+    view.set_top_margin(8)
+    view.set_left_margin(8)
+    view.set_bottom_margin(8)
+    view.set_right_margin(8)
+    return buf, view
+
+
+def _make_type_picker_popover(entry):
+    """Create a type-picker MenuButton for a plain Gtk.Entry. Returns the button."""
+    btn = Gtk.MenuButton(icon_name='pan-down-symbolic')
+    btn.add_css_class('flat')
+    btn.set_tooltip_text('Pick a PostgreSQL type')
+    btn.set_valign(Gtk.Align.CENTER)
+
+    popover = Gtk.Popover()
+    popover.set_has_arrow(False)
+    popover.set_position(Gtk.PositionType.BOTTOM)
+    btn.set_popover(popover)
+
+    outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+    outer.set_size_request(260, -1)
+
+    search = Gtk.SearchEntry()
+    search.set_placeholder_text('Search types…')
+    search.set_margin_top(8)
+    search.set_margin_bottom(4)
+    search.set_margin_start(8)
+    search.set_margin_end(8)
+
+    scroll = Gtk.ScrolledWindow()
+    scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+    scroll.set_max_content_height(280)
+    scroll.set_propagate_natural_height(True)
+
+    list_box = Gtk.ListBox()
+    list_box.set_selection_mode(Gtk.SelectionMode.NONE)
+    list_box.add_css_class('boxed-list-separate')
+
+    all_rows = []
+    for type_name, desc in _PG_TYPES:
+        row = Gtk.ListBoxRow()
+        row._type_name = type_name
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        box.set_margin_top(6)
+        box.set_margin_bottom(6)
+        box.set_margin_start(10)
+        box.set_margin_end(10)
+        name_lbl = Gtk.Label(label=type_name)
+        name_lbl.set_xalign(0)
+        desc_lbl = Gtk.Label(label=desc)
+        desc_lbl.set_xalign(0)
+        desc_lbl.add_css_class('caption')
+        desc_lbl.add_css_class('dim-label')
+        box.append(name_lbl)
+        box.append(desc_lbl)
+        row.set_child(box)
+        list_box.append(row)
+        all_rows.append(row)
+
+    def _on_search(e):
+        text = e.get_text().strip().lower()
+        for r in all_rows:
+            r.set_visible(not text or text in r._type_name.lower())
+
+    search.connect('search-changed', _on_search)
+
+    def _on_row_activated(_lb, row):
+        entry.set_text(row._type_name)
+        popover.popdown()
+
+    list_box.connect('row-activated', _on_row_activated)
+
+    scroll.set_child(list_box)
+    outer.append(search)
+    outer.append(scroll)
+    popover.set_child(outer)
+
+    return btn
+
+
+# ---------------------------------------------------------------------------
 # Add Column dialog  (#83, #111)
 # ---------------------------------------------------------------------------
 
@@ -141,9 +254,10 @@ class AddColumnDialog(Adw.Dialog):
         after_col is None if not specified
     """
 
-    def __init__(self, existing_columns, on_save):
+    def __init__(self, existing_columns, on_save, schema=None, table=None, on_open_in_editor=None):
         super().__init__(title='Add Column', content_width=420)
         self._on_save = on_save
+        self._preview_buf = None
 
         header = Adw.HeaderBar()
         self._add_btn = Gtk.Button(label='Add')
@@ -195,8 +309,94 @@ class AddColumnDialog(Adw.Dialog):
         else:
             self._after_row = None
 
-        toolbar_view.set_content(page)
+        if schema and table:
+            self._schema = schema
+            self._table = table
+            self._preview_buf, preview_widget = self._build_preview_section(on_open_in_editor)
+            self._name_row.connect('changed', self._update_preview)
+            self._type_row.connect('changed', self._update_preview)
+            self._nullable_row.connect('notify::active', self._update_preview)
+            self._default_row.connect('changed', self._update_preview)
+            content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            content_box.append(page)
+            content_box.append(preview_widget)
+            content_scroll = Gtk.ScrolledWindow()
+            content_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+            content_scroll.set_propagate_natural_height(True)
+            content_scroll.set_child(content_box)
+            toolbar_view.set_content(content_scroll)
+        else:
+            toolbar_view.set_content(page)
         self.set_child(toolbar_view)
+
+    def _build_preview_section(self, on_open_in_editor):
+        buf, view = _make_sql_preview_view()
+
+        preview_scroll = Gtk.ScrolledWindow()
+        preview_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        preview_scroll.set_min_content_height(56)
+        preview_scroll.set_child(view)
+
+        frame = Gtk.Frame()
+        frame.set_child(preview_scroll)
+
+        btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        btn_box.set_halign(Gtk.Align.END)
+        btn_box.set_margin_top(4)
+
+        copy_btn = Gtk.Button(label='Copy')
+        copy_btn.set_tooltip_text('Copy SQL to clipboard')
+        copy_btn.connect('clicked', lambda _: Gdk.Display.get_default().get_clipboard().set(
+            buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
+        ))
+        btn_box.append(copy_btn)
+
+        if on_open_in_editor:
+            open_btn = Gtk.Button(label='Open in editor')
+            open_btn.set_tooltip_text('Send SQL to the SQL editor without executing')
+            open_btn.connect('clicked', lambda _: on_open_in_editor(
+                buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
+            ))
+            btn_box.append(open_btn)
+
+        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        inner.set_margin_top(8)
+        inner.set_margin_bottom(12)
+        inner.set_margin_start(8)
+        inner.set_margin_end(8)
+        inner.append(frame)
+        inner.append(btn_box)
+
+        expander = Gtk.Expander(label='Preview SQL')
+        expander.set_expanded(False)
+        expander.set_child(inner)
+
+        return buf, expander
+
+    def _update_preview(self, *_):
+        if self._preview_buf is None:
+            return
+        name = self._name_row.get_text().strip()
+        pg_type = self._type_row.get_text().strip() or 'text'
+        nullable = self._nullable_row.get_active()
+        default = self._default_row.get_text().strip()
+
+        def qi(n):
+            return '"' + n.replace('"', '""') + '"'
+
+        if not name:
+            self._preview_buf.set_text('')
+            return
+
+        parts = [
+            f'ALTER TABLE {qi(self._schema)}.{qi(self._table)}',
+            f'ADD COLUMN {qi(name)} {pg_type}',
+        ]
+        if not nullable:
+            parts.append('NOT NULL')
+        if default:
+            parts.append(f'DEFAULT {default}')
+        self._preview_buf.set_text(' '.join(parts) + ';')
 
     def _update_add_btn(self, *_):
         name = self._name_row.get_text().strip()
@@ -794,3 +994,335 @@ class AddConstraintDialog(Adw.Dialog):
         self.close()
         self._on_save(name, constraint_sql)
 
+
+# ---------------------------------------------------------------------------
+# Create Table dialog  (#82, #85)
+# ---------------------------------------------------------------------------
+
+class CreateTableDialog(Adw.Dialog):
+    """Dialog for creating a new PostgreSQL table from the database browser.
+
+    schemas        – list of schema names available on the connection
+    default_schema – schema to pre-select
+    on_save(ddl)   – called with the full CREATE TABLE SQL string on confirm
+    on_open_in_editor(sql) – optional; sends DDL to the SQL editor
+    """
+
+    def __init__(self, schemas, default_schema, on_save, on_open_in_editor=None):
+        super().__init__(title='Create Table', content_width=540)
+        self._on_save = on_save
+        self._on_open_in_editor = on_open_in_editor
+        self._schemas = schemas if schemas else ['public']
+        self._col_rows = []
+        self._pk_updating = False
+
+        header = Adw.HeaderBar()
+        self._create_btn = Gtk.Button(label='Create')
+        self._create_btn.add_css_class('suggested-action')
+        self._create_btn.set_sensitive(False)
+        self._create_btn.connect('clicked', self._on_create_clicked)
+        header.pack_end(self._create_btn)
+
+        toolbar_view = Adw.ToolbarView()
+        toolbar_view.add_top_bar(header)
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        outer.set_margin_top(12)
+        outer.set_margin_bottom(12)
+        outer.set_margin_start(12)
+        outer.set_margin_end(12)
+
+        # ── Table definition ────────────────────────────────────────────────
+        top_page = Adw.PreferencesPage()
+        table_group = Adw.PreferencesGroup(title='Table')
+
+        self._name_row = Adw.EntryRow(title='Table name')
+        self._name_row.connect('changed', self._on_form_changed)
+        table_group.add(self._name_row)
+
+        if len(self._schemas) > 1:
+            schema_model = Gtk.StringList.new(self._schemas)
+            self._schema_combo = Adw.ComboRow(title='Schema', model=schema_model)
+            if default_schema in self._schemas:
+                self._schema_combo.set_selected(self._schemas.index(default_schema))
+            self._schema_combo.connect('notify::selected', self._on_form_changed)
+            table_group.add(self._schema_combo)
+        else:
+            self._schema_combo = None
+
+        top_page.add(table_group)
+        outer.append(top_page)
+
+        # ── Column list ─────────────────────────────────────────────────────
+        col_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        col_header.set_margin_top(12)
+        col_header.set_margin_bottom(6)
+        col_lbl = Gtk.Label(label='Columns')
+        col_lbl.add_css_class('heading')
+        col_lbl.set_xalign(0)
+        col_lbl.set_hexpand(True)
+
+        add_col_btn = Gtk.Button(icon_name='list-add-symbolic')
+        add_col_btn.add_css_class('flat')
+        add_col_btn.set_tooltip_text('Add column')
+        add_col_btn.connect('clicked', lambda _: self._add_col_row())
+        col_header.append(col_lbl)
+        col_header.append(add_col_btn)
+        outer.append(col_header)
+
+        self._col_list = Gtk.ListBox()
+        self._col_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self._col_list.add_css_class('boxed-list')
+        col_frame = Gtk.Frame()
+        col_frame.set_child(self._col_list)
+        outer.append(col_frame)
+
+        reorder_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        reorder_box.set_halign(Gtk.Align.START)
+        reorder_box.set_margin_top(4)
+        self._up_btn = Gtk.Button(icon_name='go-up-symbolic')
+        self._up_btn.add_css_class('flat')
+        self._up_btn.set_tooltip_text('Move column up')
+        self._up_btn.connect('clicked', self._move_up)
+        self._down_btn = Gtk.Button(icon_name='go-down-symbolic')
+        self._down_btn.add_css_class('flat')
+        self._down_btn.set_tooltip_text('Move column down')
+        self._down_btn.connect('clicked', self._move_down)
+        reorder_box.append(self._up_btn)
+        reorder_box.append(self._down_btn)
+        outer.append(reorder_box)
+
+        # ── DDL preview (collapsible) ───────────────────────────────────────
+        self._preview_buf, preview_view = _make_sql_preview_view()
+
+        preview_scroll = Gtk.ScrolledWindow()
+        preview_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        preview_scroll.set_min_content_height(100)
+        preview_scroll.set_child(preview_view)
+
+        preview_frame = Gtk.Frame()
+        preview_frame.set_child(preview_scroll)
+
+        preview_btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        preview_btn_box.set_halign(Gtk.Align.END)
+        preview_btn_box.set_margin_top(4)
+
+        copy_btn = Gtk.Button(label='Copy')
+        copy_btn.set_tooltip_text('Copy SQL to clipboard')
+        copy_btn.connect('clicked', self._copy_preview)
+        preview_btn_box.append(copy_btn)
+
+        if on_open_in_editor:
+            open_btn = Gtk.Button(label='Open in editor')
+            open_btn.set_tooltip_text('Send SQL to the SQL editor without executing')
+            open_btn.connect('clicked', self._open_in_editor)
+            preview_btn_box.append(open_btn)
+
+        preview_inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        preview_inner.set_margin_top(8)
+        preview_inner.set_margin_bottom(4)
+        preview_inner.append(preview_frame)
+        preview_inner.append(preview_btn_box)
+
+        preview_expander = Gtk.Expander(label='Preview SQL')
+        preview_expander.set_margin_top(16)
+        preview_expander.set_expanded(False)
+        preview_expander.set_child(preview_inner)
+        outer.append(preview_expander)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_propagate_natural_height(True)
+        scroll.set_child(outer)
+
+        toolbar_view.set_content(scroll)
+        self.set_child(toolbar_view)
+
+        # Start with one empty column row
+        self._add_col_row()
+
+    def _get_schema(self):
+        if self._schema_combo is not None:
+            idx = self._schema_combo.get_selected()
+            return self._schemas[idx] if idx < len(self._schemas) else self._schemas[0]
+        return self._schemas[0]
+
+    def _add_col_row(self):
+        row = Gtk.ListBoxRow()
+
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        box.set_margin_top(6)
+        box.set_margin_bottom(6)
+        box.set_margin_start(8)
+        box.set_margin_end(8)
+
+        name_entry = Gtk.Entry()
+        name_entry.set_placeholder_text('column_name')
+        name_entry.set_hexpand(True)
+        name_entry.connect('changed', self._on_form_changed)
+
+        type_entry = Gtk.Entry()
+        type_entry.set_text('text')
+        type_entry.set_width_chars(14)
+        type_entry.connect('changed', self._on_form_changed)
+
+        type_btn = _make_type_picker_popover(type_entry)
+
+        null_btn = Gtk.ToggleButton(label='NULL')
+        null_btn.set_tooltip_text('Allow NULL values')
+        null_btn.set_active(True)
+        null_btn.add_css_class('flat')
+        null_btn.connect('toggled', self._on_form_changed)
+
+        pk_btn = Gtk.ToggleButton(label='PK')
+        pk_btn.set_tooltip_text('Set as primary key')
+        pk_btn.add_css_class('flat')
+        pk_btn.connect('toggled', self._on_pk_toggled, row)
+
+        rm_btn = Gtk.Button(icon_name='list-remove-symbolic')
+        rm_btn.add_css_class('flat')
+        rm_btn.set_tooltip_text('Remove column')
+        rm_btn.connect('clicked', self._remove_col_row, row)
+
+        box.append(name_entry)
+        box.append(type_entry)
+        box.append(type_btn)
+        box.append(null_btn)
+        box.append(pk_btn)
+        box.append(rm_btn)
+        row.set_child(box)
+
+        row._name_entry = name_entry
+        row._type_entry = type_entry
+        row._null_btn = null_btn
+        row._pk_btn = pk_btn
+
+        self._col_list.append(row)
+        self._col_rows.append(row)
+        self._on_form_changed()
+        name_entry.grab_focus()
+
+    def _remove_col_row(self, _btn, row):
+        self._col_list.remove(row)
+        self._col_rows.remove(row)
+        self._on_form_changed()
+
+    def _on_pk_toggled(self, btn, row):
+        if self._pk_updating:
+            return
+        self._pk_updating = True
+        if btn.get_active():
+            for r in self._col_rows:
+                if r is not row and r._pk_btn.get_active():
+                    r._pk_btn.set_active(False)
+        self._pk_updating = False
+        self._on_form_changed()
+
+    def _selected_idx(self):
+        row = self._col_list.get_selected_row()
+        if row is None or row not in self._col_rows:
+            return -1
+        return self._col_rows.index(row)
+
+    def _move_up(self, _btn):
+        idx = self._selected_idx()
+        if idx <= 0:
+            return
+        self._col_rows.insert(idx - 1, self._col_rows.pop(idx))
+        self._rebuild_col_list(idx - 1)
+
+    def _move_down(self, _btn):
+        idx = self._selected_idx()
+        if idx < 0 or idx >= len(self._col_rows) - 1:
+            return
+        self._col_rows.insert(idx + 1, self._col_rows.pop(idx))
+        self._rebuild_col_list(idx + 1)
+
+    def _rebuild_col_list(self, select_idx=None):
+        child = self._col_list.get_first_child()
+        while child:
+            nxt = child.get_next_sibling()
+            self._col_list.remove(child)
+            child = nxt
+        for row in self._col_rows:
+            self._col_list.append(row)
+        if select_idx is not None and 0 <= select_idx < len(self._col_rows):
+            self._col_list.select_row(self._col_rows[select_idx])
+        self._on_form_changed()
+
+    def _generate_ddl(self):
+        def qi(name):
+            return '"' + name.replace('"', '""') + '"'
+
+        schema = self._get_schema()
+        table = self._name_row.get_text().strip()
+        if not table:
+            return ''
+
+        col_defs = []
+        pk_col = None
+        for row in self._col_rows:
+            name = row._name_entry.get_text().strip()
+            pg_type = row._type_entry.get_text().strip() or 'text'
+            nullable = row._null_btn.get_active()
+            is_pk = row._pk_btn.get_active()
+            if not name:
+                continue
+            parts = [f'{qi(name)} {pg_type}']
+            if not nullable:
+                parts.append('NOT NULL')
+            col_defs.append('    ' + ' '.join(parts))
+            if is_pk:
+                pk_col = name
+
+        if pk_col:
+            col_defs.append(f'    PRIMARY KEY ({qi(pk_col)})')
+
+        if not col_defs:
+            return f'CREATE TABLE {qi(schema)}.{qi(table)}\n(\n);'
+
+        return (
+            f'CREATE TABLE {qi(schema)}.{qi(table)}\n(\n'
+            + ',\n'.join(col_defs)
+            + '\n);'
+        )
+
+    def _on_form_changed(self, *_):
+        table = self._name_row.get_text().strip()
+        has_named_col = any(r._name_entry.get_text().strip() for r in self._col_rows)
+        self._create_btn.set_sensitive(bool(table) and has_named_col)
+        self._preview_buf.set_text(self._generate_ddl())
+
+    def _copy_preview(self, _btn):
+        text = self._preview_buf.get_text(
+            self._preview_buf.get_start_iter(),
+            self._preview_buf.get_end_iter(),
+            False,
+        )
+        Gdk.Display.get_default().get_clipboard().set(text)
+
+    def _open_in_editor(self, _btn):
+        if self._on_open_in_editor:
+            text = self._preview_buf.get_text(
+                self._preview_buf.get_start_iter(),
+                self._preview_buf.get_end_iter(),
+                False,
+            )
+            self._on_open_in_editor(text)
+
+    def _on_create_clicked(self, _btn):
+        forbidden = (';', '--', '/*', '*/', '\x00')
+        for row in self._col_rows:
+            pg_type = row._type_entry.get_text().strip()
+            for token in forbidden:
+                if token in pg_type:
+                    dlg = Adw.AlertDialog(
+                        heading='Invalid Column Type',
+                        body=f'Column type contains disallowed characters: "{token}"',
+                    )
+                    dlg.add_response('ok', 'OK')
+                    dlg.present(self)
+                    return
+        ddl = self._generate_ddl()
+        self.close()
+        self._on_save(ddl)

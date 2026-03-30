@@ -5,7 +5,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Gtk, GLib, GObject, Gdk
+from gi.repository import Gtk, GLib, GObject, Gdk, Gio
 
 COL_ICON = 0
 COL_LABEL = 1
@@ -20,7 +20,11 @@ class DbBrowser(Gtk.Box):
         'table-selected': (
             GObject.SignalFlags.RUN_FIRST, None,
             (GObject.TYPE_PYOBJECT, str, str, str),  # conn, schema, table, item_type
-        )
+        ),
+        'create-table-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str),  # conn, schema
+        ),
     }
 
     def __init__(self):
@@ -70,6 +74,14 @@ class DbBrowser(Gtk.Box):
         key_ctrl = Gtk.EventControllerKey()
         key_ctrl.connect('key-pressed', self._on_key_pressed)
         self._tree.add_controller(key_ctrl)
+
+        right_click = Gtk.GestureClick(button=3)
+        right_click.connect('pressed', self._on_right_click)
+        self._tree.add_controller(right_click)
+
+        self._ctx_popover = None
+        self._ctx_conn = None
+        self._ctx_schema = None
 
         icon_renderer = Gtk.CellRendererPixbuf()
         text_renderer = Gtk.CellRendererText()
@@ -342,6 +354,55 @@ class DbBrowser(Gtk.Box):
         self._store.append(None, [
             'dialog-error-symbolic', f'Error: {error_msg}', 'error', None, '', ''
         ])
+
+    def get_loaded_schemas(self):
+        """Return list of schema names currently loaded in the tree."""
+        schemas = []
+        it = self._store.get_iter_first()
+        while it:
+            if self._store.get_value(it, COL_TYPE) == 'schema':
+                schemas.append(self._store.get_value(it, COL_SCHEMA))
+            it = self._store.iter_next(it)
+        return schemas
+
+    def _on_right_click(self, _gesture, _n_press, x, y):
+        ok, path, _col, _cx, _cy = self._tree.get_path_at_pos(int(x), int(y))
+        if not ok or path is None:
+            return
+        ok2, it = self._filter.get_iter(path)
+        if not ok2:
+            return
+        item_type = self._filter.get_value(it, COL_TYPE)
+        label = self._filter.get_value(it, COL_LABEL)
+        conn = self._filter.get_value(it, COL_CONN)
+        schema = self._filter.get_value(it, COL_SCHEMA)
+
+        if item_type == 'schema' or (item_type == 'group' and label == 'Tables'):
+            self._ctx_conn = conn
+            self._ctx_schema = schema
+            self._show_create_table_menu(x, y)
+
+    def _show_create_table_menu(self, x, y):
+        if self._ctx_popover is None:
+            ag = Gio.SimpleActionGroup()
+            action = Gio.SimpleAction.new('create-table', None)
+            action.connect('activate', lambda *_: self.emit(
+                'create-table-requested', self._ctx_conn, self._ctx_schema
+            ))
+            ag.add_action(action)
+            self._tree.insert_action_group('browser', ag)
+
+            menu = Gio.Menu()
+            menu.append('Create Table…', 'browser.create-table')
+            popover = Gtk.PopoverMenu(menu_model=menu)
+            popover.set_has_arrow(False)
+            popover.set_parent(self._tree)
+            self._ctx_popover = popover
+
+        rect = Gdk.Rectangle()
+        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
+        self._ctx_popover.set_pointing_to(rect)
+        self._ctx_popover.popup()
 
     def _on_row_activated(self, tree, path, _col):
         it = self._filter.get_iter(path)
