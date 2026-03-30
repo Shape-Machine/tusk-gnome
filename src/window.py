@@ -1,4 +1,5 @@
 import os
+import threading
 
 import gi
 
@@ -260,6 +261,7 @@ class TuskWindow(Adw.ApplicationWindow):
 
         self._browser = DbBrowser()
         self._browser.connect('table-selected', self._on_table_selected)
+        self._browser.connect('create-table-requested', self._on_create_table_requested)
         sidebar_paned.set_start_child(self._browser)
 
         self._file_explorer = FileExplorer()
@@ -613,3 +615,53 @@ class TuskWindow(Adw.ApplicationWindow):
     def _on_ddl_executed(self):
         if self._active_conn:
             self._browser.load(self._active_conn)
+
+    # ── Create Table (from browser right-click) ───────────────────────────────
+
+    def _on_create_table_requested(self, _browser, conn, schema):
+        from column_dialogs import CreateTableDialog
+        schemas = self._browser.get_loaded_schemas()
+        if not schemas:
+            schemas = [schema]
+
+        def on_save(ddl_sql):
+            def run():
+                try:
+                    import psycopg
+                    from tunnel import open_tunnel
+                    with open_tunnel(conn) as (host, port), psycopg.connect(
+                        host=host, port=port,
+                        dbname=conn['database'], user=conn['username'],
+                        password=conn['password'], connect_timeout=10,
+                    ) as db:
+                        with db.cursor() as cur:
+                            cur.execute(ddl_sql)
+                        db.commit()
+                    GLib.idle_add(self._browser.load, conn)
+                except Exception as e:
+                    GLib.idle_add(self._show_ddl_error, 'Create Table Failed', str(e))
+            threading.Thread(target=run, daemon=True).start()
+
+        dlg = CreateTableDialog(schemas, schema, on_save, on_open_in_editor=self._open_in_editor)
+        dlg.present(self)
+
+    def _show_ddl_error(self, heading, body):
+        dialog = Adw.AlertDialog(heading=heading, body=body)
+        dialog.add_response('ok', 'OK')
+        dialog.present(self)
+
+    def _open_in_editor(self, sql):
+        """Find the first open SqlEditor tab and set its content to sql."""
+        pages = self._tab_view.get_pages()
+        for i in range(pages.get_n_items()):
+            widget = pages.get_item(i).get_child()
+            if isinstance(widget, SqlEditor):
+                self._tab_view.set_selected_page(pages.get_item(i))
+                widget.insert_sql(sql)
+                return
+        dialog = Adw.AlertDialog(
+            heading='No SQL Editor Open',
+            body='Open a .sql file first to use "Open in editor".',
+        )
+        dialog.add_response('ok', 'OK')
+        dialog.present(self)
