@@ -282,17 +282,9 @@ class DbBrowser(Gtk.Box):
     def _fetch_schema(self, conn, gen):
         try:
             import psycopg
-            from tunnel import open_tunnel, apply_conn_settings
+            from tunnel import open_db
 
-            with open_tunnel(conn) as (host, port), psycopg.connect(
-                host=host,
-                port=port,
-                dbname=conn['database'],
-                user=conn['username'],
-                password=conn['password'],
-                connect_timeout=10,
-            ) as db:
-                apply_conn_settings(db, conn)
+            with open_db(conn) as db:
                 with db.cursor() as cur:
                     cur.execute("""
                         SELECT table_schema, table_name, table_type

@@ -641,7 +641,8 @@ class TablePanel(Gtk.Box):
         popover.set_parent(col_view)
 
         def on_right_click(_gesture, _n, x, y):
-            if not _cell_hit[0]:
+            if self._read_only or not _cell_hit[0]:
+                _cell_hit[0] = False
                 return
             _cell_hit[0] = False
             rect = Gdk.Rectangle()
@@ -689,12 +690,9 @@ class TablePanel(Gtk.Box):
 
             def run():
                 try:
-                    from tunnel import open_tunnel
-                    with open_tunnel(conn) as (host, port), psycopg.connect(
-                        host=host, port=port,
-                        dbname=conn['database'], user=conn['username'],
-                        password=conn['password'], connect_timeout=10,
-                    ) as db:
+                    from tunnel import open_db
+
+                    with open_db(conn) as db:
                         with db.cursor() as cur:
                             cur.execute(ddl)
                             if after_col:
@@ -810,12 +808,9 @@ class TablePanel(Gtk.Box):
                 try:
                     import psycopg
                     from psycopg import sql as pgsql
-                    from tunnel import open_tunnel
-                    with open_tunnel(conn) as (host, port), psycopg.connect(
-                        host=host, port=port,
-                        dbname=conn['database'], user=conn['username'],
-                        password=conn['password'], connect_timeout=10,
-                    ) as db:
+                    from tunnel import open_db
+
+                    with open_db(conn) as db:
                         with db.cursor() as cur:
                             cur.execute(
                                 pgsql.SQL('SELECT COUNT(*) FROM {}.{} WHERE {} IS NULL').format(
@@ -964,12 +959,9 @@ class TablePanel(Gtk.Box):
                 try:
                     import psycopg
                     from psycopg import sql as pgsql
-                    from tunnel import open_tunnel
-                    with open_tunnel(conn) as (host, port), psycopg.connect(
-                        host=host, port=port,
-                        dbname=conn['database'], user=conn['username'],
-                        password=conn['password'], connect_timeout=10,
-                    ) as db:
+                    from tunnel import open_db
+
+                    with open_db(conn) as db:
                         with db.cursor() as cur:
                             if existing_pk:
                                 # Find the PK constraint name
@@ -1011,12 +1003,9 @@ class TablePanel(Gtk.Box):
         def run():
             try:
                 import psycopg
-                from tunnel import open_tunnel
-                with open_tunnel(conn) as (host, port), psycopg.connect(
-                    host=host, port=port,
-                    dbname=conn['database'], user=conn['username'],
-                    password=conn['password'], connect_timeout=10,
-                ) as db:
+                from tunnel import open_db
+
+                with open_db(conn) as db:
                     with db.cursor() as cur:
                         cur.execute(ddl)
                     db.commit()
@@ -1033,12 +1022,9 @@ class TablePanel(Gtk.Box):
         def run():
             try:
                 import psycopg
-                from tunnel import open_tunnel
-                with open_tunnel(conn) as (host, port), psycopg.connect(
-                    host=host, port=port,
-                    dbname=conn['database'], user=conn['username'],
-                    password=conn['password'], connect_timeout=10,
-                ) as db:
+                from tunnel import open_db
+
+                with open_db(conn) as db:
                     with db.cursor() as cur:
                         cur.execute(_SCHEMA_SQL, [schema, table])
                         schema_rows = cur.fetchall()
@@ -1143,13 +1129,9 @@ class TablePanel(Gtk.Box):
         def run():
             try:
                 import psycopg
-                from tunnel import open_tunnel
-                with open_tunnel(conn) as (host, port), psycopg.connect(
-                    host=host, port=port,
-                    dbname=conn['database'], user=conn['username'],
-                    password=conn['password'], connect_timeout=10,
-                    autocommit=autocommit,
-                ) as db:
+                from tunnel import open_db
+
+                with open_db(conn) as db:
                     with db.cursor() as cur:
                         cur.execute(ddl)
                     if not autocommit:
@@ -1166,12 +1148,9 @@ class TablePanel(Gtk.Box):
         def run():
             try:
                 import psycopg
-                from tunnel import open_tunnel
-                with open_tunnel(conn) as (host, port), psycopg.connect(
-                    host=host, port=port,
-                    dbname=conn['database'], user=conn['username'],
-                    password=conn['password'], connect_timeout=10,
-                ) as db:
+                from tunnel import open_db
+
+                with open_db(conn) as db:
                     with db.cursor() as cur:
                         cur.execute(_INDEXES_SQL, [schema, table])
                         rows = cur.fetchall()
@@ -1266,12 +1245,9 @@ class TablePanel(Gtk.Box):
         def run():
             try:
                 import psycopg
-                from tunnel import open_tunnel
-                with open_tunnel(conn) as (host, port), psycopg.connect(
-                    host=host, port=port,
-                    dbname=conn['database'], user=conn['username'],
-                    password=conn['password'], connect_timeout=10,
-                ) as db:
+                from tunnel import open_db
+
+                with open_db(conn) as db:
                     with db.cursor() as cur:
                         cur.execute(ddl)
                     db.commit()
@@ -1287,12 +1263,9 @@ class TablePanel(Gtk.Box):
         def run():
             try:
                 import psycopg
-                from tunnel import open_tunnel
-                with open_tunnel(conn) as (host, port), psycopg.connect(
-                    host=host, port=port,
-                    dbname=conn['database'], user=conn['username'],
-                    password=conn['password'], connect_timeout=10,
-                ) as db:
+                from tunnel import open_db
+
+                with open_db(conn) as db:
                     with db.cursor() as cur:
                         cur.execute(_KEYS_SQL, [schema, table])
                         keys_rows = cur.fetchall()
@@ -1368,7 +1341,8 @@ class TablePanel(Gtk.Box):
         popover.set_parent(col_view)
 
         def on_right_click(_gesture, _n, x, y):
-            if not _cell_hit[0]:
+            if self._read_only or not _cell_hit[0]:
+                _cell_hit[0] = False
                 return
             _cell_hit[0] = False
             rect = Gdk.Rectangle()
@@ -1433,16 +1407,9 @@ class TablePanel(Gtk.Box):
         try:
             import psycopg
             from psycopg import sql as pgsql
-            from tunnel import open_tunnel
+            from tunnel import open_db
 
-            with open_tunnel(conn) as (host, port), psycopg.connect(
-                host=host,
-                port=port,
-                dbname=conn['database'],
-                user=conn['username'],
-                password=conn['password'],
-                connect_timeout=10,
-            ) as db:
+            with open_db(conn) as db:
                 with db.cursor() as cur:
                     cur.execute(
                         pgsql.SQL('SELECT * FROM {}.{}').format(
@@ -1569,17 +1536,9 @@ class TablePanel(Gtk.Box):
         try:
             import psycopg
             from psycopg import sql
-            from tunnel import open_tunnel, apply_conn_settings
+            from tunnel import open_db
 
-            with open_tunnel(conn) as (host, port), psycopg.connect(
-                host=host,
-                port=port,
-                dbname=conn['database'],
-                user=conn['username'],
-                password=conn['password'],
-                connect_timeout=10,
-            ) as db:
-                apply_conn_settings(db, conn)
+            with open_db(conn) as db:
                 with db.cursor() as cur:
                     cur.execute(_SCHEMA_SQL, [schema, table])
                     schema_rows = cur.fetchall()
@@ -1719,16 +1678,9 @@ class TablePanel(Gtk.Box):
         try:
             import psycopg
             from psycopg import sql
-            from tunnel import open_tunnel
+            from tunnel import open_db
 
-            with open_tunnel(conn) as (host, port), psycopg.connect(
-                host=host,
-                port=port,
-                dbname=conn['database'],
-                user=conn['username'],
-                password=conn['password'],
-                connect_timeout=10,
-            ) as db:
+            with open_db(conn) as db:
                 with db.cursor() as cur:
                     cur.execute(
                         sql.SQL('SELECT * FROM {}.{} LIMIT %s OFFSET %s').format(
@@ -1875,13 +1827,9 @@ class TablePanel(Gtk.Box):
         try:
             import psycopg
             from psycopg import sql as pgsql
-            from tunnel import open_tunnel
+            from tunnel import open_db
 
-            with open_tunnel(conn) as (host, port), psycopg.connect(
-                host=host, port=port,
-                dbname=conn['database'], user=conn['username'], password=conn['password'],
-                connect_timeout=10,
-            ) as db:
+            with open_db(conn) as db:
                 with db.cursor() as cur:
                     if cols:
                         query = pgsql.SQL('INSERT INTO {}.{} ({}) VALUES ({})').format(
@@ -1906,17 +1854,13 @@ class TablePanel(Gtk.Box):
         try:
             import psycopg
             from psycopg import sql as pgsql
-            from tunnel import open_tunnel
+            from tunnel import open_db
 
             set_cols = list(new_values.keys())
             set_vals = list(new_values.values())
             where_vals = [original_values[c] for c in pk_cols]
 
-            with open_tunnel(conn) as (host, port), psycopg.connect(
-                host=host, port=port,
-                dbname=conn['database'], user=conn['username'], password=conn['password'],
-                connect_timeout=10,
-            ) as db:
+            with open_db(conn) as db:
                 with db.cursor() as cur:
                     query = pgsql.SQL('UPDATE {}.{} SET {} WHERE {}').format(
                         pgsql.Identifier(schema),
@@ -1940,7 +1884,7 @@ class TablePanel(Gtk.Box):
         try:
             import psycopg
             from psycopg import sql as pgsql
-            from tunnel import open_tunnel
+            from tunnel import open_db
 
             where_clause = pgsql.SQL(' AND ').join(
                 pgsql.SQL('{} = {}').format(pgsql.Identifier(c), pgsql.Placeholder())
@@ -1951,11 +1895,7 @@ class TablePanel(Gtk.Box):
                 pgsql.Identifier(table),
                 where_clause,
             )
-            with open_tunnel(conn) as (host, port), psycopg.connect(
-                host=host, port=port,
-                dbname=conn['database'], user=conn['username'], password=conn['password'],
-                connect_timeout=10,
-            ) as db:
+            with open_db(conn) as db:
                 with db.cursor() as cur:
                     for row_vals in rows_to_delete:
                         cur.execute(del_query, [row_vals[c] for c in pk_cols])

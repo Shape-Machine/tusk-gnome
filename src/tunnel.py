@@ -54,6 +54,27 @@ def apply_conn_settings(db, conn):
 
 
 @contextmanager
+def open_db(conn):
+    """Open a psycopg connection via tunnel with session settings applied.
+
+    Preferred over calling open_tunnel + psycopg.connect directly.
+    Guarantees apply_conn_settings() runs on every connection, including
+    read-only enforcement.
+    """
+    import psycopg
+    with open_tunnel(conn) as (host, port), psycopg.connect(
+        host=host,
+        port=port,
+        dbname=conn['database'],
+        user=conn['username'],
+        password=conn['password'],
+        connect_timeout=10,
+    ) as db:
+        apply_conn_settings(db, conn)
+        yield db
+
+
+@contextmanager
 def open_tunnel(conn):
     """
     Yields (host, port) to connect Postgres to.

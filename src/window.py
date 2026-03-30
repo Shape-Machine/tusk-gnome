@@ -646,12 +646,9 @@ class TuskWindow(Adw.ApplicationWindow):
             def run():
                 try:
                     import psycopg
-                    from tunnel import open_tunnel
-                    with open_tunnel(conn) as (host, port), psycopg.connect(
-                        host=host, port=port,
-                        dbname=conn['database'], user=conn['username'],
-                        password=conn['password'], connect_timeout=10,
-                    ) as db:
+                    from tunnel import open_db
+
+                    with open_db(conn) as db:
                         with db.cursor() as cur:
                             cur.execute(ddl_sql)
                         db.commit()
@@ -697,12 +694,9 @@ class TuskWindow(Adw.ApplicationWindow):
             def run():
                 try:
                     import psycopg
-                    from tunnel import open_tunnel
-                    with open_tunnel(conn) as (host, port), psycopg.connect(
-                        host=host, port=port,
-                        dbname=conn['database'], user=conn['username'],
-                        password=conn['password'], connect_timeout=10,
-                    ) as db:
+                    from tunnel import open_db
+
+                    with open_db(conn) as db:
                         with db.cursor() as cur:
                             cur.execute(ddl)
                         db.commit()
@@ -752,12 +746,9 @@ class TuskWindow(Adw.ApplicationWindow):
             def run():
                 try:
                     import psycopg
-                    from tunnel import open_tunnel
-                    with open_tunnel(conn) as (host, port), psycopg.connect(
-                        host=host, port=port,
-                        dbname=conn['database'], user=conn['username'],
-                        password=conn['password'], connect_timeout=10,
-                    ) as db:
+                    from tunnel import open_db
+
+                    with open_db(conn) as db:
                         with db.cursor() as cur:
                             cur.execute(ddl)
                         db.commit()
@@ -784,12 +775,9 @@ class TuskWindow(Adw.ApplicationWindow):
             def run():
                 try:
                     import psycopg
-                    from tunnel import open_tunnel
-                    with open_tunnel(conn) as (host, port), psycopg.connect(
-                        host=host, port=port,
-                        dbname=conn['database'], user=conn['username'],
-                        password=conn['password'], connect_timeout=10,
-                    ) as db:
+                    from tunnel import open_db
+
+                    with open_db(conn) as db:
                         with db.cursor() as cur:
                             cur.execute(ddl)
                         db.commit()
@@ -814,12 +802,9 @@ class TuskWindow(Adw.ApplicationWindow):
         def run():
             try:
                 import psycopg
-                from tunnel import open_tunnel
-                with open_tunnel(conn) as (host, port), psycopg.connect(
-                    host=host, port=port,
-                    dbname=conn['database'], user=conn['username'],
-                    password=conn['password'], connect_timeout=10,
-                ) as db:
+                from tunnel import open_db
+
+                with open_db(conn) as db:
                     with db.cursor() as cur:
                         cur.execute('''
                             SELECT
@@ -868,12 +853,9 @@ class TuskWindow(Adw.ApplicationWindow):
             def run():
                 try:
                     import psycopg
-                    from tunnel import open_tunnel
-                    with open_tunnel(conn) as (host, port), psycopg.connect(
-                        host=host, port=port,
-                        dbname=conn['database'], user=conn['username'],
-                        password=conn['password'], connect_timeout=10,
-                    ) as db:
+                    from tunnel import open_db
+
+                    with open_db(conn) as db:
                         with db.cursor() as cur:
                             cur.execute(ddl_sql)
                         db.commit()
@@ -949,12 +931,9 @@ class TuskWindow(Adw.ApplicationWindow):
         def run():
             try:
                 import psycopg
-                from tunnel import open_tunnel
-                with open_tunnel(conn) as (host, port), psycopg.connect(
-                    host=host, port=port,
-                    dbname=conn['database'], user=conn['username'],
-                    password=conn['password'], connect_timeout=10,
-                ) as db:
+                from tunnel import open_db
+
+                with open_db(conn) as db:
                     with db.cursor() as cur:
                         cur.execute(ddl)
                     db.commit()
@@ -981,12 +960,9 @@ class TuskWindow(Adw.ApplicationWindow):
                 try:
                     import psycopg
                     from psycopg import sql as pgsql
-                    from tunnel import open_tunnel
-                    with open_tunnel(conn) as (host, port), psycopg.connect(
-                        host=host, port=port,
-                        dbname=conn['database'], user=conn['username'],
-                        password=conn['password'], connect_timeout=10,
-                    ) as db:
+                    from tunnel import open_db
+
+                    with open_db(conn) as db:
                         with db.cursor() as cur:
                             cur.execute(pgsql.SQL('CREATE SCHEMA {}').format(
                                 pgsql.Identifier(schema_name)
@@ -1009,12 +985,9 @@ class TuskWindow(Adw.ApplicationWindow):
                 try:
                     import psycopg
                     from psycopg import sql as pgsql
-                    from tunnel import open_tunnel
-                    with open_tunnel(conn) as (host, port), psycopg.connect(
-                        host=host, port=port,
-                        dbname=conn['database'], user=conn['username'],
-                        password=conn['password'], connect_timeout=10,
-                    ) as db:
+                    from tunnel import open_db
+
+                    with open_db(conn) as db:
                         with db.cursor() as cur:
                             cur.execute(pgsql.SQL('ALTER SCHEMA {} RENAME TO {}').format(
                                 pgsql.Identifier(schema), pgsql.Identifier(new_name)
@@ -1050,12 +1023,9 @@ class TuskWindow(Adw.ApplicationWindow):
                 try:
                     import psycopg
                     from psycopg import sql as pgsql
-                    from tunnel import open_tunnel
-                    with open_tunnel(conn) as (host, port), psycopg.connect(
-                        host=host, port=port,
-                        dbname=conn['database'], user=conn['username'],
-                        password=conn['password'], connect_timeout=10,
-                    ) as db:
+                    from tunnel import open_db
+
+                    with open_db(conn) as db:
                         with db.cursor() as cur:
                             ddl = pgsql.SQL('DROP SCHEMA {}').format(pgsql.Identifier(schema))
                             if cascade:
@@ -1103,12 +1073,9 @@ class TuskWindow(Adw.ApplicationWindow):
             try:
                 import psycopg
                 from psycopg import sql as pgsql
-                from tunnel import open_tunnel
-                with open_tunnel(conn) as (host, port), psycopg.connect(
-                    host=host, port=port,
-                    dbname=conn['database'], user=conn['username'],
-                    password=conn['password'], connect_timeout=10,
-                ) as db:
+                from tunnel import open_db
+
+                with open_db(conn) as db:
                     with db.cursor() as cur:
                         cur.execute(pgsql.SQL('DROP SCHEMA {} CASCADE').format(
                             pgsql.Identifier(schema)
@@ -1134,12 +1101,9 @@ class TuskWindow(Adw.ApplicationWindow):
                 try:
                     import psycopg
                     from psycopg import sql as pgsql
-                    from tunnel import open_tunnel
-                    with open_tunnel(conn) as (host, port), psycopg.connect(
-                        host=host, port=port,
-                        dbname=conn['database'], user=conn['username'],
-                        password=conn['password'], connect_timeout=10,
-                    ) as db:
+                    from tunnel import open_db
+
+                    with open_db(conn) as db:
                         with db.cursor() as cur:
                             ddl = pgsql.SQL('CREATE OR REPLACE VIEW {}.{} AS {}').format(
                                 pgsql.Identifier(schema),
