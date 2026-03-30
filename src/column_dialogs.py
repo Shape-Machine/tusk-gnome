@@ -1009,7 +1009,7 @@ class CreateTableDialog(Adw.Dialog):
     """
 
     def __init__(self, schemas, default_schema, on_save, on_open_in_editor=None):
-        super().__init__(title='Create Table', content_width=540)
+        super().__init__(title='Create Table', content_width=540, content_height=520)
         self._on_save = on_save
         self._on_open_in_editor = on_open_in_editor
         self._schemas = schemas if schemas else ['public']
@@ -1127,7 +1127,7 @@ class CreateTableDialog(Adw.Dialog):
 
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroll.set_propagate_natural_height(True)
+        scroll.set_vexpand(True)
         scroll.set_child(outer)
 
         toolbar_view.set_content(scroll)
