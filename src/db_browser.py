@@ -366,11 +366,11 @@ class DbBrowser(Gtk.Box):
         return schemas
 
     def _on_right_click(self, _gesture, _n_press, x, y):
-        ok, path, _col, _cx, _cy = self._tree.get_path_at_pos(int(x), int(y))
-        if not ok or path is None:
+        path, _col, _cx, _cy = self._tree.get_path_at_pos(int(x), int(y))
+        if path is None:
             return
-        ok2, it = self._filter.get_iter(path)
-        if not ok2:
+        it = self._filter.get_iter(path)
+        if it is None:
             return
         item_type = self._filter.get_value(it, COL_TYPE)
         label = self._filter.get_value(it, COL_LABEL)

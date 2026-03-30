@@ -1026,15 +1026,14 @@ class CreateTableDialog(Adw.Dialog):
         toolbar_view = Adw.ToolbarView()
         toolbar_view.add_top_bar(header)
 
-        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         outer.set_margin_top(12)
         outer.set_margin_bottom(12)
         outer.set_margin_start(12)
         outer.set_margin_end(12)
 
         # ── Table definition ────────────────────────────────────────────────
-        top_page = Adw.PreferencesPage()
-        table_group = Adw.PreferencesGroup(title='Table')
+        table_group = Adw.PreferencesGroup()
 
         self._name_row = Adw.EntryRow(title='Table name')
         self._name_row.connect('changed', self._on_form_changed)
@@ -1050,13 +1049,11 @@ class CreateTableDialog(Adw.Dialog):
         else:
             self._schema_combo = None
 
-        top_page.add(table_group)
-        outer.append(top_page)
+        outer.append(table_group)
 
         # ── Column list ─────────────────────────────────────────────────────
         col_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-        col_header.set_margin_top(12)
-        col_header.set_margin_bottom(6)
+        col_header.set_margin_bottom(4)
         col_lbl = Gtk.Label(label='Columns')
         col_lbl.add_css_class('heading')
         col_lbl.set_xalign(0)
@@ -1079,7 +1076,6 @@ class CreateTableDialog(Adw.Dialog):
 
         reorder_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         reorder_box.set_halign(Gtk.Align.START)
-        reorder_box.set_margin_top(4)
         self._up_btn = Gtk.Button(icon_name='go-up-symbolic')
         self._up_btn.add_css_class('flat')
         self._up_btn.set_tooltip_text('Move column up')
@@ -1125,7 +1121,6 @@ class CreateTableDialog(Adw.Dialog):
         preview_inner.append(preview_btn_box)
 
         preview_expander = Gtk.Expander(label='Preview SQL')
-        preview_expander.set_margin_top(16)
         preview_expander.set_expanded(False)
         preview_expander.set_child(preview_inner)
         outer.append(preview_expander)
@@ -1163,7 +1158,7 @@ class CreateTableDialog(Adw.Dialog):
 
         type_entry = Gtk.Entry()
         type_entry.set_text('text')
-        type_entry.set_width_chars(14)
+        type_entry.set_width_chars(8)
         type_entry.connect('changed', self._on_form_changed)
 
         type_btn = _make_type_picker_popover(type_entry)
