@@ -884,16 +884,9 @@ class SqlEditor(Gtk.Box):
         results = []  # list of dicts: {stmt, kind, data}
         try:
             import psycopg
-            from tunnel import open_tunnel
+            from tunnel import open_db
 
-            with open_tunnel(conn) as (host, port), psycopg.connect(
-                host=host,
-                port=port,
-                dbname=conn['database'],
-                user=conn['username'],
-                password=conn['password'],
-                connect_timeout=10,
-            ) as db:
+            with open_db(conn) as db:
                 self._active_conn = db
                 cancelled = False
                 try:
@@ -940,16 +933,9 @@ class SqlEditor(Gtk.Box):
     def _execute_single(self, conn, sql):
         try:
             import psycopg
-            from tunnel import open_tunnel
+            from tunnel import open_db
 
-            with open_tunnel(conn) as (host, port), psycopg.connect(
-                host=host,
-                port=port,
-                dbname=conn['database'],
-                user=conn['username'],
-                password=conn['password'],
-                connect_timeout=10,
-            ) as db:
+            with open_db(conn) as db:
                 self._active_conn = db
                 try:
                     with db.cursor() as cur:
@@ -1134,12 +1120,8 @@ class SqlEditor(Gtk.Box):
         explain_sql = f'{prefix} {sql}'
         try:
             import psycopg
-            from tunnel import open_tunnel
-            with open_tunnel(conn) as (host, port), psycopg.connect(
-                host=host, port=port,
-                dbname=conn['database'], user=conn['username'],
-                password=conn['password'], connect_timeout=10,
-            ) as db:
+            from tunnel import open_db
+            with open_db(conn) as db:
                 self._active_conn = db
                 try:
                     with db.cursor() as cur:

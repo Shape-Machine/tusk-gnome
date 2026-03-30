@@ -15,6 +15,7 @@ class TuskApplication(Adw.Application):
         self.connect('activate', self._on_activate)
         self.set_resource_base_path('/xyz/shapemachine/tusk-gnome')
         self._register_accels()
+        self._css_applied = False
 
     def _register_accels(self):
         self.set_accels_for_action('app.preferences',     ['<Control>comma'])
@@ -27,7 +28,9 @@ class TuskApplication(Adw.Application):
             self.set_accels_for_action(f'win.goto-tab-{i}', [f'<Alt>{i}'])
 
     def _on_activate(self, app):
-        self._apply_css()
+        if not self._css_applied:
+            self._apply_css()
+            self._css_applied = True
         win = self.props.active_window
         if not win:
             win = TuskWindow(application=self)

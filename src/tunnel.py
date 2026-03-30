@@ -54,12 +54,15 @@ def apply_conn_settings(db, conn):
 
 
 @contextmanager
-def open_db(conn):
+def open_db(conn, autocommit=False):
     """Open a psycopg connection via tunnel with session settings applied.
 
     Preferred over calling open_tunnel + psycopg.connect directly.
     Guarantees apply_conn_settings() runs on every connection, including
     read-only enforcement.
+
+    Pass autocommit=True for DDL that must run outside a transaction block,
+    e.g. CREATE/DROP INDEX CONCURRENTLY.
     """
     import psycopg
     with open_tunnel(conn) as (host, port), psycopg.connect(
@@ -71,6 +74,8 @@ def open_db(conn):
         connect_timeout=10,
     ) as db:
         apply_conn_settings(db, conn)
+        if autocommit:
+            db.autocommit = True
         yield db
 
 

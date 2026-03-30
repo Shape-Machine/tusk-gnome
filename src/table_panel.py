@@ -1131,7 +1131,7 @@ class TablePanel(Gtk.Box):
                 import psycopg
                 from tunnel import open_db
 
-                with open_db(conn) as db:
+                with open_db(conn, autocommit=autocommit) as db:
                     with db.cursor() as cur:
                         cur.execute(ddl)
                     if not autocommit:
@@ -1509,7 +1509,7 @@ class TablePanel(Gtk.Box):
         self._load_gen += 1
         self._refresh_btn.set_sensitive(False)
         self._export_btn.set_sensitive(False)
-        self._edit_bar.set_visible(item_type == 'table' and not read_only)
+        self._edit_bar.set_visible(item_type == 'table')
         self._edit_btn.set_sensitive(False)
         self._delete_btn.set_sensitive(False)
         _ro_tip = 'This connection is read-only'
