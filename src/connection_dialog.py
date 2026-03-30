@@ -33,7 +33,11 @@ class ConnectionDialog(Adw.Window):
         )
         self._connection = connection
         self._duplicate = duplicate
+        self._db_fetch_cancelled = False
         self._build_ui()
+        if duplicate:
+            self.connect('map', lambda _: self._name_row.grab_focus())
+        self.connect('close-request', self._on_close_request)
 
     def _build_ui(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -69,6 +73,7 @@ class ConnectionDialog(Adw.Window):
         browse_db_btn.set_tooltip_text('Browse available databases…')
         browse_db_btn.connect('clicked', self._on_browse_database)
         self._database_row.add_suffix(browse_db_btn)
+        self._browse_db_btn = browse_db_btn
 
         # Popover for database list
         self._db_popover = Gtk.Popover()
@@ -272,6 +277,10 @@ class ConnectionDialog(Adw.Window):
         if response == Gtk.ResponseType.ACCEPT:
             self._ssh_key_row.set_text(dialog.get_file().get_path())
 
+    def _on_close_request(self, _):
+        self._db_fetch_cancelled = True
+        return False
+
     def _on_browse_database(self, _btn):
         # Clear previous state
         child = self._db_browse_list.get_first_child()
@@ -281,23 +290,26 @@ class ConnectionDialog(Adw.Window):
             child = next_child
         self._db_browse_list.set_visible(False)
         self._db_browse_error.set_visible(False)
+        self._browse_db_btn.set_sensitive(False)
         self._db_browse_spinner.start()
         self._db_popover.popup()
 
-        params = self._current_params()
-        params['database'] = 'postgres'
-        threading.Thread(target=self._fetch_databases, args=(params,), daemon=True).start()
+        threading.Thread(
+            target=self._fetch_databases, args=(self._current_params(),), daemon=True
+        ).start()
 
     def _fetch_databases(self, params):
         try:
             import psycopg
             from tunnel import open_tunnel
 
+            # Prefer connecting to the entered database; fall back to 'postgres'
+            connect_db = params['database'] or 'postgres'
             with open_tunnel(params) as (host, port):
                 with psycopg.connect(
                     host=host,
                     port=port,
-                    dbname='postgres',
+                    dbname=connect_db,
                     user=params['username'],
                     password=params['password'],
                     connect_timeout=10,
@@ -316,7 +328,10 @@ class ConnectionDialog(Adw.Window):
             GLib.idle_add(self._on_databases_fetch_error, str(e))
 
     def _on_databases_fetched(self, databases):
+        if self._db_fetch_cancelled:
+            return
         self._db_browse_spinner.stop()
+        self._browse_db_btn.set_sensitive(True)
         for name in databases:
             row = Gtk.ListBoxRow()
             row._dbname = name
@@ -330,7 +345,10 @@ class ConnectionDialog(Adw.Window):
         self._db_browse_list.set_visible(bool(databases))
 
     def _on_databases_fetch_error(self, error):
+        if self._db_fetch_cancelled:
+            return
         self._db_browse_spinner.stop()
+        self._browse_db_btn.set_sensitive(True)
         self._db_browse_error.set_label(error)
         self._db_browse_error.set_visible(True)
 
