@@ -243,6 +243,57 @@ def _make_type_picker_popover(entry):
 
 
 # ---------------------------------------------------------------------------
+# Rename dialog  (#87)
+# ---------------------------------------------------------------------------
+
+class RenameDialog(Adw.Dialog):
+    """Small dialog for renaming a table or column.
+
+    current_name – the name to pre-fill
+    on_rename(new_name) – callback called with the new name on confirm
+    title – dialog title (e.g. 'Rename Table' or 'Rename Column')
+    """
+
+    def __init__(self, current_name, on_rename, title='Rename'):
+        super().__init__(title=title, content_width=380)
+        self._on_rename = on_rename
+
+        header = Adw.HeaderBar()
+        self._apply_btn = Gtk.Button(label='Rename')
+        self._apply_btn.add_css_class('suggested-action')
+        self._apply_btn.set_sensitive(False)
+        self._apply_btn.connect('clicked', self._on_apply)
+        header.pack_end(self._apply_btn)
+
+        toolbar_view = Adw.ToolbarView()
+        toolbar_view.add_top_bar(header)
+
+        page = Adw.PreferencesPage()
+        group = Adw.PreferencesGroup()
+        self._name_row = Adw.EntryRow(title='New name')
+        self._name_row.set_text(current_name)
+        self._name_row.connect('changed', self._on_changed)
+        self._name_row.connect('entry-activated', self._on_entry_activated)
+        group.add(self._name_row)
+        page.add(group)
+        toolbar_view.set_content(page)
+        self.set_child(toolbar_view)
+
+        self._on_changed()
+
+    def _on_changed(self, *_):
+        self._apply_btn.set_sensitive(bool(self._name_row.get_text().strip()))
+
+    def _on_entry_activated(self, *_):
+        if self._apply_btn.get_sensitive():
+            self._on_apply()
+
+    def _on_apply(self, *_):
+        self._on_rename(self._name_row.get_text().strip())
+        self.close()
+
+
+# ---------------------------------------------------------------------------
 # Add Column dialog  (#83, #111)
 # ---------------------------------------------------------------------------
 
@@ -1025,7 +1076,13 @@ class CreateTableDialog(Adw.Dialog):
     on_save(ddl)   – called with the full CREATE TABLE SQL string on confirm
     """
 
-    def __init__(self, schemas, default_schema, on_save):
+    def __init__(self, schemas, default_schema, on_save,
+                 prefill_name=None, prefill_columns=None):
+        """
+        prefill_name    – optional initial value for the table name field
+        prefill_columns – optional list of dicts: {name, type, nullable, default, is_pk}
+                          used by Clone Structure to pre-populate column rows
+        """
         super().__init__(title='Create Table', content_width=540, content_height=520)
         self._on_save = on_save
         self._schemas = schemas if schemas else ['public']
@@ -1170,8 +1227,20 @@ class CreateTableDialog(Adw.Dialog):
         toolbar_view.add_bottom_bar(bottom_box)
         self.set_child(toolbar_view)
 
-        # Start with one empty column row
-        self._add_col_row()
+        # Pre-fill name and columns (Clone Structure) or start with one empty row
+        if prefill_name:
+            self._name_row.set_text(prefill_name)
+        if prefill_columns:
+            for col in prefill_columns:
+                self._add_col_row(
+                    name=col.get('name', ''),
+                    pg_type=col.get('type', 'text'),
+                    nullable=col.get('nullable', True),
+                    default=col.get('default', ''),
+                    is_pk=col.get('is_pk', False),
+                )
+        else:
+            self._add_col_row()
 
     def _toggle_preview(self, _):
         revealed = not self._preview_revealer.get_reveal_child()
@@ -1186,7 +1255,7 @@ class CreateTableDialog(Adw.Dialog):
             return self._schemas[idx] if 0 <= idx < len(self._schemas) else self._schemas[0]
         return self._schemas[0]
 
-    def _add_col_row(self):
+    def _add_col_row(self, name='', pg_type='text', nullable=True, default='', is_pk=False):
         row = Gtk.ListBoxRow()
 
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
@@ -1198,10 +1267,11 @@ class CreateTableDialog(Adw.Dialog):
         name_entry = Gtk.Entry()
         name_entry.set_placeholder_text('column_name')
         name_entry.set_hexpand(True)
+        name_entry.set_text(name)
         name_entry.connect('changed', self._on_form_changed)
 
         type_entry = Gtk.Entry()
-        type_entry.set_text('text')
+        type_entry.set_text(pg_type or 'text')
         type_entry.set_width_chars(8)
         type_entry.connect('changed', self._on_form_changed)
 
@@ -1209,18 +1279,20 @@ class CreateTableDialog(Adw.Dialog):
 
         null_btn = Gtk.ToggleButton(label='NULL')
         null_btn.set_tooltip_text('Allow NULL values')
-        null_btn.set_active(True)
+        null_btn.set_active(nullable)
         null_btn.add_css_class('flat')
         null_btn.connect('toggled', self._on_form_changed)
 
         pk_btn = Gtk.ToggleButton(label='PK')
         pk_btn.set_tooltip_text('Set as primary key')
+        pk_btn.set_active(is_pk)
         pk_btn.add_css_class('flat')
         pk_btn.connect('toggled', self._on_pk_toggled, row)
 
         default_entry = Gtk.Entry()
         default_entry.set_placeholder_text('default')
         default_entry.set_width_chars(7)
+        default_entry.set_text(default or '')
         default_entry.set_tooltip_text('DEFAULT value (optional)')
         default_entry.connect('changed', self._on_form_changed)
 
@@ -1247,7 +1319,8 @@ class CreateTableDialog(Adw.Dialog):
         self._col_list.append(row)
         self._col_rows.append(row)
         self._on_form_changed()
-        name_entry.grab_focus()
+        if not name:
+            name_entry.grab_focus()
 
     def _remove_col_row(self, _btn, row):
         self._col_list.remove(row)

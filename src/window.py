@@ -262,6 +262,10 @@ class TuskWindow(Adw.ApplicationWindow):
         self._browser = DbBrowser()
         self._browser.connect('table-selected', self._on_table_selected)
         self._browser.connect('create-table-requested', self._on_create_table_requested)
+        self._browser.connect('drop-table-requested', self._on_drop_table_requested)
+        self._browser.connect('truncate-table-requested', self._on_truncate_table_requested)
+        self._browser.connect('rename-table-requested', self._on_rename_table_requested)
+        self._browser.connect('clone-table-requested', self._on_clone_table_requested)
         sidebar_paned.set_start_child(self._browser)
 
         self._file_explorer = FileExplorer()
@@ -645,4 +649,253 @@ class TuskWindow(Adw.ApplicationWindow):
 
         dlg = CreateTableDialog(schemas, schema, on_save)
         dlg.present(self)
+
+    # ── Drop Table / Drop View (from browser right-click) ────────────────────
+
+    def _on_drop_table_requested(self, _browser, conn, schema, table, item_type):
+        is_view = item_type == 'view'
+        heading = f'Drop {"view" if is_view else "table"} "{schema}.{table}"?'
+        body = ('This removes the view definition.' if is_view else
+                'All data will be permanently deleted. This action cannot be undone.')
+
+        cascade_check = Gtk.CheckButton(label='Drop with CASCADE (removes dependent objects)')
+        cascade_check.set_margin_top(8)
+        cascade_check.set_margin_start(4)
+
+        dialog = Adw.AlertDialog(heading=heading, body=body)
+        if not is_view:
+            dialog.set_extra_child(cascade_check)
+        dialog.add_response('cancel', 'Cancel')
+        drop_label = 'Drop View' if is_view else 'Drop Table'
+        dialog.add_response('drop', drop_label)
+        dialog.set_response_appearance('drop', Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response('cancel')
+        dialog.set_close_response('cancel')
+
+        def on_response(_d, response):
+            if response != 'drop':
+                return
+            cascade = (not is_view) and cascade_check.get_active()
+            obj_type = 'VIEW' if is_view else 'TABLE'
+            qi = lambda n: '"' + n.replace('"', '""') + '"'
+            ddl = f'DROP {obj_type} {qi(schema)}.{qi(table)}'
+            if cascade:
+                ddl += ' CASCADE'
+            ddl += ';'
+
+            def run():
+                try:
+                    import psycopg
+                    from tunnel import open_tunnel
+                    with open_tunnel(conn) as (host, port), psycopg.connect(
+                        host=host, port=port,
+                        dbname=conn['database'], user=conn['username'],
+                        password=conn['password'], connect_timeout=10,
+                    ) as db:
+                        with db.cursor() as cur:
+                            cur.execute(ddl)
+                        db.commit()
+                    tab_id = f'table:{conn["id"]}:{schema}.{table}'
+                    GLib.idle_add(self._close_tab_by_id, tab_id)
+                    GLib.idle_add(self._browser.load, conn)
+                except Exception as e:
+                    GLib.idle_add(self._show_browser_error, 'Drop Failed', str(e))
+
+            threading.Thread(target=run, daemon=True).start()
+
+        dialog.connect('response', on_response)
+        dialog.present(self)
+
+    # ── Truncate Table (from browser right-click) ─────────────────────────────
+
+    def _on_truncate_table_requested(self, _browser, conn, schema, table):
+        restart_check = Gtk.CheckButton(label='Restart identity sequences (RESTART IDENTITY)')
+        restart_check.set_margin_top(8)
+        restart_check.set_margin_start(4)
+
+        dialog = Adw.AlertDialog(
+            heading=f'Truncate "{schema}.{table}"?',
+            body='All rows will be deleted. The table structure is preserved.',
+        )
+        dialog.set_extra_child(restart_check)
+        dialog.add_response('cancel', 'Cancel')
+        dialog.add_response('truncate', 'Truncate')
+        dialog.set_response_appearance('truncate', Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response('cancel')
+        dialog.set_close_response('cancel')
+
+        def on_response(_d, response):
+            if response != 'truncate':
+                return
+            qi = lambda n: '"' + n.replace('"', '""') + '"'
+            ddl = f'TRUNCATE TABLE {qi(schema)}.{qi(table)}'
+            if restart_check.get_active():
+                ddl += ' RESTART IDENTITY'
+            ddl += ';'
+
+            def run():
+                try:
+                    import psycopg
+                    from tunnel import open_tunnel
+                    with open_tunnel(conn) as (host, port), psycopg.connect(
+                        host=host, port=port,
+                        dbname=conn['database'], user=conn['username'],
+                        password=conn['password'], connect_timeout=10,
+                    ) as db:
+                        with db.cursor() as cur:
+                            cur.execute(ddl)
+                        db.commit()
+                    # Refresh data tab if open
+                    tab_id = f'table:{conn["id"]}:{schema}.{table}'
+                    GLib.idle_add(self._refresh_tab_by_id, tab_id)
+                except Exception as e:
+                    GLib.idle_add(self._show_browser_error, 'Truncate Failed', str(e))
+
+            threading.Thread(target=run, daemon=True).start()
+
+        dialog.connect('response', on_response)
+        dialog.present(self)
+
+    # ── Rename Table (from browser right-click) ───────────────────────────────
+
+    def _on_rename_table_requested(self, _browser, conn, schema, table):
+        from column_dialogs import RenameDialog
+
+        def on_rename(new_name):
+            qi = lambda n: '"' + n.replace('"', '""') + '"'
+            ddl = f'ALTER TABLE {qi(schema)}.{qi(table)} RENAME TO {qi(new_name)};'
+
+            def run():
+                try:
+                    import psycopg
+                    from tunnel import open_tunnel
+                    with open_tunnel(conn) as (host, port), psycopg.connect(
+                        host=host, port=port,
+                        dbname=conn['database'], user=conn['username'],
+                        password=conn['password'], connect_timeout=10,
+                    ) as db:
+                        with db.cursor() as cur:
+                            cur.execute(ddl)
+                        db.commit()
+                    old_tab_id = f'table:{conn["id"]}:{schema}.{table}'
+                    new_tab_id = f'table:{conn["id"]}:{schema}.{new_name}'
+                    GLib.idle_add(self._rename_tab, old_tab_id, new_tab_id,
+                                  f'{schema}.{new_name}', conn, schema, new_name)
+                    GLib.idle_add(self._browser.load, conn)
+                except Exception as e:
+                    GLib.idle_add(self._show_browser_error, 'Rename Failed', str(e))
+
+            threading.Thread(target=run, daemon=True).start()
+
+        dlg = RenameDialog(table, on_rename, title='Rename Table')
+        dlg.present(self)
+
+    # ── Clone Table Structure (from browser right-click) ─────────────────────
+
+    def _on_clone_table_requested(self, _browser, conn, schema, table):
+        from column_dialogs import CreateTableDialog
+
+        def run():
+            try:
+                import psycopg
+                from tunnel import open_tunnel
+                with open_tunnel(conn) as (host, port), psycopg.connect(
+                    host=host, port=port,
+                    dbname=conn['database'], user=conn['username'],
+                    password=conn['password'], connect_timeout=10,
+                ) as db:
+                    with db.cursor() as cur:
+                        cur.execute('''
+                            SELECT
+                                a.attname,
+                                pg_catalog.format_type(a.atttypid, a.atttypmod),
+                                NOT a.attnotnull,
+                                pg_get_expr(d.adbin, d.adrelid),
+                                EXISTS (
+                                    SELECT 1 FROM pg_index i
+                                    JOIN pg_attribute ia ON ia.attrelid = i.indrelid
+                                        AND ia.attnum = ANY(i.indkey)
+                                    WHERE i.indrelid = a.attrelid
+                                        AND ia.attnum = a.attnum
+                                        AND i.indisprimary
+                                )
+                            FROM pg_attribute a
+                            LEFT JOIN pg_attrdef d
+                                ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+                            JOIN pg_class c ON c.oid = a.attrelid
+                            JOIN pg_namespace n ON n.oid = c.relnamespace
+                            WHERE n.nspname = %s AND c.relname = %s
+                              AND a.attnum > 0 AND NOT a.attisdropped
+                            ORDER BY a.attnum
+                        ''', (schema, table))
+                        cols = [
+                            {
+                                'name': r[0],
+                                'type': r[1],
+                                'nullable': r[2],
+                                'default': r[3] or '',
+                                'is_pk': r[4],
+                            }
+                            for r in cur.fetchall()
+                        ]
+                GLib.idle_add(self._open_clone_dialog, conn, schema, cols, table)
+            except Exception as e:
+                GLib.idle_add(self._show_browser_error, 'Clone Failed', str(e))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _open_clone_dialog(self, conn, schema, cols, source_table):
+        from column_dialogs import CreateTableDialog
+        schemas = self._browser.get_loaded_schemas() or [schema]
+
+        def on_save(ddl_sql, on_done):
+            def run():
+                try:
+                    import psycopg
+                    from tunnel import open_tunnel
+                    with open_tunnel(conn) as (host, port), psycopg.connect(
+                        host=host, port=port,
+                        dbname=conn['database'], user=conn['username'],
+                        password=conn['password'], connect_timeout=10,
+                    ) as db:
+                        with db.cursor() as cur:
+                            cur.execute(ddl_sql)
+                        db.commit()
+                    GLib.idle_add(self._browser.load, conn)
+                    GLib.idle_add(on_done)
+                except Exception as e:
+                    GLib.idle_add(on_done, str(e))
+            threading.Thread(target=run, daemon=True).start()
+
+        dlg = CreateTableDialog(
+            schemas, schema, on_save,
+            prefill_name=f'{source_table}_copy',
+            prefill_columns=cols,
+        )
+        dlg.present(self)
+
+    # ── Tab helpers ───────────────────────────────────────────────────────────
+
+    def _close_tab_by_id(self, tab_id):
+        page = self._find_tab(tab_id)
+        if page:
+            self._tab_view.close_page(page)
+
+    def _refresh_tab_by_id(self, tab_id):
+        page = self._find_tab(tab_id)
+        if page and isinstance(page.get_child(), TablePanel):
+            page.get_child()._on_refresh()
+
+    def _rename_tab(self, old_tab_id, new_tab_id, new_title, conn, schema, new_name):
+        page = self._find_tab(old_tab_id)
+        if page:
+            page._tab_id = new_tab_id
+            page.set_title(new_title)
+            if isinstance(page.get_child(), TablePanel):
+                page.get_child().load(conn, schema, new_name, 'table')
+
+    def _show_browser_error(self, heading, body):
+        dialog = Adw.AlertDialog(heading=heading, body=body)
+        dialog.add_response('ok', 'OK')
+        dialog.present(self)
 

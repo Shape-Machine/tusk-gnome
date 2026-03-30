@@ -25,6 +25,22 @@ class DbBrowser(Gtk.Box):
             GObject.SignalFlags.RUN_FIRST, None,
             (GObject.TYPE_PYOBJECT, str),  # conn, schema
         ),
+        'drop-table-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str, str, str),  # conn, schema, table, item_type
+        ),
+        'truncate-table-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str, str),  # conn, schema, table
+        ),
+        'rename-table-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str, str),  # conn, schema, table
+        ),
+        'clone-table-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str, str),  # conn, schema, table
+        ),
     }
 
     def __init__(self):
@@ -82,6 +98,8 @@ class DbBrowser(Gtk.Box):
         self._ctx_popover = None
         self._ctx_conn = None
         self._ctx_schema = None
+        self._ctx_table = None
+        self._ctx_item_type = None
 
         icon_renderer = Gtk.CellRendererPixbuf()
         text_renderer = Gtk.CellRendererText()
@@ -366,7 +384,10 @@ class DbBrowser(Gtk.Box):
         return schemas
 
     def _on_right_click(self, _gesture, _n_press, x, y):
-        path, _col, _cx, _cy = self._tree.get_path_at_pos(int(x), int(y))
+        result = self._tree.get_path_at_pos(int(x), int(y))
+        if result is None:
+            return
+        path, _col, _cx, _cy = result
         if path is None:
             return
         it = self._filter.get_iter(path)
@@ -376,33 +397,88 @@ class DbBrowser(Gtk.Box):
         label = self._filter.get_value(it, COL_LABEL)
         conn = self._filter.get_value(it, COL_CONN)
         schema = self._filter.get_value(it, COL_SCHEMA)
+        table = self._filter.get_value(it, COL_TABLE)
 
-        if item_type == 'schema' or (item_type == 'group' and label == 'Tables'):
-            self._ctx_conn = conn
-            self._ctx_schema = schema
-            self._show_create_table_menu(x, y)
+        self._ctx_conn = conn
+        self._ctx_schema = schema
+        self._ctx_table = table
+        self._ctx_item_type = item_type
 
-    def _show_create_table_menu(self, x, y):
-        if self._ctx_popover is None:
-            ag = Gio.SimpleActionGroup()
-            action = Gio.SimpleAction.new('create-table', None)
-            action.connect('activate', lambda *_: self.emit(
-                'create-table-requested', self._ctx_conn, self._ctx_schema
-            ))
-            ag.add_action(action)
-            self._tree.insert_action_group('browser', ag)
+        if item_type in ('table', 'view'):
+            self._show_table_context_menu(x, y, item_type)
+        elif item_type == 'schema' or (item_type == 'group' and label == 'Tables'):
+            self._show_schema_context_menu(x, y)
 
-            menu = Gio.Menu()
-            menu.append('Create Table…', 'browser.create-table')
-            popover = Gtk.PopoverMenu(menu_model=menu)
-            popover.set_has_arrow(False)
-            popover.set_parent(self._tree)
-            self._ctx_popover = popover
+    def _show_schema_context_menu(self, x, y):
+        ag = Gio.SimpleActionGroup()
+        action = Gio.SimpleAction.new('create-table', None)
+        action.connect('activate', lambda *_: self.emit(
+            'create-table-requested', self._ctx_conn, self._ctx_schema
+        ))
+        ag.add_action(action)
+        self._tree.insert_action_group('browser', ag)
+
+        menu = Gio.Menu()
+        menu.append('Create Table…', 'browser.create-table')
+        popover = Gtk.PopoverMenu(menu_model=menu)
+        popover.set_has_arrow(False)
+        popover.set_parent(self._tree)
 
         rect = Gdk.Rectangle()
         rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
-        self._ctx_popover.set_pointing_to(rect)
-        self._ctx_popover.popup()
+        popover.set_pointing_to(rect)
+        popover.popup()
+
+    def _show_table_context_menu(self, x, y, item_type):
+        ag = Gio.SimpleActionGroup()
+
+        def add_action(name, cb):
+            action = Gio.SimpleAction.new(name, None)
+            action.connect('activate', lambda *_: cb())
+            ag.add_action(action)
+
+        add_action('create-table', lambda: self.emit(
+            'create-table-requested', self._ctx_conn, self._ctx_schema
+        ))
+        add_action('rename-table', lambda: self.emit(
+            'rename-table-requested', self._ctx_conn, self._ctx_schema, self._ctx_table
+        ))
+        add_action('clone-table', lambda: self.emit(
+            'clone-table-requested', self._ctx_conn, self._ctx_schema, self._ctx_table
+        ))
+        add_action('truncate-table', lambda: self.emit(
+            'truncate-table-requested', self._ctx_conn, self._ctx_schema, self._ctx_table
+        ))
+        add_action('drop-object', lambda: self.emit(
+            'drop-table-requested', self._ctx_conn, self._ctx_schema,
+            self._ctx_table, self._ctx_item_type
+        ))
+
+        self._tree.insert_action_group('tbl', ag)
+
+        section1 = Gio.Menu()
+        section1.append('Create Table…', 'tbl.create-table')
+        if item_type == 'table':
+            section1.append('Rename Table…', 'tbl.rename-table')
+            section1.append('Clone Structure…', 'tbl.clone-table')
+        section2 = Gio.Menu()
+        if item_type == 'table':
+            section2.append('Truncate…', 'tbl.truncate-table')
+        drop_label = 'Drop Table…' if item_type == 'table' else 'Drop View…'
+        section2.append(drop_label, 'tbl.drop-object')
+
+        menu = Gio.Menu()
+        menu.append_section(None, section1)
+        menu.append_section(None, section2)
+
+        popover = Gtk.PopoverMenu(menu_model=menu)
+        popover.set_has_arrow(False)
+        popover.set_parent(self._tree)
+
+        rect = Gdk.Rectangle()
+        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
+        popover.set_pointing_to(rect)
+        popover.popup()
 
     def _on_row_activated(self, tree, path, _col):
         it = self._filter.get_iter(path)
