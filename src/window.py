@@ -506,7 +506,7 @@ class TuskWindow(Adw.ApplicationWindow):
                 self._tab_view.close_page(page)
 
         new_conn = {**conn, 'database': new_dbname}
-        self._active_conn = new_conn
+        self._set_active_conn(new_conn)
 
         label = new_conn['name']
         if new_conn.get('read_only'):
@@ -568,7 +568,7 @@ class TuskWindow(Adw.ApplicationWindow):
 
         # Switch active connection to postgres fallback and reload browser
         new_conn = {**conn, 'database': 'postgres'}
-        self._active_conn = new_conn
+        self._set_active_conn(new_conn)
         label = new_conn['name']
         if new_conn.get('read_only'):
             label += '  🔒'

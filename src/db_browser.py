@@ -448,6 +448,7 @@ class DbBrowser(Gtk.Box):
                         SELECT datname FROM pg_database
                         WHERE datistemplate = false
                           AND datname NOT IN ('template0', 'template1')
+                          AND has_database_privilege(current_user, datname, 'CONNECT')
                         ORDER BY datname
                     """)
                     all_databases = [r[0] for r in cur.fetchall()]
