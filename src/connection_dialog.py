@@ -1,5 +1,6 @@
 import threading
 import uuid
+from urllib.parse import urlparse, unquote, quote
 
 import gi
 import keyring
@@ -7,7 +8,7 @@ import keyring
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Gtk, Adw, GObject, GLib
+from gi.repository import Gtk, Adw, GObject, GLib, Gdk
 
 from connections import KEYRING_SERVICE
 
@@ -52,6 +53,19 @@ class ConnectionDialog(Adw.Window):
         content.set_margin_end(16)
 
         conn = self._connection
+
+        # ── URI import ────────────────────────────────────────────────────────
+        uri_group = Adw.PreferencesGroup()
+
+        self._uri_row = Adw.EntryRow(title='Paste PostgreSQL URI')
+        parse_btn = Gtk.Button(icon_name='go-next-symbolic')
+        parse_btn.add_css_class('flat')
+        parse_btn.set_valign(Gtk.Align.CENTER)
+        parse_btn.set_tooltip_text('Parse URI and fill form')
+        parse_btn.connect('clicked', self._on_parse_uri)
+        self._uri_row.add_suffix(parse_btn)
+        self._uri_row.connect('entry-activated', self._on_parse_uri)
+        uri_group.add(self._uri_row)
 
         # ── Name ─────────────────────────────────────────────────────────────
         name_group = Adw.PreferencesGroup()
@@ -113,9 +127,25 @@ class ConnectionDialog(Adw.Window):
         db_popover_box.append(db_scroll)
         self._db_popover.set_child(db_popover_box)
 
+        # ── Connection string preview ─────────────────────────────────────────
+        self._uri_preview_row = Adw.ActionRow()
+        self._uri_preview_row.set_subtitle_selectable(True)
+
+        copy_uri_btn = Gtk.Button(icon_name='edit-copy-symbolic')
+        copy_uri_btn.add_css_class('flat')
+        copy_uri_btn.set_valign(Gtk.Align.CENTER)
+        copy_uri_btn.set_tooltip_text('Copy URI')
+        copy_uri_btn.connect('clicked', self._on_copy_preview_uri)
+        self._uri_preview_row.add_suffix(copy_uri_btn)
+        self._copy_uri_btn = copy_uri_btn
+
+        uri_expander = Adw.ExpanderRow(title='Connection String')
+        uri_expander.add_row(self._uri_preview_row)
+
         details_group.add(self._host_row)
         details_group.add(self._port_row)
         details_group.add(self._database_row)
+        details_group.add(uri_expander)
 
         # ── Authentication ────────────────────────────────────────────────────
         auth_group = Adw.PreferencesGroup(title='Authentication')
@@ -216,6 +246,12 @@ class ConnectionDialog(Adw.Window):
         self._keyring_warning.set_xalign(0)
         self._keyring_warning.set_visible(keyring_failed)
 
+        # Connect live preview signals
+        for row in (self._host_row, self._port_row, self._database_row, self._username_row):
+            row.connect('notify::text', self._update_uri_preview)
+        self._update_uri_preview()
+
+        content.append(uri_group)
         content.append(name_group)
         content.append(details_group)
         content.append(auth_group)
@@ -276,6 +312,55 @@ class ConnectionDialog(Adw.Window):
     def _on_key_chosen(self, dialog, response):
         if response == Gtk.ResponseType.ACCEPT:
             self._ssh_key_row.set_text(dialog.get_file().get_path())
+
+    def _on_parse_uri(self, *_):
+        uri_text = self._uri_row.get_text().strip()
+        if not uri_text:
+            return
+        try:
+            parsed = urlparse(uri_text)
+            if parsed.scheme not in ('postgresql', 'postgres'):
+                raise ValueError('URI must start with postgresql:// or postgres://')
+            host = parsed.hostname or 'localhost'
+            port = parsed.port or 5432
+            database = parsed.path.lstrip('/') or 'postgres'
+            username = unquote(parsed.username or '')
+            password = unquote(parsed.password or '')
+        except Exception:
+            self._uri_row.add_css_class('error')
+            return
+
+        self._uri_row.remove_css_class('error')
+        self._host_row.set_text(host)
+        self._port_row.set_text(str(port))
+        self._database_row.set_text(database)
+        self._username_row.set_text(username)
+        self._password_row.set_text(password)
+        if not self._name_row.get_text().strip():
+            self._name_row.set_text(
+                f'{username}@{host}/{database}' if username else f'{host}/{database}'
+            )
+        self._uri_row.set_text('')
+
+    def _update_uri_preview(self, *_):
+        host = self._host_row.get_text().strip() or 'host'
+        try:
+            port = int(self._port_row.get_text().strip())
+        except ValueError:
+            port = 5432
+        database = self._database_row.get_text().strip() or 'database'
+        username = self._username_row.get_text().strip()
+        if username:
+            uri = f'postgresql://{quote(username, safe="")}@{host}:{port}/{database}'
+        else:
+            uri = f'postgresql://{host}:{port}/{database}'
+        self._uri_preview_row.set_subtitle(uri)
+
+    def _on_copy_preview_uri(self, btn):
+        uri = self._uri_preview_row.get_subtitle()
+        Gdk.Display.get_default().get_clipboard().set(uri)
+        btn.set_icon_name('object-select-symbolic')
+        GLib.timeout_add(1500, lambda: btn.set_icon_name('edit-copy-symbolic') or False)
 
     def _on_close_request(self, _):
         self._db_fetch_cancelled = True

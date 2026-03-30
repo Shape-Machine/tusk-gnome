@@ -52,6 +52,7 @@ class TuskWindow(Adw.ApplicationWindow):
         add('close-tab',      lambda *_: self._close_current_tab())
         add('next-tab',       lambda *_: self._tab_view.select_next_page())
         add('prev-tab',       lambda *_: self._tab_view.select_previous_page())
+        add('import-pgpass',  lambda *_: self._on_import_pgpass())
         self._refresh_action = Gio.SimpleAction.new('refresh-tab', None)
         self._refresh_action.connect('activate', lambda *_: self._refresh_current_tab())
         self._refresh_action.set_enabled(False)
@@ -202,7 +203,9 @@ class TuskWindow(Adw.ApplicationWindow):
 
         root.set_start_child(self._build_sidebar())
         root.set_end_child(self._build_main())
-        self.set_content(root)
+        self._toast_overlay = Adw.ToastOverlay()
+        self._toast_overlay.set_child(root)
+        self.set_content(self._toast_overlay)
 
     def _build_sidebar(self):
         sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -212,9 +215,13 @@ class TuskWindow(Adw.ApplicationWindow):
         header.set_show_end_title_buttons(False)
         header.set_title_widget(Gtk.Label(label='Tusk'))
 
-        add_btn = Gtk.Button(icon_name='list-add-symbolic')
+        add_btn = Adw.SplitButton()
+        add_btn.set_icon_name('list-add-symbolic')
         add_btn.set_tooltip_text('New Connection')
         add_btn.connect('clicked', self._on_add_connection)
+        add_menu = Gio.Menu()
+        add_menu.append('Import from .pgpass…', 'win.import-pgpass')
+        add_btn.set_menu_model(add_menu)
         header.pack_end(add_btn)
 
         sidebar.append(header)
@@ -379,6 +386,7 @@ class TuskWindow(Adw.ApplicationWindow):
         menu.append('Disconnect', 'row.disconnect')
         menu.append('Edit', 'row.edit')
         menu.append('Duplicate', 'row.duplicate')
+        menu.append('Copy as URI', 'row.copy-uri')
         menu.append('Delete', 'row.delete')
 
         menu_btn = Gtk.MenuButton()
@@ -401,6 +409,9 @@ class TuskWindow(Adw.ApplicationWindow):
         duplicate_action = Gio.SimpleAction.new('duplicate', None)
         duplicate_action.connect('activate', lambda a, p, r=row: self._on_duplicate_connection(r))
         ag.add_action(duplicate_action)
+        copy_uri_action = Gio.SimpleAction.new('copy-uri', None)
+        copy_uri_action.connect('activate', lambda a, p, r=row: self._on_copy_as_uri(r))
+        ag.add_action(copy_uri_action)
         delete_action = Gio.SimpleAction.new('delete', None)
         delete_action.connect('activate', lambda a, p, r=row: self._on_delete_connection(r))
         ag.add_action(delete_action)
@@ -416,6 +427,71 @@ class TuskWindow(Adw.ApplicationWindow):
         dlg = ConnectionDialog(parent=self)
         dlg.connect('connection-saved', self._on_connection_added)
         dlg.present()
+
+    def _on_copy_as_uri(self, row):
+        from urllib.parse import quote
+        conn = row._conn
+        user = quote(conn['username'], safe='')
+        host = conn['host']
+        port = conn['port']
+        database = conn['database']
+        uri = f'postgresql://{user}@{host}:{port}/{database}'
+        Gdk.Display.get_default().get_clipboard().set(uri)
+        toast = Adw.Toast(title='URI copied to clipboard')
+        toast.set_timeout(2)
+        self._toast_overlay.add_toast(toast)
+
+    def _on_import_pgpass(self):
+        import os
+        from pgpass_dialog import PgpassImportDialog, parse_pgpass
+
+        pgpass_path = os.path.expanduser('~/.pgpass')
+        if not os.path.exists(pgpass_path):
+            dialog = Adw.MessageDialog(
+                transient_for=self,
+                heading='No .pgpass File',
+                body='~/.pgpass was not found on this system.',
+            )
+            dialog.add_response('ok', 'OK')
+            dialog.present()
+            return
+
+        entries, warnings = parse_pgpass(pgpass_path)
+        if not entries:
+            dialog = Adw.MessageDialog(
+                transient_for=self,
+                heading='No Importable Entries',
+                body=(
+                    '~/.pgpass contains no importable entries. '
+                    'Entries with wildcard hostnames (*) are skipped.'
+                ),
+            )
+            dialog.add_response('ok', 'OK')
+            dialog.present()
+            return
+
+        dlg = PgpassImportDialog(parent=self, entries=entries, warnings=warnings)
+        dlg.connect('entries-selected', self._on_pgpass_entries_selected)
+        dlg.present()
+
+    def _on_pgpass_entries_selected(self, _dlg, entries):
+        for entry in entries:
+            conn = {
+                'name': (
+                    f'{entry["username"]}@{entry["hostname"]}/{entry["database"]}'
+                ),
+                'host': entry['hostname'],
+                'port': entry['port'],
+                'database': entry['database'],
+                'username': entry['username'],
+                'password': entry['password'],
+            }
+            try:
+                self._store.add(conn)
+            except KeyringUnavailableError as e:
+                self._show_keyring_error(str(e))
+                return
+            self._add_connection_row(conn)
 
     def _show_keyring_error(self, msg):
         dialog = Adw.MessageDialog(
