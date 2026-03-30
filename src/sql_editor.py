@@ -280,7 +280,10 @@ def _apply_scheme(buf, dark):
 
 
 _DDL_RE = re.compile(r'\b(CREATE|DROP|ALTER)\b', re.IGNORECASE)
-_AUTOCOMMIT_RE = re.compile(r'^\s*(CREATE|DROP)\s+DATABASE\b', re.IGNORECASE)
+_AUTOCOMMIT_RE = re.compile(
+    r'^\s*(?:(?:--[^\n]*\n)|(?:/\*.*?\*/\s*))*\s*(CREATE|DROP|ALTER)\s+DATABASE\b',
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 class SqlEditor(Gtk.Box):

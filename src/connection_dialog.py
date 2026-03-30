@@ -226,14 +226,13 @@ class ConnectionDialog(Adw.Window):
         except ValueError:
             ssh_port = 22
 
-        return {
+        params = {
             'host': self._host_row.get_text().strip() or 'localhost',
             'port': port,
             'database': self._database_row.get_text().strip() or 'postgres',
             'username': self._username_row.get_text().strip(),
             'password': self._password_row.get_text(),
             'read_only': self._readonly_row.get_active(),
-            'default_schema': self._default_schema_row.get_text().strip(),
             'ssh_enabled': self._ssh_row.get_enable_expansion(),
             'ssh_host': self._ssh_host_row.get_text().strip(),
             'ssh_port': ssh_port,
@@ -241,6 +240,10 @@ class ConnectionDialog(Adw.Window):
             'ssh_key_path': self._ssh_key_row.get_text().strip(),
             'ssh_passphrase': self._ssh_passphrase_row.get_text(),
         }
+        default_schema = self._default_schema_row.get_text().strip()
+        if default_schema:
+            params['default_schema'] = default_schema
+        return params
 
     def _on_test(self, _btn):
         self._test_btn.set_sensitive(False)
@@ -323,7 +326,6 @@ class ConnectionDialog(Adw.Window):
             'username': username,
             'password': self._password_row.get_text(),
             'read_only': self._readonly_row.get_active(),
-            'default_schema': self._default_schema_row.get_text().strip(),
             'ssh_enabled': self._ssh_row.get_enable_expansion(),
             'ssh_host': self._ssh_host_row.get_text().strip(),
             'ssh_port': ssh_port,
@@ -331,5 +333,8 @@ class ConnectionDialog(Adw.Window):
             'ssh_key_path': self._ssh_key_row.get_text().strip(),
             'ssh_passphrase': self._ssh_passphrase_row.get_text(),
         }
+        default_schema = self._default_schema_row.get_text().strip()
+        if default_schema:
+            conn['default_schema'] = default_schema
         self.emit('connection-saved', conn)
         self.close()
