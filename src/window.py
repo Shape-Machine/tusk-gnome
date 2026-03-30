@@ -266,6 +266,10 @@ class TuskWindow(Adw.ApplicationWindow):
         self._browser.connect('truncate-table-requested', self._on_truncate_table_requested)
         self._browser.connect('rename-table-requested', self._on_rename_table_requested)
         self._browser.connect('clone-table-requested', self._on_clone_table_requested)
+        self._browser.connect('create-schema-requested', self._on_create_schema_requested)
+        self._browser.connect('rename-schema-requested', self._on_rename_schema_requested)
+        self._browser.connect('drop-schema-requested', self._on_drop_schema_requested)
+        self._browser.connect('create-view-requested', self._on_create_view_requested)
         sidebar_paned.set_start_child(self._browser)
 
         self._file_explorer = FileExplorer()
@@ -956,4 +960,184 @@ class TuskWindow(Adw.ApplicationWindow):
         dialog = Adw.AlertDialog(heading=heading, body=body)
         dialog.add_response('ok', 'OK')
         dialog.present(self)
+
+    # ── Schema management (#97, #100) ─────────────────────────────────────────
+
+    def _on_create_schema_requested(self, _browser, conn):
+        from column_dialogs import CreateSchemaDialog
+
+        def on_save(schema_name, on_done):
+            def run():
+                try:
+                    import psycopg
+                    from psycopg import sql as pgsql
+                    from tunnel import open_tunnel
+                    with open_tunnel(conn) as (host, port), psycopg.connect(
+                        host=host, port=port,
+                        dbname=conn['database'], user=conn['username'],
+                        password=conn['password'], connect_timeout=10,
+                    ) as db:
+                        with db.cursor() as cur:
+                            cur.execute(pgsql.SQL('CREATE SCHEMA {}').format(
+                                pgsql.Identifier(schema_name)
+                            ))
+                        db.commit()
+                    GLib.idle_add(self._browser.load, conn)
+                    GLib.idle_add(on_done)
+                except Exception as e:
+                    GLib.idle_add(on_done, str(e))
+            threading.Thread(target=run, daemon=True).start()
+
+        dlg = CreateSchemaDialog(on_save)
+        dlg.present(self)
+
+    def _on_rename_schema_requested(self, _browser, conn, schema):
+        from column_dialogs import RenameDialog
+
+        def on_rename(new_name):
+            def run():
+                try:
+                    import psycopg
+                    from psycopg import sql as pgsql
+                    from tunnel import open_tunnel
+                    with open_tunnel(conn) as (host, port), psycopg.connect(
+                        host=host, port=port,
+                        dbname=conn['database'], user=conn['username'],
+                        password=conn['password'], connect_timeout=10,
+                    ) as db:
+                        with db.cursor() as cur:
+                            cur.execute(pgsql.SQL('ALTER SCHEMA {} RENAME TO {}').format(
+                                pgsql.Identifier(schema), pgsql.Identifier(new_name)
+                            ))
+                        db.commit()
+                    GLib.idle_add(self._browser.load, conn)
+                except Exception as e:
+                    GLib.idle_add(self._show_browser_error, 'Rename Schema Failed', str(e))
+            threading.Thread(target=run, daemon=True).start()
+
+        dlg = RenameDialog(schema, on_rename, title='Rename Schema')
+        dlg.present(self)
+
+    def _on_drop_schema_requested(self, _browser, conn, schema):
+        cascade_check = Gtk.CheckButton(label='Drop with CASCADE (removes all objects in schema)')
+        cascade_check.set_margin_top(8)
+        cascade_check.set_margin_start(4)
+
+        dialog = Adw.AlertDialog(
+            heading=f'Drop schema "{schema}"?',
+            body='This will permanently remove the schema. Non-empty schemas require CASCADE.',
+        )
+        dialog.set_extra_child(cascade_check)
+        dialog.add_response('cancel', 'Cancel')
+        dialog.add_response('drop', 'Drop Schema')
+        dialog.set_response_appearance('drop', Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response('cancel')
+        dialog.set_close_response('cancel')
+
+        def execute_drop(cascade):
+            def run():
+                try:
+                    import psycopg
+                    from psycopg import sql as pgsql
+                    from tunnel import open_tunnel
+                    with open_tunnel(conn) as (host, port), psycopg.connect(
+                        host=host, port=port,
+                        dbname=conn['database'], user=conn['username'],
+                        password=conn['password'], connect_timeout=10,
+                    ) as db:
+                        with db.cursor() as cur:
+                            ddl = pgsql.SQL('DROP SCHEMA {}').format(pgsql.Identifier(schema))
+                            if cascade:
+                                ddl = pgsql.SQL('DROP SCHEMA {} CASCADE').format(
+                                    pgsql.Identifier(schema)
+                                )
+                            cur.execute(ddl)
+                        db.commit()
+                    GLib.idle_add(self._browser.load, conn)
+                except Exception as e:
+                    err = str(e)
+                    if 'depends on' in err or (hasattr(e, 'sqlstate') and e.sqlstate == '2BP01'):
+                        GLib.idle_add(self._show_drop_schema_cascade_error, err, conn, schema)
+                    else:
+                        GLib.idle_add(self._show_browser_error, 'Drop Schema Failed', err)
+            threading.Thread(target=run, daemon=True).start()
+
+        def on_response(_d, response):
+            if response == 'drop':
+                execute_drop(cascade_check.get_active())
+
+        dialog.connect('response', on_response)
+        dialog.present(self)
+
+    def _show_drop_schema_cascade_error(self, err_str, conn, schema):
+        dialog = Adw.AlertDialog(
+            heading='Drop Schema Failed — Objects Exist',
+            body=f'{err_str}\n\nEnable CASCADE to drop the schema and all its objects.',
+        )
+        dialog.add_response('cancel', 'Cancel')
+        dialog.add_response('cascade', 'Drop with CASCADE')
+        dialog.set_response_appearance('cascade', Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response('cancel')
+        dialog.set_close_response('cancel')
+
+        def on_cascade(_d, response):
+            if response == 'cascade':
+                self._drop_schema_cascade(conn, schema)
+
+        dialog.connect('response', on_cascade)
+        dialog.present(self)
+
+    def _drop_schema_cascade(self, conn, schema):
+        def run():
+            try:
+                import psycopg
+                from psycopg import sql as pgsql
+                from tunnel import open_tunnel
+                with open_tunnel(conn) as (host, port), psycopg.connect(
+                    host=host, port=port,
+                    dbname=conn['database'], user=conn['username'],
+                    password=conn['password'], connect_timeout=10,
+                ) as db:
+                    with db.cursor() as cur:
+                        cur.execute(pgsql.SQL('DROP SCHEMA {} CASCADE').format(
+                            pgsql.Identifier(schema)
+                        ))
+                    db.commit()
+                GLib.idle_add(self._browser.load, conn)
+            except Exception as e:
+                GLib.idle_add(self._show_browser_error, 'Drop Schema Failed', str(e))
+        threading.Thread(target=run, daemon=True).start()
+
+    # ── View management (#95) ─────────────────────────────────────────────────
+
+    def _on_create_view_requested(self, _browser, conn, schema):
+        from column_dialogs import CreateViewDialog
+
+        def on_save(schema, name, sql_def, on_done):
+            def run():
+                try:
+                    import psycopg
+                    from psycopg import sql as pgsql
+                    from tunnel import open_tunnel
+                    with open_tunnel(conn) as (host, port), psycopg.connect(
+                        host=host, port=port,
+                        dbname=conn['database'], user=conn['username'],
+                        password=conn['password'], connect_timeout=10,
+                    ) as db:
+                        with db.cursor() as cur:
+                            ddl = pgsql.SQL('CREATE OR REPLACE VIEW {}.{} AS {}').format(
+                                pgsql.Identifier(schema),
+                                pgsql.Identifier(name),
+                                pgsql.SQL(sql_def),
+                            )
+                            cur.execute(ddl)
+                        db.commit()
+                    GLib.idle_add(self._browser.load, conn)
+                    GLib.idle_add(on_done)
+                except Exception as e:
+                    GLib.idle_add(on_done, str(e))
+            threading.Thread(target=run, daemon=True).start()
+
+        dlg = CreateViewDialog(schema, on_save)
+        dlg.present(self)
 

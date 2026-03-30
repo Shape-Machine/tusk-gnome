@@ -41,6 +41,22 @@ class DbBrowser(Gtk.Box):
             GObject.SignalFlags.RUN_FIRST, None,
             (GObject.TYPE_PYOBJECT, str, str),  # conn, schema, table
         ),
+        'create-schema-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT,),  # conn
+        ),
+        'rename-schema-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str),  # conn, schema
+        ),
+        'drop-schema-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str),  # conn, schema
+        ),
+        'create-view-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str),  # conn, schema
+        ),
     }
 
     def __init__(self):
@@ -65,16 +81,28 @@ class DbBrowser(Gtk.Box):
         self._loading_bar.set_visible(False)
         self.append(self._loading_bar)
 
-        # Search entry
+        # Search + New Schema toolbar
+        search_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        search_bar.set_margin_start(6)
+        search_bar.set_margin_end(6)
+        search_bar.set_margin_top(4)
+        search_bar.set_margin_bottom(4)
+        search_bar.set_visible(False)
+        self._search_bar = search_bar
+
         self._search_entry = Gtk.SearchEntry()
         self._search_entry.set_placeholder_text('Filter…')
-        self._search_entry.set_margin_start(6)
-        self._search_entry.set_margin_end(6)
-        self._search_entry.set_margin_top(4)
-        self._search_entry.set_margin_bottom(4)
-        self._search_entry.set_visible(False)
+        self._search_entry.set_hexpand(True)
         self._search_entry.connect('search-changed', self._on_search_changed)
-        self.append(self._search_entry)
+        search_bar.append(self._search_entry)
+
+        self._new_schema_btn = Gtk.Button(icon_name='folder-new-symbolic')
+        self._new_schema_btn.add_css_class('flat')
+        self._new_schema_btn.set_tooltip_text('New Schema…')
+        self._new_schema_btn.connect('clicked', self._on_new_schema_clicked)
+        search_bar.append(self._new_schema_btn)
+
+        self.append(search_bar)
 
         self._store = Gtk.TreeStore(str, str, str, GObject.TYPE_PYOBJECT, str, str)
 
@@ -101,6 +129,7 @@ class DbBrowser(Gtk.Box):
         self._ctx_table = None
         self._ctx_item_type = None
         self._expansion_snapshot = None
+        self._last_conn = None
 
         icon_renderer = Gtk.CellRendererPixbuf()
         text_renderer = Gtk.CellRendererText()
@@ -216,12 +245,13 @@ class DbBrowser(Gtk.Box):
         self._loading_spinner.stop()
         self._loading_bar.set_visible(False)
         self._search_entry.set_text('')
-        self._search_entry.set_visible(False)
+        self._search_bar.set_visible(False)
         self._store.clear()
 
     def load(self, conn):
         self._load_gen += 1
         gen = self._load_gen
+        self._last_conn = conn
         self._saved_expansion = None
         self._expansion_snapshot = self._snapshot_expansion()
         self._store.clear()
@@ -399,7 +429,7 @@ class DbBrowser(Gtk.Box):
                             ])
 
         self._saved_expansion = None
-        self._search_entry.set_visible(True)
+        self._search_bar.set_visible(True)
         snapshot = getattr(self, '_expansion_snapshot', None)
         if snapshot:
             self._restore_expansion(snapshot)
@@ -448,10 +478,18 @@ class DbBrowser(Gtk.Box):
 
         if item_type in ('table', 'view'):
             self._show_table_context_menu(x, y, item_type)
-        elif item_type == 'schema' or (item_type == 'group' and label == 'Tables'):
+        elif item_type == 'schema':
+            self._show_schema_node_context_menu(x, y)
+        elif item_type == 'group' and label == 'Tables':
             self._show_schema_context_menu(x, y)
+        elif item_type == 'group' and label == 'Views':
+            self._show_views_group_context_menu(x, y)
+
+    def _on_new_schema_clicked(self, _btn):
+        self.emit('create-schema-requested', self._ctx_conn or self._last_conn)
 
     def _show_schema_context_menu(self, x, y):
+        """Context menu for the Tables group node — just Create Table."""
         ag = Gio.SimpleActionGroup()
         action = Gio.SimpleAction.new('create-table', None)
         action.connect('activate', lambda *_: self.emit(
@@ -462,10 +500,56 @@ class DbBrowser(Gtk.Box):
 
         menu = Gio.Menu()
         menu.append('Create Table…', 'browser.create-table')
+        self._popup_menu(menu, x, y)
+
+    def _show_schema_node_context_menu(self, x, y):
+        """Context menu for a schema node — Create Table, Rename Schema, Drop Schema."""
+        ag = Gio.SimpleActionGroup()
+
+        def add_action(name, cb):
+            action = Gio.SimpleAction.new(name, None)
+            action.connect('activate', lambda *_: cb())
+            ag.add_action(action)
+
+        add_action('create-table', lambda: self.emit(
+            'create-table-requested', self._ctx_conn, self._ctx_schema
+        ))
+        add_action('rename-schema', lambda: self.emit(
+            'rename-schema-requested', self._ctx_conn, self._ctx_schema
+        ))
+        add_action('drop-schema', lambda: self.emit(
+            'drop-schema-requested', self._ctx_conn, self._ctx_schema
+        ))
+        self._tree.insert_action_group('schm', ag)
+
+        section1 = Gio.Menu()
+        section1.append('Create Table…', 'schm.create-table')
+        section2 = Gio.Menu()
+        section2.append('Rename Schema…', 'schm.rename-schema')
+        section2.append('Drop Schema…', 'schm.drop-schema')
+        menu = Gio.Menu()
+        menu.append_section(None, section1)
+        menu.append_section(None, section2)
+        self._popup_menu(menu, x, y)
+
+    def _show_views_group_context_menu(self, x, y):
+        """Context menu for the Views group node — New View."""
+        ag = Gio.SimpleActionGroup()
+        action = Gio.SimpleAction.new('create-view', None)
+        action.connect('activate', lambda *_: self.emit(
+            'create-view-requested', self._ctx_conn, self._ctx_schema
+        ))
+        ag.add_action(action)
+        self._tree.insert_action_group('views', ag)
+
+        menu = Gio.Menu()
+        menu.append('New View…', 'views.create-view')
+        self._popup_menu(menu, x, y)
+
+    def _popup_menu(self, menu, x, y):
         popover = Gtk.PopoverMenu(menu_model=menu)
         popover.set_has_arrow(False)
         popover.set_parent(self._tree)
-
         rect = Gdk.Rectangle()
         rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
         popover.set_pointing_to(rect)
@@ -512,15 +596,7 @@ class DbBrowser(Gtk.Box):
         menu = Gio.Menu()
         menu.append_section(None, section1)
         menu.append_section(None, section2)
-
-        popover = Gtk.PopoverMenu(menu_model=menu)
-        popover.set_has_arrow(False)
-        popover.set_parent(self._tree)
-
-        rect = Gdk.Rectangle()
-        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
-        popover.set_pointing_to(rect)
-        popover.popup()
+        self._popup_menu(menu, x, y)
 
     def _on_row_activated(self, tree, path, _col):
         it = self._filter.get_iter(path)

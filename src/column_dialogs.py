@@ -1449,3 +1449,160 @@ class CreateTableDialog(Adw.Dialog):
             err_dlg = Adw.AlertDialog(heading='Create Table Failed', body=error)
             err_dlg.add_response('ok', 'OK')
             err_dlg.present(self)
+
+
+# ---------------------------------------------------------------------------
+# Create Schema dialog  (#97)
+# ---------------------------------------------------------------------------
+
+class CreateSchemaDialog(Adw.Dialog):
+    """Dialog for creating a new PostgreSQL schema.
+
+    on_save(schema_name, on_done) — on_done(error=None) called on completion
+    """
+
+    def __init__(self, on_save):
+        super().__init__(title='New Schema', content_width=380)
+        self._on_save = on_save
+
+        header = Adw.HeaderBar()
+        self._create_btn = Gtk.Button(label='Create')
+        self._create_btn.add_css_class('suggested-action')
+        self._create_btn.set_sensitive(False)
+        self._create_btn.connect('clicked', self._on_create_clicked)
+        header.pack_end(self._create_btn)
+
+        toolbar_view = Adw.ToolbarView()
+        toolbar_view.add_top_bar(header)
+
+        page = Adw.PreferencesPage()
+        group = Adw.PreferencesGroup()
+        self._name_row = Adw.EntryRow(title='Schema name')
+        self._name_row.connect('changed', self._on_changed)
+        self._name_row.connect('entry-activated', self._on_entry_activated)
+        group.add(self._name_row)
+        page.add(group)
+        toolbar_view.set_content(page)
+        self.set_child(toolbar_view)
+
+    def _on_changed(self, *_):
+        self._create_btn.set_sensitive(bool(self._name_row.get_text().strip()))
+
+    def _on_entry_activated(self, *_):
+        if self._create_btn.get_sensitive():
+            self._on_create_clicked()
+
+    def _on_create_clicked(self, *_):
+        self._create_btn.set_sensitive(False)
+        self._on_save(self._name_row.get_text().strip(), self._on_done)
+
+    def _on_done(self, error=None):
+        if error is None:
+            self.close()
+        else:
+            self._create_btn.set_sensitive(True)
+            err_dlg = Adw.AlertDialog(heading='Create Schema Failed', body=error)
+            err_dlg.add_response('ok', 'OK')
+            err_dlg.present(self)
+
+
+# ---------------------------------------------------------------------------
+# Create View dialog  (#95)
+# ---------------------------------------------------------------------------
+
+class CreateViewDialog(Adw.Dialog):
+    """Dialog for creating a new PostgreSQL view.
+
+    on_save(schema, name, sql_def, on_done) — on_done(error=None) called on completion
+    schema — the schema to create the view in
+    """
+
+    def __init__(self, schema, on_save):
+        super().__init__(title='New View', content_width=560, content_height=480)
+        self._on_save = on_save
+        self._schema = schema
+
+        header = Adw.HeaderBar()
+        self._create_btn = Gtk.Button(label='Create')
+        self._create_btn.add_css_class('suggested-action')
+        self._create_btn.set_sensitive(False)
+        self._create_btn.connect('clicked', self._on_create_clicked)
+        header.pack_end(self._create_btn)
+
+        toolbar_view = Adw.ToolbarView()
+        toolbar_view.add_top_bar(header)
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        outer.set_margin_top(12)
+        outer.set_margin_bottom(12)
+        outer.set_margin_start(12)
+        outer.set_margin_end(12)
+
+        name_group = Adw.PreferencesGroup()
+        self._name_row = Adw.EntryRow(title='View name')
+        self._name_row.connect('changed', self._on_changed)
+        name_group.add(self._name_row)
+        outer.append(name_group)
+
+        sql_label = Gtk.Label(label='SELECT definition')
+        sql_label.set_xalign(0)
+        sql_label.add_css_class('caption')
+        sql_label.add_css_class('dim-label')
+        outer.append(sql_label)
+
+        self._sql_buf, sql_view = _make_sql_preview_view()
+        self._sql_buf.connect('changed', self._on_changed)
+        # Make the view editable
+        sql_view.set_editable(True)
+        sql_view.set_cursor_visible(True)
+        placeholder = 'SELECT col1, col2\nFROM ...\nWHERE ...'
+        self._sql_buf.set_text(placeholder)
+        # Select all placeholder text so user can just start typing
+        sql_view.connect('realize', lambda v: (
+            v.get_buffer().select_range(
+                v.get_buffer().get_start_iter(),
+                v.get_buffer().get_end_iter(),
+            )
+        ))
+
+        sql_scroll = Gtk.ScrolledWindow()
+        sql_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        sql_scroll.set_vexpand(True)
+        sql_scroll.set_child(sql_view)
+
+        sql_frame = Gtk.Frame()
+        sql_frame.set_child(sql_scroll)
+        sql_frame.set_vexpand(True)
+        outer.append(sql_frame)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_vexpand(True)
+        scroll.set_child(outer)
+
+        toolbar_view.set_content(scroll)
+        self.set_child(toolbar_view)
+
+    def _on_changed(self, *_):
+        name = self._name_row.get_text().strip()
+        sql = self._sql_buf.get_text(
+            self._sql_buf.get_start_iter(), self._sql_buf.get_end_iter(), False
+        ).strip()
+        self._create_btn.set_sensitive(bool(name) and bool(sql))
+
+    def _on_create_clicked(self, *_):
+        self._create_btn.set_sensitive(False)
+        name = self._name_row.get_text().strip()
+        sql = self._sql_buf.get_text(
+            self._sql_buf.get_start_iter(), self._sql_buf.get_end_iter(), False
+        ).strip()
+        self._on_save(self._schema, name, sql, self._on_done)
+
+    def _on_done(self, error=None):
+        if error is None:
+            self.close()
+        else:
+            self._create_btn.set_sensitive(True)
+            err_dlg = Adw.AlertDialog(heading='Create View Failed', body=error)
+            err_dlg.add_response('ok', 'OK')
+            err_dlg.present(self)
