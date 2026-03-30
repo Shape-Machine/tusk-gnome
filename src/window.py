@@ -642,7 +642,7 @@ class TuskWindow(Adw.ApplicationWindow):
                     GLib.idle_add(self._show_ddl_error, 'Create Table Failed', str(e))
             threading.Thread(target=run, daemon=True).start()
 
-        dlg = CreateTableDialog(schemas, schema, on_save, on_open_in_editor=self._open_in_editor)
+        dlg = CreateTableDialog(schemas, schema, on_save)
         dlg.present(self)
 
     def _show_ddl_error(self, heading, body):
@@ -650,18 +650,3 @@ class TuskWindow(Adw.ApplicationWindow):
         dialog.add_response('ok', 'OK')
         dialog.present(self)
 
-    def _open_in_editor(self, sql):
-        """Find the first open SqlEditor tab and set its content to sql."""
-        pages = self._tab_view.get_pages()
-        for i in range(pages.get_n_items()):
-            widget = pages.get_item(i).get_child()
-            if isinstance(widget, SqlEditor):
-                self._tab_view.set_selected_page(pages.get_item(i))
-                widget.insert_sql(sql)
-                return
-        dialog = Adw.AlertDialog(
-            heading='No SQL Editor Open',
-            body='Open a .sql file first to use "Open in editor".',
-        )
-        dialog.add_response('ok', 'OK')
-        dialog.present(self)
