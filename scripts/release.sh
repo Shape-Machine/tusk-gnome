@@ -150,6 +150,25 @@ if [[ $DO_APPIMAGE == 1 ]]; then
     cat > "$APPDIR/AppRun" <<'APPRUN'
 #!/bin/bash
 HERE="$(dirname "$(readlink -f "$0")")"
+
+# Check for required system libraries before launching
+missing=()
+python3 -c "import gi; gi.require_version('Gtk','4.0'); from gi.repository import Gtk" 2>/dev/null \
+    || missing+=("GTK4")
+python3 -c "import gi; gi.require_version('Adw','1'); from gi.repository import Adw" 2>/dev/null \
+    || missing+=("libadwaita")
+
+if [[ ${#missing[@]} -gt 0 ]]; then
+    echo "Tusk requires: ${missing[*]}"
+    echo ""
+    echo "Install with:"
+    echo "  Ubuntu/Debian:  sudo apt install libgtk-4-1 libadwaita-1-0 python3-gi gir1.2-gtk-4.0 gir1.2-adw-1"
+    echo "  Fedora:         sudo dnf install gtk4 libadwaita python3-gobject"
+    echo "  Arch:           sudo pacman -S gtk4 libadwaita python-gobject"
+    echo "  openSUSE:       sudo zypper install gtk4 libadwaita python3-gobject"
+    exit 1
+fi
+
 export PATH="$HERE/bin:$PATH"
 export PYTHONPATH="$HERE/share/tusk-gnome/vendor:$HERE/share/tusk-gnome:$PYTHONPATH"
 export XDG_DATA_DIRS="$HERE/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
