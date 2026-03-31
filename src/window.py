@@ -264,20 +264,21 @@ class TuskWindow(Adw.ApplicationWindow):
         self._conn_list.set_selection_mode(Gtk.SelectionMode.NONE)
         self._conn_list.connect('row-activated', self._on_connection_activated)
 
-        popover_scroll = Gtk.ScrolledWindow()
-        popover_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        popover_scroll.set_propagate_natural_height(True)
-        popover_scroll.set_max_content_height(320)
-        popover_scroll.set_min_content_width(240)
-        popover_scroll.set_child(self._conn_list)
+        self._conn_popover_scroll = Gtk.ScrolledWindow()
+        self._conn_popover_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self._conn_popover_scroll.set_propagate_natural_height(True)
+        self._conn_popover_scroll.set_max_content_height(320)
+        self._conn_popover_scroll.set_child(self._conn_list)
 
         self._conn_popover = Gtk.Popover()
-        self._conn_popover.set_child(popover_scroll)
+        self._conn_popover.set_child(self._conn_popover_scroll)
         self._conn_popover.set_has_arrow(False)
         self._conn_dropdown.set_popover(self._conn_popover)
-        self._conn_dropdown.connect(
-            'notify::width',
-            lambda w, _: self._conn_popover.set_size_request(w.get_width(), -1),
+        self._conn_popover.connect(
+            'map',
+            lambda _: self._conn_popover_scroll.set_size_request(
+                self._conn_dropdown.get_width() - 20, -1
+            ),
         )
 
         conn_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
