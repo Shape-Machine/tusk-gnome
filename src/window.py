@@ -275,6 +275,10 @@ class TuskWindow(Adw.ApplicationWindow):
         self._conn_popover.set_child(popover_scroll)
         self._conn_popover.set_has_arrow(False)
         self._conn_dropdown.set_popover(self._conn_popover)
+        self._conn_dropdown.connect(
+            'notify::width',
+            lambda w, _: self._conn_popover.set_size_request(w.get_width(), -1),
+        )
 
         conn_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         conn_bar.set_margin_top(4)
