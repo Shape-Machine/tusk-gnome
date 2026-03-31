@@ -28,6 +28,13 @@ except (ValueError, ImportError):
 
 _AUTOSAVE_DELAY_MS = 800
 
+# Optional SQL formatter
+try:
+    import sqlparse
+    _HAS_SQLPARSE = True
+except ImportError:
+    _HAS_SQLPARSE = False
+
 
 def _split_statements(sql):
     """Split SQL text into individual non-empty statements.
@@ -639,14 +646,50 @@ class SqlEditor(Gtk.Box):
             Adw.StyleManager.get_default().disconnect(self._dark_handler_id)
             self._dark_handler_id = 0
 
+    def _trim_buffer(self):
+        """Strip trailing whitespace from each line and remove leading/trailing blank lines."""
+        start = self._buffer.get_start_iter()
+        end = self._buffer.get_end_iter()
+        text = self._buffer.get_text(start, end, False)
+        lines = text.split('\n')
+        trimmed = [line.rstrip() for line in lines]
+        # Remove leading blank lines
+        while trimmed and not trimmed[0]:
+            trimmed.pop(0)
+        # Remove trailing blank lines
+        while trimmed and not trimmed[-1]:
+            trimmed.pop()
+        result = '\n'.join(trimmed)
+        if result != text:
+            self._buffer.set_text(result)
+
+    def _format_buffer(self):
+        """Pretty-print SQL in the buffer using sqlparse (no-op if unavailable)."""
+        if not _HAS_SQLPARSE:
+            return
+        start = self._buffer.get_start_iter()
+        end = self._buffer.get_end_iter()
+        text = self._buffer.get_text(start, end, False)
+        formatted = sqlparse.format(
+            text,
+            reindent=True,
+            keyword_case='upper',
+            identifier_case=None,
+            strip_whitespace=False,
+        ).strip()
+        if formatted != text.strip():
+            self._buffer.set_text(formatted)
+
     def _save_now(self):
         if self._autosave_timer:
             GLib.source_remove(self._autosave_timer)
             self._autosave_timer = 0
+        self._format_buffer()
         self._do_save()
 
     def _do_save(self):
         self._autosave_timer = 0  # timer fired and consumed itself; clear stale ID
+        self._trim_buffer()
         try:
             start = self._buffer.get_start_iter()
             end = self._buffer.get_end_iter()
