@@ -42,6 +42,20 @@
       ]
     },
     {
+      "name": "python3-sqlparse",
+      "buildsystem": "simple",
+      "build-commands": [
+        "pip3 install --no-index --find-links=. --prefix=/app sqlparse-0.5.5-py3-none-any.whl"
+      ],
+      "sources": [
+        {
+          "type": "file",
+          "url": "https://files.pythonhosted.org/packages/49/4b/359f28a903c13438ef59ebeee215fb25da53066db67b305c125f1c6d2a25/sqlparse-0.5.5-py3-none-any.whl",
+          "sha256": "12a08b3bf3eec877c519589833aed092e2444e68240a3577e8e26148acc7b1ba"
+        }
+      ]
+    },
+    {
       "name": "python3-jeepney",
       "buildsystem": "simple",
       "build-commands": [

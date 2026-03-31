@@ -73,7 +73,7 @@ for f in "$ROOT"/src/*.py; do
 done
 
 # Vendor psycopg (not in most distro repos) into the package
-python3 -m pip install --quiet --target="$STAGING/usr/local/share/tusk-gnome/vendor" "psycopg[binary]"
+python3 -m pip install --quiet --target="$STAGING/usr/local/share/tusk-gnome/vendor" "psycopg[binary]" "sqlparse"
 
 # Launcher script
 mkdir -p "$STAGING/usr/local/bin"
