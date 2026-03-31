@@ -6,7 +6,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Gtk, Adw, Gio, GLib, GObject, Gdk
+from gi.repository import Gtk, Adw, Gio, GLib, GObject, Gdk, Pango
 
 import prefs
 from connections import ConnectionStore, KeyringUnavailableError
@@ -238,36 +238,53 @@ class TuskWindow(Adw.ApplicationWindow):
 
         sidebar.append(header)
 
-        # Connection list
+        # Connection dropdown
+        dropdown_child = Gtk.Box(spacing=6)
+        dropdown_child.set_margin_start(2)
+        conn_icon = Gtk.Image.new_from_icon_name('network-server-symbolic')
+        self._conn_dropdown_label = Gtk.Label(label='Select connection…')
+        self._conn_dropdown_label.set_hexpand(True)
+        self._conn_dropdown_label.set_xalign(0)
+        self._conn_dropdown_label.set_ellipsize(Pango.EllipsizeMode.END)
+        self._conn_dropdown_badge = Gtk.Label(label='🛡')
+        self._conn_dropdown_badge.add_css_class('dim-label')
+        self._conn_dropdown_badge.add_css_class('connection-role-badge')
+        self._conn_dropdown_badge.set_visible(False)
+        dropdown_child.append(conn_icon)
+        dropdown_child.append(self._conn_dropdown_label)
+        dropdown_child.append(self._conn_dropdown_badge)
+
+        self._conn_dropdown = Gtk.MenuButton()
+        self._conn_dropdown.set_child(dropdown_child)
+        self._conn_dropdown.set_hexpand(True)
+        self._conn_dropdown.add_css_class('flat')
+
         self._conn_list = Gtk.ListBox()
         self._conn_list.add_css_class('navigation-sidebar')
-        self._conn_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self._conn_list.set_selection_mode(Gtk.SelectionMode.NONE)
         self._conn_list.connect('row-activated', self._on_connection_activated)
 
-        placeholder = Adw.StatusPage()
-        placeholder.set_title('No connections')
-        placeholder.set_description('Click + to add your first connection')
-        placeholder.set_icon_name('network-server-symbolic')
-        self._conn_list.set_placeholder(placeholder)
+        popover_scroll = Gtk.ScrolledWindow()
+        popover_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        popover_scroll.set_propagate_natural_height(True)
+        popover_scroll.set_max_content_height(320)
+        popover_scroll.set_min_content_width(240)
+        popover_scroll.set_child(self._conn_list)
 
-        conn_scroll = Gtk.ScrolledWindow()
-        conn_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        conn_scroll.set_propagate_natural_height(True)
-        conn_scroll.set_max_content_height(200)
-        conn_scroll.set_child(self._conn_list)
-        sidebar.append(conn_scroll)
+        self._conn_popover = Gtk.Popover()
+        self._conn_popover.set_child(popover_scroll)
+        self._conn_popover.set_has_arrow(False)
+        self._conn_dropdown.set_popover(self._conn_popover)
+
+        conn_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        conn_bar.set_margin_top(4)
+        conn_bar.set_margin_bottom(4)
+        conn_bar.set_margin_start(6)
+        conn_bar.set_margin_end(6)
+        conn_bar.append(self._conn_dropdown)
+        sidebar.append(conn_bar)
 
         sidebar.append(Gtk.Separator())
-
-        self._active_conn_label = Gtk.Label()
-        self._active_conn_label.add_css_class('caption')
-        self._active_conn_label.add_css_class('dim-label')
-        self._active_conn_label.set_xalign(0)
-        self._active_conn_label.set_margin_start(10)
-        self._active_conn_label.set_margin_top(4)
-        self._active_conn_label.set_margin_bottom(4)
-        self._active_conn_label.set_visible(False)
-        sidebar.append(self._active_conn_label)
 
         # Vertical pane: DB browser (top) + file explorer (bottom)
         sidebar_paned = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
@@ -394,15 +411,6 @@ class TuskWindow(Adw.ApplicationWindow):
         role_badge.set_valign(Gtk.Align.CENTER)
         row.add_suffix(role_badge)
         row._role_badge = role_badge
-
-        bar = Gtk.Box()
-        bar.add_css_class('connection-active-bar')
-        bar.set_size_request(3, 14)
-        bar.set_visible(False)
-        bar.set_tooltip_text('Active connection')
-        bar.set_valign(Gtk.Align.CENTER)
-        row.add_suffix(bar)
-        row._active_dot = bar
 
         menu = Gio.Menu()
         menu.append('Disconnect', 'row.disconnect')
@@ -626,6 +634,7 @@ class TuskWindow(Adw.ApplicationWindow):
         }
 
     def _on_connection_activated(self, _listbox, row):
+        self._conn_popover.popdown()
         try:
             conn = self._conn_with_password(row._conn)
         except KeyringUnavailableError as e:
@@ -649,20 +658,15 @@ class TuskWindow(Adw.ApplicationWindow):
 
         new_conn = {**conn, 'database': new_dbname}
         self._set_active_conn(new_conn)
-
-        label = new_conn['name']
-        if new_conn.get('read_only'):
-            label += '  🔒'
-        self._active_conn_label.set_label(f'Connected: {label} — {new_dbname}')
-
         self._browser.load(new_conn)
 
     def _on_role_attrs_loaded(self, _browser, conn, attrs):
-        """Update the role badge on the matching connection row."""
+        """Update the role badge on the matching connection row and dropdown."""
         is_superuser = attrs.get('superuser', False)
         tooltip_parts = [f'{k}: {"yes" if v else "no"}' for k, v in attrs.items()]
         tooltip = '\n'.join(tooltip_parts) if tooltip_parts else ''
 
+        # Update popover row badge
         row = self._conn_list.get_first_child()
         while row:
             if hasattr(row, '_conn') and row._conn['id'] == conn['id']:
@@ -671,6 +675,12 @@ class TuskWindow(Adw.ApplicationWindow):
                     row._role_badge.set_tooltip_text(tooltip)
                 break
             row = row.get_next_sibling()
+
+        # Update dropdown badge if this is the active connection
+        if self._active_conn_id == conn['id']:
+            self._conn_dropdown_badge.set_visible(is_superuser)
+            if is_superuser:
+                self._conn_dropdown_badge.set_tooltip_text(tooltip)
 
     def _on_drop_database_requested(self, _browser, conn, dbname):
         entry = Gtk.Entry(placeholder_text=dbname, hexpand=True)
@@ -743,10 +753,6 @@ class TuskWindow(Adw.ApplicationWindow):
         # Switch active connection to postgres fallback and reload browser
         new_conn = {**conn, 'database': 'postgres'}
         self._set_active_conn(new_conn)
-        label = new_conn['name']
-        if new_conn.get('read_only'):
-            label += '  🔒'
-        self._active_conn_label.set_label(f'Connected: {label} — postgres')
         self._browser.load(new_conn)
 
     def _on_disconnect(self, row):
@@ -770,25 +776,24 @@ class TuskWindow(Adw.ApplicationWindow):
         self._active_conn_id = conn['id'] if conn else None
         self._active_conn = conn
 
-        # Update row indicators
+        # Update per-row disconnect action enabled state
         row = self._conn_list.get_first_child()
         while row:
             if hasattr(row, '_conn'):
-                is_active = bool(conn and row._conn['id'] == conn['id'])
-                row._active_dot.set_visible(is_active)
-                row._disconnect_action.set_enabled(is_active)
+                row._disconnect_action.set_enabled(
+                    bool(conn and row._conn['id'] == conn['id'])
+                )
             row = row.get_next_sibling()
 
-        # Update active connection label above DB browser
+        # Update dropdown label
         if conn:
             label = conn['name']
             if conn.get('read_only'):
                 label += '  🔒'
-            self._active_conn_label.set_label(f'Connected: {label}')
-            self._active_conn_label.set_visible(True)
+            self._conn_dropdown_label.set_label(label)
         else:
-            self._active_conn_label.set_label('')
-            self._active_conn_label.set_visible(False)
+            self._conn_dropdown_label.set_label('Select connection…')
+            self._conn_dropdown_badge.set_visible(False)
 
         # Update all open SQL editors
         pages = self._tab_view.get_pages()
