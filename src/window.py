@@ -15,6 +15,7 @@ from db_browser import DbBrowser
 from file_explorer import FileExplorer
 from sql_editor import SqlEditor
 from table_panel import TablePanel
+from role_panel import RolePanel
 
 
 class TuskWindow(Adw.ApplicationWindow):
@@ -314,6 +315,7 @@ class TuskWindow(Adw.ApplicationWindow):
         self._browser.connect('database-switched', self._on_database_switched)
         self._browser.connect('drop-database-requested', self._on_drop_database_requested)
         self._browser.connect('role-attrs-loaded', self._on_role_attrs_loaded)
+        self._browser.connect('role-selected', self._on_role_selected)
         sidebar_paned.set_start_child(self._browser)
 
         self._file_explorer = FileExplorer()
@@ -823,6 +825,24 @@ class TuskWindow(Adw.ApplicationWindow):
         page = self._tab_view.append(panel)
         page.set_title(f'{schema}.{table}')
         page.set_icon(Gio.ThemedIcon.new(icon_name))
+        page._tab_id = tab_id
+
+        self._show_tabs()
+        self._tab_view.set_selected_page(page)
+
+    def _on_role_selected(self, _browser, conn, role_name):
+        tab_id = f'role:{conn["id"]}:{role_name}'
+        existing = self._find_tab(tab_id)
+        if existing:
+            self._tab_view.set_selected_page(existing)
+            return
+
+        panel = RolePanel()
+        panel.load(conn, role_name)
+
+        page = self._tab_view.append(panel)
+        page.set_title(role_name)
+        page.set_icon(Gio.ThemedIcon.new('person-symbolic'))
         page._tab_id = tab_id
 
         self._show_tabs()

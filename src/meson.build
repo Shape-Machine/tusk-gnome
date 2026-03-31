@@ -32,6 +32,7 @@ tusk_sources = [
   'data_grid.py',
   'db_browser.py',
   'table_panel.py',
+  'role_panel.py',
   'sql_editor.py',
   'file_explorer.py',
   'prefs.py',

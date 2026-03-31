@@ -69,6 +69,10 @@ class DbBrowser(Gtk.Box):
             GObject.SignalFlags.RUN_FIRST, None,
             (GObject.TYPE_PYOBJECT, GObject.TYPE_PYOBJECT),  # conn, attrs dict
         ),
+        'role-selected': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str),  # conn, role_name
+        ),
     }
 
     def __init__(self):
@@ -917,6 +921,10 @@ class DbBrowser(Gtk.Box):
             schema = self._filter.get_value(it, COL_SCHEMA)
             table = self._filter.get_value(it, COL_TABLE)
             self.emit('table-selected', conn, schema, table, item_type)
+        elif item_type == 'role':
+            conn = self._filter.get_value(it, COL_CONN)
+            role_name = self._filter.get_value(it, COL_TABLE)
+            self.emit('role-selected', conn, role_name)
         elif item_type in ('schema', 'group', 'users'):
             if tree.row_expanded(path):
                 tree.collapse_row(path)
@@ -933,6 +941,11 @@ class DbBrowser(Gtk.Box):
                     schema = self._filter.get_value(it, COL_SCHEMA)
                     table = self._filter.get_value(it, COL_TABLE)
                     self.emit('table-selected', conn, schema, table, item_type)
+                    return True
+                if item_type == 'role':
+                    conn = self._filter.get_value(it, COL_CONN)
+                    role_name = self._filter.get_value(it, COL_TABLE)
+                    self.emit('role-selected', conn, role_name)
                     return True
                 if item_type in ('schema', 'group', 'users'):
                     path, _ = self._tree.get_cursor()
