@@ -626,16 +626,7 @@ class RolePanel(Gtk.Box):
         self._conn = None
         self._role_name = None
 
-        # Header
-        header_bar = Adw.HeaderBar()
-        header_bar.set_show_end_title_buttons(False)
-        header_bar.set_show_start_title_buttons(False)
-        self._title_label = Gtk.Label()
-        self._title_label.add_css_class('heading')
-        header_bar.set_title_widget(self._title_label)
-        self.append(header_bar)
-
-        # View stack + switcher
+        # View stack
         self._stack = Adw.ViewStack()
         self._stack.set_vexpand(True)
 
@@ -653,17 +644,22 @@ class RolePanel(Gtk.Box):
             self._object_tab, 'objects', 'Object Privileges', 'emblem-system-symbolic'
         )
 
-        switcher_bar = Adw.ViewSwitcherBar()
-        switcher_bar.set_stack(self._stack)
-        switcher_bar.set_reveal(True)
+        # Switcher at top (matches TablePanel pattern)
+        switcher = Adw.ViewSwitcher()
+        switcher.set_stack(self._stack)
+        switcher.set_policy(Adw.ViewSwitcherPolicy.WIDE)
+        switcher.set_hexpand(True)
 
-        self.append(self._stack)
+        switcher_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        switcher_bar.append(switcher)
+
         self.append(switcher_bar)
+        self.append(Gtk.Separator())
+        self.append(self._stack)
 
     def load(self, conn, role_name):
         self._conn = conn
         self._role_name = role_name
-        self._title_label.set_label(role_name)
         self._memberships_tab.load(conn, role_name)
         self._effective_tab.load(conn, role_name)
         self._object_tab.load(conn, role_name)
