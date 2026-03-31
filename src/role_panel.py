@@ -90,7 +90,7 @@ def _make_scrolled(child):
 
 
 def _make_column_view(cols):
-    store = Gio.ListStore()
+    store = Gio.ListStore(item_type=_Row.__gtype__)
     cv = Gtk.ColumnView(model=Gtk.NoSelection(model=store))
     cv.set_hexpand(True)
     cv.set_vexpand(True)
@@ -229,11 +229,13 @@ class MembershipsTab(Gtk.Box):
     def _do_revoke(self, group_role):
         try:
             from tunnel import open_db
+            from psycopg import sql
             with open_db(self._conn) as db:
                 with db.cursor() as cur:
-                    cur.execute(
-                        f'REVOKE "{group_role}" FROM "{self._role_name}"'
-                    )
+                    cur.execute(sql.SQL('REVOKE {} FROM {}').format(
+                        sql.Identifier(group_role),
+                        sql.Identifier(self._role_name),
+                    ))
                 db.commit()
             GLib.idle_add(self.load, self._conn, self._role_name)
         except Exception as e:
@@ -281,7 +283,16 @@ class _GrantMembershipDialog(Adw.Dialog):
                                          subtitle='Allows this role to grant the group to others')
         prefs_group.add(self._admin_row)
 
-        box.append(prefs_group)
+        self._error_label = Gtk.Label()
+        self._error_label.add_css_class('error')
+        self._error_label.add_css_class('caption')
+        self._error_label.set_margin_start(12)
+        self._error_label.set_margin_end(12)
+        self._error_label.set_margin_bottom(8)
+        self._error_label.set_visible(False)
+        self._error_label.set_wrap(True)
+        box.append(self._error_label)
+
         self.set_child(box)
 
         threading.Thread(target=self._load_groups, daemon=True).start()
@@ -294,8 +305,12 @@ class _GrantMembershipDialog(Adw.Dialog):
                     cur.execute(_ALL_GROUP_ROLES_SQL)
                     groups = [r[0] for r in cur.fetchall()]
             GLib.idle_add(self._populate_groups, groups)
-        except Exception:
-            pass
+        except Exception as e:
+            GLib.idle_add(self._show_load_error, str(e))
+
+    def _show_load_error(self, msg):
+        self._error_label.set_label(f'Could not load group roles: {msg}')
+        self._error_label.set_visible(True)
 
     def _populate_groups(self, groups):
         for g in groups:
@@ -316,12 +331,16 @@ class _GrantMembershipDialog(Adw.Dialog):
     def _do_grant(self, group_role, admin_opt):
         try:
             from tunnel import open_db
+            from psycopg import sql
             with open_db(self._conn) as db:
                 with db.cursor() as cur:
-                    sql = f'GRANT "{group_role}" TO "{self._role_name}"'
+                    stmt = sql.SQL('GRANT {} TO {}').format(
+                        sql.Identifier(group_role),
+                        sql.Identifier(self._role_name),
+                    )
                     if admin_opt:
-                        sql += ' WITH ADMIN OPTION'
-                    cur.execute(sql)
+                        stmt = sql.SQL('{} WITH ADMIN OPTION').format(stmt)
+                    cur.execute(stmt)
                 db.commit()
             GLib.idle_add(self._on_done)
         except Exception as e:
@@ -493,14 +512,14 @@ class ObjectPrivilegesTab(Gtk.Box):
 
     def _populate_schemas(self, schemas):
         self._updating = True
-        # clear and repopulate
         while self._schema_model.get_n_items():
             self._schema_model.remove(0)
         for s in schemas:
             self._schema_model.append(s)
-        self._updating = False
         if schemas:
             self._schema_drop.set_selected(0)
+        self._updating = False
+        if schemas:
             self._load_tables(schemas[0])
 
     def _on_schema_changed(self, drop, _pspec):
@@ -534,9 +553,10 @@ class ObjectPrivilegesTab(Gtk.Box):
             self._table_model.remove(0)
         for t in tables:
             self._table_model.append(t)
-        self._updating = False
         if tables:
             self._table_drop.set_selected(0)
+        self._updating = False
+        if tables:
             self._load_privs()
 
     def _on_table_changed(self, _drop, _pspec):
@@ -600,14 +620,25 @@ class ObjectPrivilegesTab(Gtk.Box):
     def _do_grant_revoke(self, schema, table, priv, grant):
         try:
             from tunnel import open_db
+            from psycopg import sql
             with open_db(self._conn) as db:
                 with db.cursor() as cur:
-                    verb = 'GRANT' if grant else 'REVOKE'
-                    on_to = 'ON' if grant else 'ON'
-                    from_to = 'TO' if grant else 'FROM'
-                    cur.execute(
-                        f'{verb} {priv} {on_to} TABLE "{schema}"."{table}" {from_to} "{self._role_name}"'
-                    )
+                    # priv is one of a fixed whitelist (_TABLE_PRIVS_ALL) — safe to inline
+                    if grant:
+                        stmt = sql.SQL('GRANT {} ON TABLE {}.{} TO {}').format(
+                            sql.SQL(priv),
+                            sql.Identifier(schema),
+                            sql.Identifier(table),
+                            sql.Identifier(self._role_name),
+                        )
+                    else:
+                        stmt = sql.SQL('REVOKE {} ON TABLE {}.{} FROM {}').format(
+                            sql.SQL(priv),
+                            sql.Identifier(schema),
+                            sql.Identifier(table),
+                            sql.Identifier(self._role_name),
+                        )
+                    cur.execute(stmt)
                 db.commit()
             GLib.idle_add(self._load_privs)
         except Exception as e:
