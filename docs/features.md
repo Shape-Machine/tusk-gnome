@@ -1,6 +1,6 @@
 # Features
 
-_Last updated: 2026-03-27_
+_Generated from source: v2026.03.30-00_
 
 ## Connections
 
@@ -54,9 +54,13 @@ _Last updated: 2026-03-27_
 - Auto-save with 800 ms debounce; unsaved-changes indicator shown in toolbar; manual save with Ctrl+S
 - **Run All** (F5) — executes the entire buffer as one or more statements
 - **Run Selected** (Ctrl+Enter) — executes selected text, or the statement at the cursor
+- **EXPLAIN** — runs EXPLAIN on the current statement; results shown as a collapsible tree
+- **EXPLAIN ANALYZE** — runs EXPLAIN ANALYZE; tree annotated with actual row counts and timing
 - **Cancel** — stops a running query mid-execution
 - Custom multi-statement parser: splits on semicolons while respecting string literals, dollar-quoting, and comments
 - Multi-statement results: a log lists each statement's outcome; SELECT results open as additional closeable tabs
+- Query history — recent queries listed with timestamp and execution duration; click to restore
+- Toggle line comment with Ctrl+/ (adds or removes `--` prefix)
 - Row count shown after each query; spinner shown while a query is running
 - Right-click results to copy a cell value, copy selected rows as CSV or JSON, or copy all rows as CSV or JSON
 
