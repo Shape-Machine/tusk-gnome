@@ -439,7 +439,7 @@ class SqlEditor(Gtk.Box):
 
         # ── Editor ────────────────────────────────────────────────────────────
         self._buffer, self._editor = _make_editor()
-        self._buffer.connect('changed', self._on_changed)
+        self._changed_handler_id = self._buffer.connect('changed', self._on_changed)
 
         self._editor.set_monospace(True)
         self._editor.set_wrap_mode(Gtk.WrapMode.NONE)
@@ -646,13 +646,44 @@ class SqlEditor(Gtk.Box):
             Adw.StyleManager.get_default().disconnect(self._dark_handler_id)
             self._dark_handler_id = 0
 
+    def _set_buffer_text(self, text):
+        """Set buffer text without triggering the autosave changed handler."""
+        self._buffer.handler_block(self._changed_handler_id)
+        try:
+            self._buffer.set_text(text)
+        finally:
+            self._buffer.handler_unblock(self._changed_handler_id)
+
     def _trim_buffer(self):
-        """Strip trailing whitespace from each line and remove leading/trailing blank lines."""
+        """Strip trailing whitespace from each line and remove leading/trailing blank lines.
+
+        Lines that end inside a SQL string literal are preserved as-is to avoid
+        altering intentional whitespace within multi-line string values.
+        """
         start = self._buffer.get_start_iter()
         end = self._buffer.get_end_iter()
         text = self._buffer.get_text(start, end, False)
         lines = text.split('\n')
-        trimmed = [line.rstrip() for line in lines]
+        trimmed = []
+        in_string = False
+        quote_char = None
+        for line in lines:
+            i = 0
+            while i < len(line):
+                c = line[i]
+                if not in_string:
+                    if c in ("'", '"'):
+                        in_string = True
+                        quote_char = c
+                else:
+                    if c == quote_char:
+                        if i + 1 < len(line) and line[i + 1] == quote_char:
+                            i += 1  # skip escaped quote pair
+                        else:
+                            in_string = False
+                            quote_char = None
+                i += 1
+            trimmed.append(line if in_string else line.rstrip())
         # Remove leading blank lines
         while trimmed and not trimmed[0]:
             trimmed.pop(0)
@@ -661,7 +692,7 @@ class SqlEditor(Gtk.Box):
             trimmed.pop()
         result = '\n'.join(trimmed)
         if result != text:
-            self._buffer.set_text(result)
+            self._set_buffer_text(result)
 
     def _format_buffer(self):
         """Pretty-print SQL in the buffer using sqlparse (no-op if unavailable)."""
@@ -678,7 +709,7 @@ class SqlEditor(Gtk.Box):
             strip_whitespace=False,
         ).strip()
         if formatted != text.strip():
-            self._buffer.set_text(formatted)
+            self._set_buffer_text(formatted)
 
     def _save_now(self):
         if self._autosave_timer:
