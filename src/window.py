@@ -636,15 +636,32 @@ class TuskWindow(Adw.ApplicationWindow):
         self._browser.load(new_conn)
 
     def _on_drop_database_requested(self, _browser, conn, dbname):
+        entry = Gtk.Entry(placeholder_text=dbname, hexpand=True)
+        entry_row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        entry_label = Gtk.Label(
+            label=f'Type <b>{dbname}</b> to confirm',
+            use_markup=True,
+            xalign=0,
+        )
+        entry_row.append(entry_label)
+        entry_row.append(entry)
+
         dialog = Adw.AlertDialog(
             heading=f'Drop database "{dbname}"?',
             body='All data in this database will be permanently deleted. This cannot be undone.',
         )
+        dialog.set_extra_child(entry_row)
         dialog.add_response('cancel', 'Cancel')
         dialog.add_response('drop', 'Drop Database')
         dialog.set_response_appearance('drop', Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_response_enabled('drop', False)
         dialog.set_default_response('cancel')
         dialog.set_close_response('cancel')
+
+        entry.connect('changed', lambda e: dialog.set_response_enabled(
+            'drop', e.get_text() == dbname
+        ))
+
         dialog.connect('response', self._on_drop_database_response, conn, dbname)
         dialog.present(self)
 
@@ -874,7 +891,7 @@ class TuskWindow(Adw.ApplicationWindow):
         body = ('This removes the view definition.' if is_view else
                 'All data will be permanently deleted. This action cannot be undone.')
 
-        cascade_check = Gtk.CheckButton(label='Drop with CASCADE (removes dependent objects)')
+        cascade_check = Gtk.CheckButton(label='Drop with CASCADE — also drops all dependent views and constraints')
         cascade_check.set_margin_top(8)
         cascade_check.set_margin_start(4)
 
@@ -930,7 +947,7 @@ class TuskWindow(Adw.ApplicationWindow):
 
         dialog = Adw.AlertDialog(
             heading=f'Truncate "{schema}.{table}"?',
-            body='All rows will be deleted. The table structure is preserved.',
+            body='Truncate empties the table but keeps its structure and indexes. This cannot be undone.',
         )
         dialog.set_extra_child(restart_check)
         dialog.add_response('cancel', 'Cancel')
@@ -1108,7 +1125,7 @@ class TuskWindow(Adw.ApplicationWindow):
         if is_dependency and not is_view:
             dialog = Adw.AlertDialog(
                 heading='Drop Failed — Dependent Objects Exist',
-                body=f'{err_str}\n\nUse "Drop with CASCADE" to also drop all dependent objects.',
+                body=f'{err_str}\n\nUse "Drop with CASCADE" to also drop all dependent views and constraints.',
             )
             dialog.add_response('cancel', 'Cancel')
             dialog.add_response('cascade', 'Drop with CASCADE')
@@ -1208,7 +1225,7 @@ class TuskWindow(Adw.ApplicationWindow):
         dlg.present(self)
 
     def _on_drop_schema_requested(self, _browser, conn, schema):
-        cascade_check = Gtk.CheckButton(label='Drop with CASCADE (removes all objects in schema)')
+        cascade_check = Gtk.CheckButton(label='Drop with CASCADE — also drops all tables, views and other objects in this schema')
         cascade_check.set_margin_top(8)
         cascade_check.set_margin_start(4)
 
@@ -1258,7 +1275,7 @@ class TuskWindow(Adw.ApplicationWindow):
     def _show_drop_schema_cascade_error(self, err_str, conn, schema):
         dialog = Adw.AlertDialog(
             heading='Drop Schema Failed — Objects Exist',
-            body=f'{err_str}\n\nEnable CASCADE to drop the schema and all its objects.',
+            body=f'{err_str}\n\nUse "Drop with CASCADE" to also drop all tables, views and other objects in this schema.',
         )
         dialog.add_response('cancel', 'Cancel')
         dialog.add_response('cascade', 'Drop with CASCADE')
