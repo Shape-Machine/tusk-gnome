@@ -707,7 +707,7 @@ class DbBrowser(Gtk.Box):
             group_roles  = [r for r in roles_list if not r['login']]
 
             users_sub = self._store.append(users_it, [
-                'person-symbolic', 'Users', 'users', conn, '', ''
+                'system-users-symbolic', 'Users', 'users', conn, '', ''
             ])
             for role in login_roles:
                 self._store.append(users_sub, [
@@ -715,11 +715,11 @@ class DbBrowser(Gtk.Box):
                 ])
 
             roles_sub = self._store.append(users_it, [
-                'group-symbolic', 'Roles', 'users', conn, '', ''
+                'key-symbolic', 'Roles', 'users', conn, '', ''
             ])
             for role in group_roles:
                 self._store.append(roles_sub, [
-                    'group-symbolic', _role_label(role), 'role', conn, '', role['name']
+                    'key-symbolic', _role_label(role), 'role', conn, '', role['name']
                 ])
 
         self._saved_expansion = None
