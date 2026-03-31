@@ -639,7 +639,7 @@ class TuskWindow(Adw.ApplicationWindow):
         entry = Gtk.Entry(placeholder_text=dbname, hexpand=True)
         entry_row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         entry_label = Gtk.Label(
-            label=f'Type <b>{dbname}</b> to confirm',
+            label=f'Type <b>{GLib.markup_escape_text(dbname)}</b> to confirm',
             use_markup=True,
             xalign=0,
         )
