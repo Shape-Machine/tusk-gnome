@@ -684,12 +684,10 @@ class DbBrowser(Gtk.Box):
                 'dialog-information-symbolic', 'No roles found', 'info', conn, '', ''
             ])
         else:
-            for role in roles_list:
+            def _role_label(role):
                 attrs = []
                 if role['superuser']:
                     attrs.append('superuser')
-                if role['login']:
-                    attrs.append('login')
                 if role['createdb']:
                     attrs.append('createdb')
                 if role['createrole']:
@@ -703,9 +701,25 @@ class DbBrowser(Gtk.Box):
                     f' — member of: {", ".join(role["member_of"])}'
                     if role['member_of'] else ''
                 )
-                label = f'{role["name"]}{attr_str}{member_str}'
-                self._store.append(users_it, [
-                    'person-symbolic', label, 'role', conn, '', role['name']
+                return f'{role["name"]}{attr_str}{member_str}'
+
+            login_roles = [r for r in roles_list if r['login']]
+            group_roles  = [r for r in roles_list if not r['login']]
+
+            users_sub = self._store.append(users_it, [
+                'person-symbolic', 'Users', 'users', conn, '', ''
+            ])
+            for role in login_roles:
+                self._store.append(users_sub, [
+                    'person-symbolic', _role_label(role), 'role', conn, '', role['name']
+                ])
+
+            roles_sub = self._store.append(users_it, [
+                'group-symbolic', 'Roles', 'users', conn, '', ''
+            ])
+            for role in group_roles:
+                self._store.append(roles_sub, [
+                    'group-symbolic', _role_label(role), 'role', conn, '', role['name']
                 ])
 
         self._saved_expansion = None
