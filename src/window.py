@@ -375,7 +375,7 @@ class TuskWindow(Adw.ApplicationWindow):
             lock.add_css_class('dim-label')
             row.add_suffix(lock)
 
-        role_badge = Gtk.Label(label='superuser')
+        role_badge = Gtk.Label(label='⚡')
         role_badge.add_css_class('dim-label')
         role_badge.add_css_class('caption')
         role_badge.set_visible(False)
