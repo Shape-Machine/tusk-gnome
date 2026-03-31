@@ -230,6 +230,15 @@ class DbBrowser(Gtk.Box):
             return self._group_has_match(model, it, query)
         if item_type in ('table', 'view', 'sequence', 'enum', 'function'):
             return query in model.get_value(it, COL_LABEL).lower()
+        if item_type == 'users':
+            child = model.iter_children(it)
+            while child:
+                if query in model.get_value(child, COL_LABEL).lower():
+                    return True
+                child = model.iter_next(child)
+            return False
+        if item_type == 'role':
+            return query in model.get_value(it, COL_LABEL).lower()
         return True  # info, error
 
     def _group_has_match(self, model, group_it, query):
@@ -458,18 +467,23 @@ class DbBrowser(Gtk.Box):
                     all_databases = [r[0] for r in cur.fetchall()]
 
                     # Current user's own role attributes (for connection badge)
-                    cur.execute("""
-                        SELECT rolsuper, rolcreatedb, rolcreaterole, rolcanlogin, rolreplication
-                        FROM pg_roles WHERE rolname = current_user
-                    """)
-                    row = cur.fetchone()
-                    current_role_attrs = {
-                        'superuser': bool(row[0]),
-                        'createdb': bool(row[1]),
-                        'createrole': bool(row[2]),
-                        'login': bool(row[3]),
-                        'replication': bool(row[4]),
-                    } if row else {}
+                    current_role_attrs = {}
+                    try:
+                        cur.execute("""
+                            SELECT rolsuper, rolcreatedb, rolcreaterole, rolcanlogin, rolreplication
+                            FROM pg_roles WHERE rolname = current_user
+                        """)
+                        row = cur.fetchone()
+                        if row:
+                            current_role_attrs = {
+                                'superuser': bool(row[0]),
+                                'createdb': bool(row[1]),
+                                'createrole': bool(row[2]),
+                                'login': bool(row[3]),
+                                'replication': bool(row[4]),
+                            }
+                    except psycopg.errors.InsufficientPrivilege:
+                        pass  # degrade gracefully — badge stays hidden
 
                     # All roles + membership (for Users & Roles tree section)
                     roles_list = None
@@ -505,7 +519,7 @@ class DbBrowser(Gtk.Box):
                             }
                             for rr in cur.fetchall()
                         ]
-                    except Exception:
+                    except psycopg.errors.InsufficientPrivilege:
                         pass  # insufficient privileges — roles_list stays None
 
             schema_items = {}
@@ -680,6 +694,8 @@ class DbBrowser(Gtk.Box):
                     attrs.append('createdb')
                 if role['createrole']:
                     attrs.append('createrole')
+                if role['inherit']:
+                    attrs.append('inherit')
                 if role['replication']:
                     attrs.append('replication')
                 attr_str = f' ({", ".join(attrs)})' if attrs else ''
