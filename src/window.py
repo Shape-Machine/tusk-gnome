@@ -30,11 +30,23 @@ class TuskWindow(Adw.ApplicationWindow):
         self._active_conn = None       # full conn dict with password
         self._sidebar_css = Gtk.CssProvider()
         self._main_css = Gtk.CssProvider()
+        self._static_css = Gtk.CssProvider()
+        self._static_css.load_from_string("""
+            .connection-active-bar {
+                background-color: @accent_bg_color;
+                border-radius: 2px;
+            }
+            .connection-role-badge {
+                font-size: 13px;
+            }
+        """)
         display = Gdk.Display.get_default()
         Gtk.StyleContext.add_provider_for_display(
             display, self._sidebar_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         Gtk.StyleContext.add_provider_for_display(
             display, self._main_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        Gtk.StyleContext.add_provider_for_display(
+            display, self._static_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         self._build_ui()
         self._apply_fonts()
         self._add_actions()
@@ -375,21 +387,22 @@ class TuskWindow(Adw.ApplicationWindow):
             lock.add_css_class('dim-label')
             row.add_suffix(lock)
 
-        role_badge = Gtk.Label(label='★')
+        role_badge = Gtk.Label(label='🛡')
         role_badge.add_css_class('dim-label')
-        role_badge.add_css_class('caption')
+        role_badge.add_css_class('connection-role-badge')
         role_badge.set_visible(False)
         role_badge.set_valign(Gtk.Align.CENTER)
         row.add_suffix(role_badge)
         row._role_badge = role_badge
 
-        dot = Gtk.Label(label='●')
-        dot.add_css_class('accent')
-        dot.set_visible(False)
-        dot.set_tooltip_text('Active connection')
-        dot.set_valign(Gtk.Align.CENTER)
-        row.add_suffix(dot)
-        row._active_dot = dot
+        bar = Gtk.Box()
+        bar.add_css_class('connection-active-bar')
+        bar.set_size_request(3, 14)
+        bar.set_visible(False)
+        bar.set_tooltip_text('Active connection')
+        bar.set_valign(Gtk.Align.CENTER)
+        row.add_suffix(bar)
+        row._active_dot = bar
 
         menu = Gio.Menu()
         menu.append('Disconnect', 'row.disconnect')
