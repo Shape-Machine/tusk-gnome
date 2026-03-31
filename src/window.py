@@ -660,8 +660,8 @@ class TuskWindow(Adw.ApplicationWindow):
     def _on_role_attrs_loaded(self, _browser, conn, attrs):
         """Update the role badge on the matching connection row."""
         is_superuser = attrs.get('superuser', False)
-        tooltip_parts = [k for k, v in attrs.items() if v]
-        tooltip = ', '.join(tooltip_parts) if tooltip_parts else ''
+        tooltip_parts = [f'{k}: {"yes" if v else "no"}' for k, v in attrs.items()]
+        tooltip = '\n'.join(tooltip_parts) if tooltip_parts else ''
 
         row = self._conn_list.get_first_child()
         while row:
