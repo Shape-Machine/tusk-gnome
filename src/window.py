@@ -279,6 +279,7 @@ class TuskWindow(Adw.ApplicationWindow):
         self._browser.connect('create-view-requested', self._on_create_view_requested)
         self._browser.connect('database-switched', self._on_database_switched)
         self._browser.connect('drop-database-requested', self._on_drop_database_requested)
+        self._browser.connect('role-attrs-loaded', self._on_role_attrs_loaded)
         sidebar_paned.set_start_child(self._browser)
 
         self._file_explorer = FileExplorer()
@@ -373,6 +374,14 @@ class TuskWindow(Adw.ApplicationWindow):
             lock.set_valign(Gtk.Align.CENTER)
             lock.add_css_class('dim-label')
             row.add_suffix(lock)
+
+        role_badge = Gtk.Label(label='superuser')
+        role_badge.add_css_class('dim-label')
+        role_badge.add_css_class('caption')
+        role_badge.set_visible(False)
+        role_badge.set_valign(Gtk.Align.CENTER)
+        row.add_suffix(role_badge)
+        row._role_badge = role_badge
 
         dot = Gtk.Label(label='●')
         dot.add_css_class('accent')
@@ -634,6 +643,21 @@ class TuskWindow(Adw.ApplicationWindow):
         self._active_conn_label.set_label(f'Connected: {label} — {new_dbname}')
 
         self._browser.load(new_conn)
+
+    def _on_role_attrs_loaded(self, _browser, conn, attrs):
+        """Update the role badge on the matching connection row."""
+        is_superuser = attrs.get('superuser', False)
+        tooltip_parts = [k for k, v in attrs.items() if v]
+        tooltip = ', '.join(tooltip_parts) if tooltip_parts else ''
+
+        row = self._conn_list.get_first_child()
+        while row:
+            if hasattr(row, '_conn') and row._conn['id'] == conn['id']:
+                row._role_badge.set_visible(is_superuser)
+                if is_superuser:
+                    row._role_badge.set_tooltip_text(tooltip)
+                break
+            row = row.get_next_sibling()
 
     def _on_drop_database_requested(self, _browser, conn, dbname):
         entry = Gtk.Entry(placeholder_text=dbname, hexpand=True)

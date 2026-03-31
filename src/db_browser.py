@@ -9,7 +9,7 @@ from gi.repository import Gtk, GLib, GObject, Gdk, Gio
 
 COL_ICON = 0
 COL_LABEL = 1
-COL_TYPE = 2    # 'schema' | 'group' | 'table' | 'view' | 'sequence' | 'enum' | 'function' | 'loading' | 'error'
+COL_TYPE = 2    # 'schema' | 'group' | 'table' | 'view' | 'sequence' | 'enum' | 'function' | 'users' | 'role' | 'loading' | 'error'
 COL_CONN = 3
 COL_SCHEMA = 4
 COL_TABLE = 5
@@ -64,6 +64,10 @@ class DbBrowser(Gtk.Box):
         'create-view-requested': (
             GObject.SignalFlags.RUN_FIRST, None,
             (GObject.TYPE_PYOBJECT, str),  # conn, schema
+        ),
+        'role-attrs-loaded': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, GObject.TYPE_PYOBJECT),  # conn, attrs dict
         ),
     }
 
@@ -453,6 +457,57 @@ class DbBrowser(Gtk.Box):
                     """)
                     all_databases = [r[0] for r in cur.fetchall()]
 
+                    # Current user's own role attributes (for connection badge)
+                    cur.execute("""
+                        SELECT rolsuper, rolcreatedb, rolcreaterole, rolcanlogin, rolreplication
+                        FROM pg_roles WHERE rolname = current_user
+                    """)
+                    row = cur.fetchone()
+                    current_role_attrs = {
+                        'superuser': bool(row[0]),
+                        'createdb': bool(row[1]),
+                        'createrole': bool(row[2]),
+                        'login': bool(row[3]),
+                        'replication': bool(row[4]),
+                    } if row else {}
+
+                    # All roles + membership (for Users & Roles tree section)
+                    roles_list = None
+                    try:
+                        cur.execute("""
+                            SELECT r.rolname,
+                                   r.rolsuper,
+                                   r.rolcanlogin,
+                                   r.rolcreatedb,
+                                   r.rolcreaterole,
+                                   r.rolinherit,
+                                   r.rolreplication,
+                                   array_agg(g.rolname ORDER BY g.rolname)
+                                       FILTER (WHERE g.rolname IS NOT NULL) AS member_of
+                            FROM pg_roles r
+                            LEFT JOIN pg_auth_members m ON m.member = r.oid
+                            LEFT JOIN pg_roles g ON g.oid = m.roleid
+                            GROUP BY r.rolname, r.rolsuper, r.rolcanlogin,
+                                     r.rolcreatedb, r.rolcreaterole,
+                                     r.rolinherit, r.rolreplication
+                            ORDER BY r.rolname
+                        """)
+                        roles_list = [
+                            {
+                                'name': rr[0],
+                                'superuser': bool(rr[1]),
+                                'login': bool(rr[2]),
+                                'createdb': bool(rr[3]),
+                                'createrole': bool(rr[4]),
+                                'inherit': bool(rr[5]),
+                                'replication': bool(rr[6]),
+                                'member_of': rr[7] or [],
+                            }
+                            for rr in cur.fetchall()
+                        ]
+                    except Exception:
+                        pass  # insufficient privileges — roles_list stays None
+
             schema_items = {}
 
             def _schema(s):
@@ -487,17 +542,22 @@ class DbBrowser(Gtk.Box):
                     f'Default schema "{default_schema}" not found on this server.'
                 )
 
-            GLib.idle_add(self._populate, conn, schema_items, all_databases, schema_warning, gen)
+            GLib.idle_add(self._populate, conn, schema_items, all_databases,
+                          schema_warning, current_role_attrs, roles_list, gen)
 
         except Exception as e:
             GLib.idle_add(self._show_error, str(e), gen)
 
-    def _populate(self, conn, schema_items, all_databases, schema_warning, gen):
+    def _populate(self, conn, schema_items, all_databases,
+                  schema_warning, current_role_attrs, roles_list, gen):
         if gen != self._load_gen:
             return
         self._loading_spinner.stop()
         self._loading_bar.set_visible(False)
         self._store.clear()
+
+        # Emit badge signal so window.py can update the connection row indicator
+        self.emit('role-attrs-loaded', conn, current_role_attrs)
 
         # Update database switcher
         self._db_switch_inhibit = True
@@ -596,6 +656,41 @@ class DbBrowser(Gtk.Box):
                             self._store.append(parent_it, [
                                 'system-run-symbolic', label, 'function', conn, schema, name
                             ])
+
+        # Users & Roles section
+        users_it = self._store.append(None, [
+            'system-users-symbolic', 'Users & Roles', 'users', conn, '', ''
+        ])
+        if roles_list is None:
+            self._store.append(users_it, [
+                'dialog-error-symbolic', 'Insufficient privileges', 'info', conn, '', ''
+            ])
+        elif not roles_list:
+            self._store.append(users_it, [
+                'dialog-information-symbolic', 'No roles found', 'info', conn, '', ''
+            ])
+        else:
+            for role in roles_list:
+                attrs = []
+                if role['superuser']:
+                    attrs.append('superuser')
+                if role['login']:
+                    attrs.append('login')
+                if role['createdb']:
+                    attrs.append('createdb')
+                if role['createrole']:
+                    attrs.append('createrole')
+                if role['replication']:
+                    attrs.append('replication')
+                attr_str = f' ({", ".join(attrs)})' if attrs else ''
+                member_str = (
+                    f' — member of: {", ".join(role["member_of"])}'
+                    if role['member_of'] else ''
+                )
+                label = f'{role["name"]}{attr_str}{member_str}'
+                self._store.append(users_it, [
+                    'person-symbolic', label, 'role', conn, '', role['name']
+                ])
 
         self._saved_expansion = None
         self._search_bar.set_visible(True)
