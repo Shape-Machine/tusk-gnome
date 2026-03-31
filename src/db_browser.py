@@ -887,7 +887,7 @@ class DbBrowser(Gtk.Box):
             schema = self._filter.get_value(it, COL_SCHEMA)
             table = self._filter.get_value(it, COL_TABLE)
             self.emit('table-selected', conn, schema, table, item_type)
-        elif item_type in ('schema', 'group'):
+        elif item_type in ('schema', 'group', 'users'):
             if tree.row_expanded(path):
                 tree.collapse_row(path)
             else:
@@ -904,7 +904,7 @@ class DbBrowser(Gtk.Box):
                     table = self._filter.get_value(it, COL_TABLE)
                     self.emit('table-selected', conn, schema, table, item_type)
                     return True
-                if item_type in ('schema', 'group'):
+                if item_type in ('schema', 'group', 'users'):
                     path, _ = self._tree.get_cursor()
                     if path:
                         if self._tree.row_expanded(path):
