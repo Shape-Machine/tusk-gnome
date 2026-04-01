@@ -161,11 +161,11 @@ class FileExplorer(Gtk.Box):
         self._path_label.set_label(self._current_dir)
         self._up_btn.set_sensitive(os.path.dirname(self._current_dir) != self._current_dir)
 
-        try:
-            parent = os.path.dirname(self._current_dir)
-            if parent != self._current_dir:
-                self._store.append(['go-up-symbolic', '..', parent, True, True])
+        parent = os.path.dirname(self._current_dir)
+        if parent != self._current_dir:
+            self._store.append(['go-up-symbolic', '..', parent, True, True])
 
+        try:
             entries = sorted(
                 os.scandir(self._current_dir),
                 key=lambda e: (not e.is_dir(), e.name.lower()),

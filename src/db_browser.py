@@ -1009,48 +1009,45 @@ class DbBrowser(Gtk.Box):
                 tree.expand_row(path, False)
 
     def _on_key_pressed(self, _ctrl, keyval, _code, _state):
+        _model, it = self._tree.get_selection().get_selected()
+        if not it:
+            return False
+        item_type = self._filter.get_value(it, COL_TYPE)
+
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
-            _model, it = self._tree.get_selection().get_selected()
-            if it:
-                item_type = self._filter.get_value(it, COL_TYPE)
-                if item_type in ('table', 'view'):
-                    conn = self._filter.get_value(it, COL_CONN)
-                    schema = self._filter.get_value(it, COL_SCHEMA)
-                    table = self._filter.get_value(it, COL_TABLE)
-                    self.emit('table-selected', conn, schema, table, item_type)
-                    return True
-                if item_type == 'role':
-                    conn = self._filter.get_value(it, COL_CONN)
-                    role_name = self._filter.get_value(it, COL_TABLE)
-                    self.emit('role-selected', conn, role_name)
-                    return True
-                if item_type in ('schema', 'group', 'users'):
-                    path, _ = self._tree.get_cursor()
-                    if path:
-                        if self._tree.row_expanded(path):
-                            self._tree.collapse_row(path)
-                        else:
-                            self._tree.expand_row(path, False)
-                    return True
-        if keyval == Gdk.KEY_Right:
-            _model, it = self._tree.get_selection().get_selected()
-            if it:
-                item_type = self._filter.get_value(it, COL_TYPE)
-                if item_type in ('schema', 'group', 'users'):
-                    path, _ = self._tree.get_cursor()
-                    if path and not self._tree.row_expanded(path):
+            if item_type in ('table', 'view'):
+                conn = self._filter.get_value(it, COL_CONN)
+                schema = self._filter.get_value(it, COL_SCHEMA)
+                table = self._filter.get_value(it, COL_TABLE)
+                self.emit('table-selected', conn, schema, table, item_type)
+                return True
+            if item_type == 'role':
+                conn = self._filter.get_value(it, COL_CONN)
+                role_name = self._filter.get_value(it, COL_TABLE)
+                self.emit('role-selected', conn, role_name)
+                return True
+            if item_type in ('schema', 'group', 'users'):
+                path, _ = self._tree.get_cursor()
+                if path:
+                    if self._tree.row_expanded(path):
+                        self._tree.collapse_row(path)
+                    else:
                         self._tree.expand_row(path, False)
-                    return True
-        if keyval == Gdk.KEY_Left:
-            _model, it = self._tree.get_selection().get_selected()
-            if it:
-                item_type = self._filter.get_value(it, COL_TYPE)
-                if item_type in ('schema', 'group', 'users'):
-                    path, _ = self._tree.get_cursor()
-                    if path:
-                        if self._tree.row_expanded(path):
-                            self._tree.collapse_row(path)
-                        elif path.up():
-                            self._tree.set_cursor(path, None, False)
-                    return True
+                return True
+
+        if keyval == Gdk.KEY_Right and item_type in ('schema', 'group', 'users'):
+            path, _ = self._tree.get_cursor()
+            if path and not self._tree.row_expanded(path):
+                self._tree.expand_row(path, False)
+                return True
+
+        if keyval == Gdk.KEY_Left and item_type in ('schema', 'group', 'users'):
+            path, _ = self._tree.get_cursor()
+            if path:
+                if self._tree.row_expanded(path):
+                    self._tree.collapse_row(path)
+                elif path.up():
+                    self._tree.set_cursor(path, None, False)
+            return True
+
         return False
