@@ -1057,10 +1057,10 @@ class TablePanel(Gtk.Box):
         self._schema_exact_count_btn.set_sensitive(False)
         self._schema_count_label.set_label('counting…')
         conn, schema, table = self._conn, self._current_schema, self._current_table
+        gen = self._load_gen
 
         def run():
             try:
-                import psycopg
                 from psycopg import sql
                 from tunnel import open_db
 
@@ -1072,17 +1072,21 @@ class TablePanel(Gtk.Box):
                             )
                         )
                         count = cur.fetchone()[0]
-                GLib.idle_add(self._on_exact_count_done, count)
+                GLib.idle_add(self._on_exact_count_done, count, gen)
             except Exception as e:
-                GLib.idle_add(self._on_exact_count_error, str(e))
+                GLib.idle_add(self._on_exact_count_error, str(e), gen)
 
         threading.Thread(target=run, daemon=True).start()
 
-    def _on_exact_count_done(self, count):
+    def _on_exact_count_done(self, count, gen):
+        if gen != self._load_gen:
+            return
         self._schema_count_label.set_label(f'{count:,} rows (exact)')
         self._schema_exact_count_btn.set_sensitive(True)
 
-    def _on_exact_count_error(self, error):
+    def _on_exact_count_error(self, error, gen):
+        if gen != self._load_gen:
+            return
         self._schema_count_label.set_label('count failed')
         self._schema_exact_count_btn.set_sensitive(True)
         self._show_edit_error(error)
