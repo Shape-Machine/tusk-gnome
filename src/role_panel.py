@@ -704,7 +704,7 @@ class _NewRoleDialog(Adw.Dialog):
     }
 
     def __init__(self, conn):
-        super().__init__(title='New Role', content_width=400)
+        super().__init__(title='New Role', content_width=400, content_height=560)
         self._conn = conn
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
