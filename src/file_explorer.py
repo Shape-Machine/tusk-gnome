@@ -162,6 +162,10 @@ class FileExplorer(Gtk.Box):
         self._up_btn.set_sensitive(os.path.dirname(self._current_dir) != self._current_dir)
 
         try:
+            parent = os.path.dirname(self._current_dir)
+            if parent != self._current_dir:
+                self._store.append(['go-up-symbolic', '..', parent, True, True])
+
             entries = sorted(
                 os.scandir(self._current_dir),
                 key=lambda e: (not e.is_dir(), e.name.lower()),
@@ -286,6 +290,8 @@ class FileExplorer(Gtk.Box):
             return
         it = self._store.get_iter(result[0])
         if not self._store.get_value(it, COL_SENSITIVE):
+            return
+        if self._store.get_value(it, COL_NAME) == '..':
             return
         tree_path, _col, _cx, _cy = result
         self._tree.get_selection().select_path(tree_path)
