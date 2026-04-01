@@ -91,13 +91,12 @@ class ConnectionDialog(Adw.Window):
         self._uri_preview_row.add_suffix(copy_uri_btn)
         self._copy_uri_btn = copy_uri_btn
 
-        uri_expander = Adw.ExpanderRow(title='Connection String')
-        uri_expander.add_row(self._uri_preview_row)
+        self._uri_preview_row.set_title('Connection String')
 
         details_group.add(self._host_row)
         details_group.add(self._port_row)
         details_group.add(self._database_row)
-        details_group.add(uri_expander)
+        details_group.add(self._uri_preview_row)
 
         # ── Authentication ────────────────────────────────────────────────────
         auth_group = Adw.PreferencesGroup(title='Authentication')
