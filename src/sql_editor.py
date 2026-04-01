@@ -310,6 +310,7 @@ class SqlEditor(Gtk.Box):
         self._dark_handler_id = 0
         self._active_conn = None
         self._cancel_event = threading.Event()
+        self._first_error_row_index = -1
         self._last_sql = ''
         self._history = []
         self._run_start_time = time.monotonic()
@@ -498,7 +499,16 @@ class SqlEditor(Gtk.Box):
         log_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         log_scroll.set_vexpand(True)
         log_scroll.set_child(self._results_log)
-        self._results_stack.add_named(log_scroll, 'log')
+        self._log_scroll = log_scroll
+
+        self._results_banner = Adw.Banner()
+        self._results_banner.set_revealed(False)
+        self._results_banner.connect('button-clicked', self._on_banner_action)
+
+        log_outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        log_outer.append(self._results_banner)
+        log_outer.append(log_scroll)
+        self._results_stack.add_named(log_outer, 'log')
 
         # ── EXPLAIN results pane ──────────────────────────────────────────────
         self._explain_copy_confirm = Gtk.Label()
@@ -905,6 +915,7 @@ class SqlEditor(Gtk.Box):
         self._explain_menu_btn.set_sensitive(False)
         self._run_stack.set_visible_child_name('cancel')
         self._results_meta.set_label('')
+        self._results_banner.set_revealed(False)
         self._results_spinner.start()
         self._results_stack.set_visible_child_name('message')
         self._results_message.set_label('Running…')
@@ -1106,12 +1117,30 @@ class SqlEditor(Gtk.Box):
         errors = sum(1 for r in results if r['kind'] == 'error')
         cancelled = any(r['kind'] == 'cancelled' for r in results)
         total = len(results)
+        succeeded = sum(1 for r in results if r['kind'] in ('select', 'status'))
         meta = f'{total} statement{"s" if total != 1 else ""}'
         if errors:
             meta += f', {errors} error{"s" if errors != 1 else ""}'
         if cancelled:
             meta += ', cancelled'
         self._results_meta.set_label(meta)
+
+        self._first_error_row_index = next(
+            (i for i, r in enumerate(results) if r['kind'] == 'error'), -1
+        )
+
+        if errors:
+            self._results_banner.set_title(
+                f'{errors} of {total} statement{"s" if total != 1 else ""} failed'
+            )
+            self._results_banner.set_button_label('Jump to first error')
+        else:
+            self._results_banner.set_title(
+                f'All {succeeded} statement{"s" if succeeded != 1 else ""} succeeded'
+                if succeeded > 0 else ('Cancelled' if cancelled else f'{total} statements ran')
+            )
+            self._results_banner.set_button_label('Dismiss')
+        self._results_banner.set_revealed(True)
 
         for i, result in enumerate(results):
             preview = ' '.join(result['stmt'].split())
@@ -1162,6 +1191,13 @@ class SqlEditor(Gtk.Box):
                 err = result.get('msg') if result['kind'] == 'error' else None
                 rows = len(result.get('rows', [])) if result['kind'] == 'select' else None
                 self._append_history(result['stmt'], elapsed, rows=rows, error=err)
+
+    def _on_banner_action(self, _banner):
+        if self._first_error_row_index >= 0:
+            row = self._results_log.get_row_at_index(self._first_error_row_index)
+            if row:
+                row.grab_focus()
+        self._results_banner.set_revealed(False)
 
     # ── EXPLAIN ───────────────────────────────────────────────────────────────
 

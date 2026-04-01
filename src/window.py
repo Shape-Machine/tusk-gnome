@@ -319,6 +319,7 @@ class TuskWindow(Adw.ApplicationWindow):
         self._browser.connect('create-role-requested', self._on_create_role_requested)
         self._browser.connect('drop-role-requested', self._on_drop_role_requested)
         self._browser.connect('change-password-requested', self._on_change_password_requested)
+        self._browser.connect('edit-connection-requested', self._on_edit_connection_from_browser)
         sidebar_paned.set_start_child(self._browser)
 
         self._file_explorer = FileExplorer()
@@ -1464,4 +1465,12 @@ class TuskWindow(Adw.ApplicationWindow):
             self._toast_overlay.add_toast(toast)
         dlg.connect('password-changed', _on_changed)
         dlg.present(self)
+
+    def _on_edit_connection_from_browser(self, _browser, conn):
+        row = self._conn_list.get_first_child()
+        while row:
+            if hasattr(row, '_conn') and row._conn.get('id') == conn.get('id'):
+                self._on_edit_connection(row)
+                return
+            row = row.get_next_sibling()
 
