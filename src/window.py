@@ -1458,5 +1458,10 @@ class TuskWindow(Adw.ApplicationWindow):
     def _on_change_password_requested(self, _browser, conn, role_name):
         from role_panel import _ChangePasswordDialog
         dlg = _ChangePasswordDialog(conn, role_name)
+        def _on_changed(*_):
+            toast = Adw.Toast(title=f'Password changed for "{role_name}"')
+            toast.set_timeout(2)
+            self._toast_overlay.add_toast(toast)
+        dlg.connect('password-changed', _on_changed)
         dlg.present(self)
 
