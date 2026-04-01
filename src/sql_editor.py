@@ -499,7 +499,6 @@ class SqlEditor(Gtk.Box):
         log_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         log_scroll.set_vexpand(True)
         log_scroll.set_child(self._results_log)
-        self._log_scroll = log_scroll
 
         self._results_banner = Adw.Banner()
         self._results_banner.set_revealed(False)
