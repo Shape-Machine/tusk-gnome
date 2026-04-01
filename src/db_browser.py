@@ -85,6 +85,10 @@ class DbBrowser(Gtk.Box):
             GObject.SignalFlags.RUN_FIRST, None,
             (GObject.TYPE_PYOBJECT, str),  # conn, role_name
         ),
+        'edit-connection-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT,),  # conn
+        ),
     }
 
     def __init__(self):
@@ -101,11 +105,11 @@ class DbBrowser(Gtk.Box):
         self._loading_bar.set_margin_bottom(4)
         self._loading_spinner = Gtk.Spinner()
         self._loading_spinner.set_size_request(16, 16)
-        loading_label = Gtk.Label(label='Connecting…')
-        loading_label.add_css_class('caption')
-        loading_label.add_css_class('dim-label')
+        self._loading_label = Gtk.Label(label='Connecting…')
+        self._loading_label.add_css_class('caption')
+        self._loading_label.add_css_class('dim-label')
         self._loading_bar.append(self._loading_spinner)
-        self._loading_bar.append(loading_label)
+        self._loading_bar.append(self._loading_label)
         self._loading_bar.set_visible(False)
         self.append(self._loading_bar)
 
@@ -149,15 +153,26 @@ class DbBrowser(Gtk.Box):
         self.append(db_switcher_bar)
 
         # Schema warning bar
-        self._schema_warning_bar = Gtk.Label()
-        self._schema_warning_bar.add_css_class('caption')
-        self._schema_warning_bar.add_css_class('warning')
-        self._schema_warning_bar.set_xalign(0)
+        self._schema_warning_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self._schema_warning_bar.set_margin_start(8)
         self._schema_warning_bar.set_margin_end(6)
         self._schema_warning_bar.set_margin_bottom(2)
-        self._schema_warning_bar.set_wrap(True)
+        self._schema_warning_bar.set_margin_top(2)
         self._schema_warning_bar.set_visible(False)
+        self._schema_warning_label = Gtk.Label()
+        self._schema_warning_label.add_css_class('caption')
+        self._schema_warning_label.add_css_class('warning')
+        self._schema_warning_label.set_xalign(0)
+        self._schema_warning_label.set_wrap(True)
+        self._schema_warning_label.set_hexpand(True)
+        self._schema_warning_bar.append(self._schema_warning_label)
+        edit_conn_btn = Gtk.Button(label='Edit Connection')
+        edit_conn_btn.add_css_class('flat')
+        edit_conn_btn.add_css_class('caption')
+        edit_conn_btn.connect('clicked', lambda _: self.emit(
+            'edit-connection-requested', self._last_conn
+        ))
+        self._schema_warning_bar.append(edit_conn_btn)
         self.append(self._schema_warning_bar)
 
         # Search + New Schema toolbar
@@ -405,6 +420,7 @@ class DbBrowser(Gtk.Box):
             self._rename_hint = None
         self._store.clear()
         self._search_entry.set_text('')
+        self._loading_label.set_label('Connecting…')
         self._loading_bar.set_visible(True)
         self._loading_spinner.start()
         threading.Thread(target=self._fetch_schema, args=(conn, gen), daemon=True).start()
@@ -415,6 +431,7 @@ class DbBrowser(Gtk.Box):
             from tunnel import open_db
 
             with open_db(conn) as db:
+                GLib.idle_add(self._loading_label.set_label, 'Fetching schemas…')
                 with db.cursor() as cur:
                     cur.execute("""
                         SELECT table_schema, table_name, table_type
@@ -603,7 +620,7 @@ class DbBrowser(Gtk.Box):
 
         # Show schema warning if default schema not found
         if schema_warning:
-            self._schema_warning_bar.set_label(schema_warning)
+            self._schema_warning_label.set_label(schema_warning)
             self._schema_warning_bar.set_visible(True)
         else:
             self._schema_warning_bar.set_visible(False)
