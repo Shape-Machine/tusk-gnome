@@ -1032,4 +1032,25 @@ class DbBrowser(Gtk.Box):
                         else:
                             self._tree.expand_row(path, False)
                     return True
+        if keyval == Gdk.KEY_Right:
+            _model, it = self._tree.get_selection().get_selected()
+            if it:
+                item_type = self._filter.get_value(it, COL_TYPE)
+                if item_type in ('schema', 'group', 'users'):
+                    path, _ = self._tree.get_cursor()
+                    if path and not self._tree.row_expanded(path):
+                        self._tree.expand_row(path, False)
+                    return True
+        if keyval == Gdk.KEY_Left:
+            _model, it = self._tree.get_selection().get_selected()
+            if it:
+                item_type = self._filter.get_value(it, COL_TYPE)
+                if item_type in ('schema', 'group', 'users'):
+                    path, _ = self._tree.get_cursor()
+                    if path:
+                        if self._tree.row_expanded(path):
+                            self._tree.collapse_row(path)
+                        elif path.up():
+                            self._tree.set_cursor(path, None, False)
+                    return True
         return False

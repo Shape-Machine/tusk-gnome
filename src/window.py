@@ -144,6 +144,29 @@ class TuskWindow(Adw.ApplicationWindow):
         </child>
         <child>
           <object class="GtkShortcutsGroup">
+            <property name="title">Sidebar</property>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Expand</property>
+                <property name="accelerator">Right</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Collapse</property>
+                <property name="accelerator">Left</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Open / Toggle</property>
+                <property name="accelerator">Return</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkShortcutsGroup">
             <property name="title">Table Inspector</property>
             <child>
               <object class="GtkShortcutsShortcut">
