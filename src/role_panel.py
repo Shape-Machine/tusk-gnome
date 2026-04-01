@@ -694,3 +694,260 @@ class RolePanel(Gtk.Box):
         self._memberships_tab.load(conn, role_name)
         self._effective_tab.load(conn, role_name)
         self._object_tab.load(conn, role_name)
+
+
+# ── _NewRoleDialog ────────────────────────────────────────────────────────────
+
+class _NewRoleDialog(Adw.Dialog):
+    __gsignals__ = {
+        'role-created': (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+    }
+
+    def __init__(self, conn):
+        super().__init__(title='New Role', content_width=400)
+        self._conn = conn
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        header = Adw.HeaderBar()
+        header.set_show_end_title_buttons(False)
+        cancel_btn = Gtk.Button(label='Cancel')
+        cancel_btn.connect('clicked', lambda _: self.close())
+        header.pack_start(cancel_btn)
+        self._create_btn = Gtk.Button(label='Create')
+        self._create_btn.add_css_class('suggested-action')
+        self._create_btn.set_sensitive(False)
+        self._create_btn.connect('clicked', self._on_create)
+        header.pack_end(self._create_btn)
+        box.append(header)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_vexpand(True)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        content.set_margin_top(12)
+        content.set_margin_bottom(12)
+        content.set_margin_start(12)
+        content.set_margin_end(12)
+
+        identity_group = Adw.PreferencesGroup(title='Identity')
+
+        self._name_row = Adw.EntryRow(title='Role Name')
+        self._name_row.connect('changed', self._on_name_changed)
+        identity_group.add(self._name_row)
+
+        self._password_row = Adw.PasswordEntryRow(title='Password (optional)')
+        identity_group.add(self._password_row)
+
+        content.append(identity_group)
+
+        caps_group = Adw.PreferencesGroup(title='Capabilities')
+
+        self._login_row = Adw.SwitchRow(title='Can Login',
+                                         subtitle='Role can be used to connect to a database')
+        caps_group.add(self._login_row)
+
+        self._superuser_row = Adw.SwitchRow(title='Superuser',
+                                             subtitle='Bypasses all permission checks')
+        caps_group.add(self._superuser_row)
+
+        self._createdb_row = Adw.SwitchRow(title='Create Databases')
+        caps_group.add(self._createdb_row)
+
+        self._createrole_row = Adw.SwitchRow(title='Create Roles')
+        caps_group.add(self._createrole_row)
+
+        self._inherit_row = Adw.SwitchRow(title='Inherit Privileges',
+                                           subtitle='Automatically inherits privileges from member roles')
+        self._inherit_row.set_active(True)
+        caps_group.add(self._inherit_row)
+
+        content.append(caps_group)
+
+        limit_group = Adw.PreferencesGroup(title='Limits')
+
+        self._conn_limit_row = Adw.SpinRow.new_with_range(-1, 9999, 1)
+        self._conn_limit_row.set_title('Connection Limit')
+        self._conn_limit_row.set_subtitle('-1 means no limit')
+        self._conn_limit_row.set_value(-1)
+        limit_group.add(self._conn_limit_row)
+
+        content.append(limit_group)
+
+        self._error_label = Gtk.Label()
+        self._error_label.add_css_class('error')
+        self._error_label.add_css_class('caption')
+        self._error_label.set_wrap(True)
+        self._error_label.set_visible(False)
+        content.append(self._error_label)
+
+        scroll.set_child(content)
+        box.append(scroll)
+        self.set_child(box)
+
+    def _on_name_changed(self, _row):
+        self._create_btn.set_sensitive(bool(self._name_row.get_text().strip()))
+        self._error_label.set_visible(False)
+
+    def _on_create(self, _btn):
+        self._create_btn.set_sensitive(False)
+        name = self._name_row.get_text().strip()
+        password = self._password_row.get_text()
+        login = self._login_row.get_active()
+        superuser = self._superuser_row.get_active()
+        createdb = self._createdb_row.get_active()
+        createrole = self._createrole_row.get_active()
+        inherit = self._inherit_row.get_active()
+        conn_limit = int(self._conn_limit_row.get_value())
+        threading.Thread(
+            target=self._do_create,
+            args=(name, password, login, superuser, createdb, createrole, inherit, conn_limit),
+            daemon=True,
+        ).start()
+
+    def _do_create(self, name, password, login, superuser, createdb, createrole, inherit, conn_limit):
+        try:
+            from tunnel import open_db
+            from psycopg import sql
+            with open_db(self._conn) as db:
+                with db.cursor() as cur:
+                    options = sql.SQL(' ').join([
+                        sql.SQL('LOGIN' if login else 'NOLOGIN'),
+                        sql.SQL('SUPERUSER' if superuser else 'NOSUPERUSER'),
+                        sql.SQL('CREATEDB' if createdb else 'NOCREATEDB'),
+                        sql.SQL('CREATEROLE' if createrole else 'NOCREATEROLE'),
+                        sql.SQL('INHERIT' if inherit else 'NOINHERIT'),
+                        sql.SQL('CONNECTION LIMIT {}').format(sql.Literal(conn_limit)),
+                    ])
+                    if password:
+                        options = sql.SQL('{} PASSWORD {}').format(options, sql.Literal(password))
+                    stmt = sql.SQL('CREATE ROLE {} WITH {}').format(
+                        sql.Identifier(name), options
+                    )
+                    cur.execute(stmt)
+                db.commit()
+            GLib.idle_add(self._on_done, name)
+        except Exception as e:
+            GLib.idle_add(self._on_error, str(e))
+
+    def _on_done(self, name):
+        self.emit('role-created', name)
+        self.close()
+
+    def _on_error(self, msg):
+        self._error_label.set_label(msg)
+        self._error_label.set_visible(True)
+        self._create_btn.set_sensitive(True)
+
+
+# ── _ChangePasswordDialog ─────────────────────────────────────────────────────
+
+class _ChangePasswordDialog(Adw.Dialog):
+    __gsignals__ = {
+        'password-changed': (GObject.SignalFlags.RUN_FIRST, None, ()),
+    }
+
+    def __init__(self, conn, role_name):
+        super().__init__(title=f'Change Password — {role_name}', content_width=380)
+        self._conn = conn
+        self._role_name = role_name
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        header = Adw.HeaderBar()
+        header.set_show_end_title_buttons(False)
+        cancel_btn = Gtk.Button(label='Cancel')
+        cancel_btn.connect('clicked', lambda _: self.close())
+        header.pack_start(cancel_btn)
+        self._set_btn = Gtk.Button(label='Set Password')
+        self._set_btn.add_css_class('suggested-action')
+        self._set_btn.connect('clicked', self._on_set)
+        header.pack_end(self._set_btn)
+        box.append(header)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        content.set_margin_top(12)
+        content.set_margin_bottom(12)
+        content.set_margin_start(12)
+        content.set_margin_end(12)
+
+        pwd_group = Adw.PreferencesGroup()
+
+        self._new_pwd_row = Adw.PasswordEntryRow(title='New Password')
+        self._new_pwd_row.connect('changed', self._on_fields_changed)
+        pwd_group.add(self._new_pwd_row)
+
+        self._confirm_row = Adw.PasswordEntryRow(title='Confirm Password')
+        self._confirm_row.connect('changed', self._on_fields_changed)
+        pwd_group.add(self._confirm_row)
+
+        self._empty_pwd_row = Adw.SwitchRow(title='Set empty password',
+                                             subtitle='Clears the password (sets PASSWORD NULL)')
+        self._empty_pwd_row.connect('notify::active', self._on_empty_toggled)
+        pwd_group.add(self._empty_pwd_row)
+
+        content.append(pwd_group)
+
+        self._error_label = Gtk.Label()
+        self._error_label.add_css_class('error')
+        self._error_label.add_css_class('caption')
+        self._error_label.set_wrap(True)
+        self._error_label.set_visible(False)
+        content.append(self._error_label)
+
+        box.append(content)
+        self.set_child(box)
+
+    def _on_fields_changed(self, _row):
+        self._error_label.set_visible(False)
+
+    def _on_empty_toggled(self, _row, _pspec):
+        use_empty = self._empty_pwd_row.get_active()
+        self._new_pwd_row.set_sensitive(not use_empty)
+        self._confirm_row.set_sensitive(not use_empty)
+        self._error_label.set_visible(False)
+
+    def _on_set(self, _btn):
+        use_empty = self._empty_pwd_row.get_active()
+        if use_empty:
+            password = None
+        else:
+            password = self._new_pwd_row.get_text()
+            confirm = self._confirm_row.get_text()
+            if password != confirm:
+                self._error_label.set_label('Passwords do not match.')
+                self._error_label.set_visible(True)
+                return
+        self._set_btn.set_sensitive(False)
+        threading.Thread(
+            target=self._do_set_password, args=(password,), daemon=True
+        ).start()
+
+    def _do_set_password(self, password):
+        try:
+            from tunnel import open_db
+            from psycopg import sql
+            with open_db(self._conn) as db:
+                with db.cursor() as cur:
+                    if password is None:
+                        stmt = sql.SQL('ALTER ROLE {} PASSWORD NULL').format(
+                            sql.Identifier(self._role_name)
+                        )
+                    else:
+                        stmt = sql.SQL('ALTER ROLE {} PASSWORD {}').format(
+                            sql.Identifier(self._role_name),
+                            sql.Literal(password),
+                        )
+                    cur.execute(stmt)
+                db.commit()
+            GLib.idle_add(self._on_done)
+        except Exception as e:
+            GLib.idle_add(self._on_error, str(e))
+
+    def _on_done(self):
+        self.emit('password-changed')
+        self.close()
+
+    def _on_error(self, msg):
+        self._error_label.set_label(msg)
+        self._error_label.set_visible(True)
+        self._set_btn.set_sensitive(True)

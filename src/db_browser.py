@@ -73,6 +73,18 @@ class DbBrowser(Gtk.Box):
             GObject.SignalFlags.RUN_FIRST, None,
             (GObject.TYPE_PYOBJECT, str),  # conn, role_name
         ),
+        'create-role-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT,),  # conn
+        ),
+        'drop-role-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str),  # conn, role_name
+        ),
+        'change-password-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str),  # conn, role_name
+        ),
     }
 
     def __init__(self):
@@ -784,6 +796,10 @@ class DbBrowser(Gtk.Box):
             self._show_schema_context_menu(x, y)
         elif item_type == 'group' and label == 'Views':
             self._show_views_group_context_menu(x, y)
+        elif item_type == 'users':
+            self._show_users_group_context_menu(x, y)
+        elif item_type == 'role':
+            self._show_role_context_menu(x, y, table)  # table col stores role_name
 
     def _on_new_schema_clicked(self, _btn):
         if self._last_conn is None:
@@ -852,6 +868,50 @@ class DbBrowser(Gtk.Box):
 
         menu = Gio.Menu()
         menu.append('New View…', 'views.create-view')
+        self._popup_menu(menu, x, y)
+
+    def _show_users_group_context_menu(self, x, y):
+        """Context menu for the Users & Roles group nodes — New Role."""
+        if self._read_only:
+            return
+        ag = Gio.SimpleActionGroup()
+        action = Gio.SimpleAction.new('create-role', None)
+        action.connect('activate', lambda *_: self.emit(
+            'create-role-requested', self._ctx_conn
+        ))
+        ag.add_action(action)
+        self.insert_action_group('roles', ag)
+
+        menu = Gio.Menu()
+        menu.append('New Role…', 'roles.create-role')
+        self._popup_menu(menu, x, y)
+
+    def _show_role_context_menu(self, x, y, role_name):
+        """Context menu for an individual role node — Drop Role, Change Password."""
+        if self._read_only:
+            return
+        ag = Gio.SimpleActionGroup()
+
+        def add_action(name, cb):
+            action = Gio.SimpleAction.new(name, None)
+            action.connect('activate', lambda *_: cb())
+            ag.add_action(action)
+
+        add_action('drop-role', lambda: self.emit(
+            'drop-role-requested', self._ctx_conn, role_name
+        ))
+        add_action('change-password', lambda: self.emit(
+            'change-password-requested', self._ctx_conn, role_name
+        ))
+        self.insert_action_group('rolemenu', ag)
+
+        section1 = Gio.Menu()
+        section1.append('Change Password…', 'rolemenu.change-password')
+        section2 = Gio.Menu()
+        section2.append('Drop Role…', 'rolemenu.drop-role')
+        menu = Gio.Menu()
+        menu.append_section(None, section1)
+        menu.append_section(None, section2)
         self._popup_menu(menu, x, y)
 
     def _popup_menu(self, menu, x, y):

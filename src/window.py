@@ -316,6 +316,9 @@ class TuskWindow(Adw.ApplicationWindow):
         self._browser.connect('drop-database-requested', self._on_drop_database_requested)
         self._browser.connect('role-attrs-loaded', self._on_role_attrs_loaded)
         self._browser.connect('role-selected', self._on_role_selected)
+        self._browser.connect('create-role-requested', self._on_create_role_requested)
+        self._browser.connect('drop-role-requested', self._on_drop_role_requested)
+        self._browser.connect('change-password-requested', self._on_change_password_requested)
         sidebar_paned.set_start_child(self._browser)
 
         self._file_explorer = FileExplorer()
@@ -1408,5 +1411,52 @@ class TuskWindow(Adw.ApplicationWindow):
             threading.Thread(target=run, daemon=True).start()
 
         dlg = CreateViewDialog(schema, on_save)
+        dlg.present(self)
+
+    # ── Role management (#156, #160) ──────────────────────────────────────────
+
+    def _on_create_role_requested(self, _browser, conn):
+        from role_panel import _NewRoleDialog
+        dlg = _NewRoleDialog(conn)
+        dlg.connect('role-created', lambda _d, _name: self._browser.load(conn))
+        dlg.present(self)
+
+    def _on_drop_role_requested(self, _browser, conn, role_name):
+        dialog = Adw.AlertDialog(
+            heading=f'Drop role "{role_name}"?',
+            body='This permanently removes the role. The role must not own any objects or have any granted privileges.',
+        )
+        dialog.add_response('cancel', 'Cancel')
+        dialog.add_response('drop', 'Drop Role')
+        dialog.set_response_appearance('drop', Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response('cancel')
+        dialog.set_close_response('cancel')
+
+        def on_response(_d, response):
+            if response != 'drop':
+                return
+            def run():
+                try:
+                    from psycopg import sql as pgsql
+                    from tunnel import open_db
+                    with open_db(conn) as db:
+                        with db.cursor() as cur:
+                            cur.execute(pgsql.SQL('DROP ROLE {}').format(
+                                pgsql.Identifier(role_name)
+                            ))
+                        db.commit()
+                    tab_id = f'role:{conn["id"]}:{role_name}'
+                    GLib.idle_add(self._close_tab_by_id, tab_id)
+                    GLib.idle_add(self._browser.load, conn)
+                except Exception as e:
+                    GLib.idle_add(self._show_browser_error, 'Drop Role Failed', str(e))
+            threading.Thread(target=run, daemon=True).start()
+
+        dialog.connect('response', on_response)
+        dialog.present(self)
+
+    def _on_change_password_requested(self, _browser, conn, role_name):
+        from role_panel import _ChangePasswordDialog
+        dlg = _ChangePasswordDialog(conn, role_name)
         dlg.present(self)
 
