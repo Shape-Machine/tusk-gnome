@@ -405,6 +405,14 @@ class PinColumnView(Gtk.Box):
             self._rebuild_columns()
 
     def _rebuild_columns(self):
+        # Snapshot active sort state before tearing down columns
+        sort_col_idx = None
+        sort_type = Gtk.SortType.ASCENDING
+        sorter = self._main_cv.get_sorter()
+        if hasattr(sorter, 'get_n_sort_columns') and sorter.get_n_sort_columns() > 0:
+            old_col, sort_type = sorter.get_nth_sort_column(0)
+            sort_col_idx = getattr(old_col, '_col_idx', None)
+
         # Clear both views
         while self._pin_cv.get_columns().get_n_items():
             self._pin_cv.remove_column(self._pin_cv.get_columns().get_item(0))
@@ -426,6 +434,15 @@ class PinColumnView(Gtk.Box):
         self._pin_scroll.set_visible(has_pinned)
         self._sep.set_visible(has_pinned)
 
+        # Restore sort state on the rebuilt column (if it's still unpinned)
+        if sort_col_idx is not None:
+            cols = self._main_cv.get_columns()
+            for i in range(cols.get_n_items()):
+                c = cols.get_item(i)
+                if getattr(c, '_col_idx', None) == sort_col_idx:
+                    self._main_cv.sort_by_column(c, sort_type)
+                    break
+
     def _build_column(self, col_idx, pinned):
         name = self._columns[col_idx]
         factory = Gtk.SignalListItemFactory()
@@ -435,13 +452,12 @@ class PinColumnView(Gtk.Box):
             label.set_xalign(0)
             label.set_ellipsize(Pango.EllipsizeMode.END)
             label.set_max_width_chars(40)
-            if not pinned:
-                cell_gesture = Gtk.GestureClick(button=3)
-                def _on_cell_rclick(_g, _n, _x, _y, lbl=label):
-                    self._right_clicked_cell[0] = getattr(lbl, '_raw_value', None)
-                    self._cell_clicked[0] = True
-                cell_gesture.connect('pressed', _on_cell_rclick)
-                label.add_controller(cell_gesture)
+            cell_gesture = Gtk.GestureClick(button=3)
+            def _on_cell_rclick(_g, _n, _x, _y, lbl=label):
+                self._right_clicked_cell[0] = getattr(lbl, '_raw_value', None)
+                self._cell_clicked[0] = True
+            cell_gesture.connect('pressed', _on_cell_rclick)
+            label.add_controller(cell_gesture)
             item.set_child(label)
 
         def on_bind(_f, item, idx=col_idx):
@@ -464,6 +480,7 @@ class PinColumnView(Gtk.Box):
         col = Gtk.ColumnViewColumn(title=name, factory=factory)
         col.set_resizable(True)
         col.set_expand(not pinned)
+        col._col_idx = col_idx
 
         def _cmp(a, b, *_, idx=col_idx):
             ra, rb = a.raw(idx), b.raw(idx)
@@ -601,11 +618,7 @@ class PinColumnView(Gtk.Box):
         menu.append_section(None, selected_section)
         menu.append_section(None, all_section)
 
-        popover = Gtk.PopoverMenu(menu_model=menu)
-        popover.set_has_arrow(False)
-        popover.set_parent(self._main_cv)
-
-        def on_right_click(_gesture, _n, x, y):
+        def _popup_menu(popover, x, y):
             cell_action.set_enabled(self._cell_clicked[0])
             self._cell_clicked[0] = False
             rect = Gdk.Rectangle()
@@ -613,9 +626,13 @@ class PinColumnView(Gtk.Box):
             popover.set_pointing_to(rect)
             popover.popup()
 
-        gesture = Gtk.GestureClick(button=3)
-        gesture.connect('pressed', on_right_click)
-        self._main_cv.add_controller(gesture)
+        for cv in (self._main_cv, self._pin_cv):
+            popover = Gtk.PopoverMenu(menu_model=menu)
+            popover.set_has_arrow(False)
+            popover.set_parent(cv)
+            gesture = Gtk.GestureClick(button=3)
+            gesture.connect('pressed', lambda _g, _n, x, y, p=popover: _popup_menu(p, x, y))
+            cv.add_controller(gesture)
 
 
 def make_pinnable_column_view(columns, rows, table_name=None):
