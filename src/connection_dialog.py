@@ -161,7 +161,7 @@ class ConnectionDialog(Adw.Window):
 
         self._readonly_row = Adw.SwitchRow(
             title='Read-only',
-            subtitle='Prevents accidental writes to this database',
+            subtitle='Prevents accidental writes. Recommended for production databases.',
         )
         self._readonly_row.set_active(conn.get('read_only', False) if conn else False)
         options_group.add(self._readonly_row)
@@ -175,7 +175,10 @@ class ConnectionDialog(Adw.Window):
         # ── SSH Tunnel ────────────────────────────────────────────────────────
         ssh_group = Adw.PreferencesGroup(title='SSH Tunnel')
 
-        self._ssh_row = Adw.ExpanderRow(title='Use SSH Tunnel')
+        self._ssh_row = Adw.ExpanderRow(
+            title='Use SSH Tunnel',
+            subtitle='Use if your PostgreSQL server is behind an SSH bastion host.',
+        )
         self._ssh_row.set_show_enable_switch(True)
 
         self._ssh_host_row = Adw.EntryRow(title='SSH Host')
@@ -250,6 +253,11 @@ class ConnectionDialog(Adw.Window):
         for row in (self._host_row, self._port_row, self._database_row, self._username_row):
             row.connect('notify::text', self._update_uri_preview)
         self._update_uri_preview()
+
+        # Browse databases button sensitivity
+        for row in (self._host_row, self._port_row, self._username_row):
+            row.connect('notify::text', self._update_browse_sensitivity)
+        self._update_browse_sensitivity()
 
         # ── 2-column layout ───────────────────────────────────────────────────
         left_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
@@ -374,6 +382,17 @@ class ConnectionDialog(Adw.Window):
         else:
             uri = f'postgresql://{host}:{port}/{database}'
         self._uri_preview_row.set_subtitle(uri)
+
+    def _update_browse_sensitivity(self, *_):
+        has_required = bool(
+            self._host_row.get_text().strip()
+            and self._port_row.get_text().strip()
+            and self._username_row.get_text().strip()
+        )
+        self._browse_db_btn.set_sensitive(has_required)
+        self._browse_db_btn.set_tooltip_text(
+            'Browse available databases…' if has_required else 'Requires valid host, port and user'
+        )
 
     def _on_copy_preview_uri(self, btn):
         uri = self._uri_preview_row.get_subtitle()
