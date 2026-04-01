@@ -11,7 +11,7 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib, Gio, GObject, Pango, Gdk
 
 import prefs
-from data_grid import make_column_view, update_column_view
+from data_grid import make_column_view, update_column_view, make_pinnable_column_view, PinColumnView
 
 try:
     gi.require_version('GtkSource', '5')
@@ -1528,10 +1528,10 @@ class TablePanel(Gtk.Box):
         )
         if rows:
             existing = self._data_scroll.get_child()
-            if isinstance(existing, Gtk.ColumnView):
+            if isinstance(existing, (Gtk.ColumnView, PinColumnView)):
                 update_column_view(existing, rows)
             else:
-                col_view = make_column_view(self._all_data_cols, rows, table_name=table_name)
+                col_view = make_pinnable_column_view(self._all_data_cols, rows, table_name=table_name)
                 self._data_scroll.set_child(col_view)
                 self._column_view = col_view
                 if self._item_type == 'table':

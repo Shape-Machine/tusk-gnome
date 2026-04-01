@@ -104,12 +104,22 @@ class FileExplorer(Gtk.Box):
         self._error_label = Gtk.Label()
         self._error_label.add_css_class('error')
         self._error_label.set_halign(Gtk.Align.CENTER)
-        self._error_label.set_valign(Gtk.Align.CENTER)
+
+        home_recovery_btn = Gtk.Button(label='Go to Home Folder')
+        home_recovery_btn.add_css_class('pill')
+        home_recovery_btn.set_halign(Gtk.Align.CENTER)
+        home_recovery_btn.connect('clicked', lambda _: self._navigate_to(os.path.expanduser('~')))
+
+        error_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        error_box.set_valign(Gtk.Align.CENTER)
+        error_box.set_vexpand(True)
+        error_box.append(self._error_label)
+        error_box.append(home_recovery_btn)
 
         self._list_stack = Gtk.Stack()
         self._list_stack.set_vexpand(True)
         self._list_stack.add_named(scroll, 'list')
-        self._list_stack.add_named(self._error_label, 'error')
+        self._list_stack.add_named(error_box, 'error')
         self.append(self._list_stack)
 
         # ── Context menu ──────────────────────────────────────────────────────
