@@ -120,11 +120,14 @@ def make_column_view(columns, rows, table_name=None):
             raw = list_item.get_item().raw(col_idx)
             label._raw_value = raw
             if raw is None:
-                label.set_text('NULL')
+                label.set_markup('<i>null</i>')
                 label.add_css_class('dim-label')
+                label.set_tooltip_text('NULL')
             else:
-                label.set_text(list_item.get_item().get(col_idx))
+                text = list_item.get_item().get(col_idx)
+                label.set_text(text)
                 label.remove_css_class('dim-label')
+                label.set_tooltip_text(text if len(text) > 40 else None)
 
         factory.connect('setup', on_setup)
         factory.connect('bind', on_bind)

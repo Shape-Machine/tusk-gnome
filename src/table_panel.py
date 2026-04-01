@@ -277,6 +277,19 @@ class TablePanel(Gtk.Box):
         self._schema_toolbar.set_margin_bottom(2)
         self._schema_toolbar.set_visible(False)
 
+        self._schema_count_label = Gtk.Label()
+        self._schema_count_label.add_css_class('caption')
+        self._schema_count_label.add_css_class('dim-label')
+        self._schema_count_label.set_margin_start(4)
+        self._schema_toolbar.append(self._schema_count_label)
+
+        self._schema_exact_count_btn = Gtk.Button(icon_name='view-refresh-symbolic')
+        self._schema_exact_count_btn.add_css_class('flat')
+        self._schema_exact_count_btn.set_tooltip_text('Get exact row count')
+        self._schema_exact_count_btn.set_valign(Gtk.Align.CENTER)
+        self._schema_exact_count_btn.connect('clicked', self._on_exact_count_clicked)
+        self._schema_toolbar.append(self._schema_exact_count_btn)
+
         _schema_spacer = Gtk.Box()
         _schema_spacer.set_hexpand(True)
         self._schema_toolbar.append(_schema_spacer)
@@ -552,7 +565,11 @@ class TablePanel(Gtk.Box):
     def _fill_schema_scroll(self, schema_rows):
         """Build/refresh the schema ColumnView with a per-row right-click action menu."""
         if not schema_rows:
-            empty = Adw.StatusPage(title='No columns')
+            empty = Adw.StatusPage(title='Could not load columns')
+            retry_btn = Gtk.Button(label='Retry')
+            retry_btn.add_css_class('pill')
+            retry_btn.connect('clicked', lambda _: self._refresh_schema())
+            empty.set_child(retry_btn)
             empty.set_vexpand(True)
             self._schema_scroll.set_child(empty)
             return
@@ -1036,6 +1053,40 @@ class TablePanel(Gtk.Box):
 
         threading.Thread(target=run, daemon=True).start()
 
+    def _on_exact_count_clicked(self, _btn):
+        self._schema_exact_count_btn.set_sensitive(False)
+        self._schema_count_label.set_label('counting…')
+        conn, schema, table = self._conn, self._current_schema, self._current_table
+
+        def run():
+            try:
+                import psycopg
+                from psycopg import sql
+                from tunnel import open_db
+
+                with open_db(conn) as db:
+                    with db.cursor() as cur:
+                        cur.execute(
+                            sql.SQL('SELECT COUNT(*) FROM {}.{}').format(
+                                sql.Identifier(schema), sql.Identifier(table)
+                            )
+                        )
+                        count = cur.fetchone()[0]
+                GLib.idle_add(self._on_exact_count_done, count)
+            except Exception as e:
+                GLib.idle_add(self._on_exact_count_error, str(e))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _on_exact_count_done(self, count):
+        self._schema_count_label.set_label(f'{count:,} rows (exact)')
+        self._schema_exact_count_btn.set_sensitive(True)
+
+    def _on_exact_count_error(self, error):
+        self._schema_count_label.set_label('count failed')
+        self._schema_exact_count_btn.set_sensitive(True)
+        self._show_edit_error(error)
+
     def _update_schema_view(self, schema_rows, keys_rows):
         self._schema_info = [(r[0], r[1], r[3], r[4]) for r in schema_rows]
         pk_entry = next((r for r in keys_rows if r[1] == 'PRIMARY KEY'), None)
@@ -1485,8 +1536,24 @@ class TablePanel(Gtk.Box):
                     col_view.connect('activate', self._on_data_row_activate)
                     col_view.get_model().connect('selection-changed', self._on_data_selection_changed)
         else:
-            text = self._filter_entry.get_text().strip()
-            empty = Adw.StatusPage(title='No matching rows' if text else 'No data')
+            filter_text = self._filter_entry.get_text().strip()
+            if filter_text:
+                empty = Adw.StatusPage(title='No matching rows')
+            elif self._item_type == 'table' and not self._read_only:
+                empty = Adw.StatusPage(title='No rows yet')
+                cols = self._all_data_cols
+                if cols:
+                    col_summary = ', '.join(cols[:8])
+                    if len(cols) > 8:
+                        col_summary += f', +{len(cols) - 8} more'
+                    empty.set_description(col_summary)
+                insert_btn = Gtk.Button(label='Insert Row')
+                insert_btn.add_css_class('suggested-action')
+                insert_btn.add_css_class('pill')
+                insert_btn.connect('clicked', self._on_insert_clicked)
+                empty.set_child(insert_btn)
+            else:
+                empty = Adw.StatusPage(title='No data')
             empty.set_vexpand(True)
             self._data_scroll.set_child(empty)
             self._column_view = None
@@ -1523,6 +1590,8 @@ class TablePanel(Gtk.Box):
         self._add_constraint_btn.set_tooltip_text(_ro_tip if read_only else 'Add Constraint')
         self._add_index_btn.set_sensitive(not read_only)
         self._add_index_btn.set_tooltip_text(_ro_tip if read_only else 'Add Index')
+        self._schema_count_label.set_label('')
+        self._schema_exact_count_btn.set_sensitive(False)
         self._set_tabs_for_type(item_type)
         self._spinner.start()
         self._outer.set_visible_child_name('loading')
@@ -1618,9 +1687,13 @@ class TablePanel(Gtk.Box):
             self._stats_label.set_label(' · '.join(parts))
             self._stats_label.set_visible(True)
             self._stats_separator.set_visible(True)
+            self._schema_count_label.set_label(_fmt_rows(n_live_tup))
+            self._schema_exact_count_btn.set_sensitive(True)
         else:
             self._stats_label.set_visible(False)
             self._stats_separator.set_visible(False)
+            self._schema_count_label.set_label('')
+            self._schema_exact_count_btn.set_sensitive(False)
 
         self._fill_schema_scroll(schema_rows)
         self._fill_keys_scroll(keys_rows)
