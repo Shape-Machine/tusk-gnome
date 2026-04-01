@@ -913,6 +913,10 @@ class _ChangePasswordDialog(Adw.Dialog):
         else:
             password = self._new_pwd_row.get_text()
             confirm = self._confirm_row.get_text()
+            if not password:
+                self._error_label.set_label('Password cannot be empty. Use "Set empty password" to remove it.')
+                self._error_label.set_visible(True)
+                return
             if password != confirm:
                 self._error_label.set_label('Passwords do not match.')
                 self._error_label.set_visible(True)
