@@ -37,7 +37,7 @@ class ConnectionDialog(Adw.Window):
         self._build_ui()
         if duplicate:
             self.connect('map', lambda _: self._name_row.grab_focus())
-        self.connect('close-request', self._on_close_request)
+
 
     def _build_ui(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -333,8 +333,6 @@ class ConnectionDialog(Adw.Window):
         btn.set_icon_name('object-select-symbolic')
         GLib.timeout_add(1500, lambda: btn.set_icon_name('edit-copy-symbolic') or False)
 
-    def _on_close_request(self, _):
-        return False
 
     def _current_params(self):
         try:
