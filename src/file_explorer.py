@@ -200,6 +200,9 @@ class FileExplorer(Gtk.Box):
                 path = self._store.get_path(it)
                 self._on_row_activated(self._tree, path, None)
                 return True
+        if keyval == Gdk.KEY_BackSpace:
+            self._on_go_up(None)
+            return True
         return False
 
     def _on_row_activated(self, _tree, path, _col):

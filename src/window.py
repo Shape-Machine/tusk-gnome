@@ -163,6 +163,12 @@ class TuskWindow(Adw.ApplicationWindow):
                 <property name="accelerator">Return</property>
               </object>
             </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Go Up (File Explorer)</property>
+                <property name="accelerator">BackSpace</property>
+              </object>
+            </child>
           </object>
         </child>
         <child>
