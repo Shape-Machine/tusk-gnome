@@ -143,6 +143,10 @@ class FileExplorer(Gtk.Box):
         self._context_popover.set_has_arrow(False)
         self._context_popover.set_parent(self._tree)
 
+        key_ctrl = Gtk.EventControllerKey()
+        key_ctrl.connect('key-pressed', self._on_key_pressed)
+        self._tree.add_controller(key_ctrl)
+
         right_click = Gtk.GestureClick(button=3)
         right_click.connect('pressed', self._on_right_click)
         self._tree.add_controller(right_click)
@@ -184,6 +188,15 @@ class FileExplorer(Gtk.Box):
         parent = os.path.dirname(self._current_dir)
         if parent != self._current_dir:
             self._navigate_to(parent)
+
+    def _on_key_pressed(self, _ctrl, keyval, _code, _state):
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            _model, it = self._tree.get_selection().get_selected()
+            if it:
+                path = self._store.get_path(it)
+                self._on_row_activated(self._tree, path, None)
+                return True
+        return False
 
     def _on_row_activated(self, _tree, path, _col):
         it = self._store.get_iter(path)
