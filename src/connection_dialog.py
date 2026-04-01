@@ -175,11 +175,9 @@ class ConnectionDialog(Adw.Window):
         # ── SSH Tunnel ────────────────────────────────────────────────────────
         ssh_group = Adw.PreferencesGroup(title='SSH Tunnel')
 
-        self._ssh_row = Adw.ExpanderRow(
-            title='Use SSH Tunnel',
-            subtitle='Use if your PostgreSQL server is behind an SSH bastion host.',
-        )
+        self._ssh_row = Adw.ExpanderRow(title='Use SSH Tunnel')
         self._ssh_row.set_show_enable_switch(True)
+        self._ssh_row.set_subtitle('Use if your PostgreSQL server is behind an SSH bastion host.')
 
         self._ssh_host_row = Adw.EntryRow(title='SSH Host')
         self._ssh_port_row = Adw.EntryRow(title='SSH Port')
