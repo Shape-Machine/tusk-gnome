@@ -34,7 +34,6 @@ class ConnectionDialog(Adw.Window):
         )
         self._connection = connection
         self._duplicate = duplicate
-        self._db_fetch_cancelled = False
         self._build_ui()
         if duplicate:
             self.connect('map', lambda _: self._name_row.grab_focus())
@@ -79,53 +78,6 @@ class ConnectionDialog(Adw.Window):
         self._host_row = Adw.EntryRow(title='Host')
         self._port_row = Adw.EntryRow(title='Port')
         self._database_row = Adw.EntryRow(title='Database')
-
-        # Browse databases button
-        browse_db_btn = Gtk.Button(icon_name='folder-symbolic')
-        browse_db_btn.add_css_class('flat')
-        browse_db_btn.set_valign(Gtk.Align.CENTER)
-        browse_db_btn.set_tooltip_text('Browse available databases…')
-        browse_db_btn.connect('clicked', self._on_browse_database)
-        self._database_row.add_suffix(browse_db_btn)
-        self._browse_db_btn = browse_db_btn
-
-        # Popover for database list
-        self._db_popover = Gtk.Popover()
-        self._db_popover.set_parent(browse_db_btn)
-        self._db_popover.set_has_arrow(True)
-
-        db_popover_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        db_popover_box.set_margin_top(6)
-        db_popover_box.set_margin_bottom(6)
-        db_popover_box.set_margin_start(6)
-        db_popover_box.set_margin_end(6)
-
-        self._db_browse_spinner = Gtk.Spinner()
-        self._db_browse_spinner.set_halign(Gtk.Align.CENTER)
-
-        self._db_browse_error = Gtk.Label()
-        self._db_browse_error.add_css_class('error')
-        self._db_browse_error.set_wrap(True)
-        self._db_browse_error.set_max_width_chars(28)
-        self._db_browse_error.set_xalign(0)
-        self._db_browse_error.set_visible(False)
-
-        self._db_browse_list = Gtk.ListBox()
-        self._db_browse_list.set_selection_mode(Gtk.SelectionMode.NONE)
-        self._db_browse_list.add_css_class('boxed-list')
-        self._db_browse_list.connect('row-activated', self._on_db_row_activated)
-        self._db_browse_list.set_visible(False)
-
-        db_scroll = Gtk.ScrolledWindow()
-        db_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        db_scroll.set_max_content_height(200)
-        db_scroll.set_propagate_natural_height(True)
-        db_scroll.set_child(self._db_browse_list)
-
-        db_popover_box.append(self._db_browse_spinner)
-        db_popover_box.append(self._db_browse_error)
-        db_popover_box.append(db_scroll)
-        self._db_popover.set_child(db_popover_box)
 
         # ── Connection string preview ─────────────────────────────────────────
         self._uri_preview_row = Adw.ActionRow()
@@ -252,11 +204,6 @@ class ConnectionDialog(Adw.Window):
             row.connect('notify::text', self._update_uri_preview)
         self._update_uri_preview()
 
-        # Browse databases button sensitivity
-        for row in (self._host_row, self._port_row, self._username_row):
-            row.connect('notify::text', self._update_browse_sensitivity)
-        self._update_browse_sensitivity()
-
         # ── 2-column layout ───────────────────────────────────────────────────
         left_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
         left_col.set_hexpand(True)
@@ -381,17 +328,6 @@ class ConnectionDialog(Adw.Window):
             uri = f'postgresql://{host}:{port}/{database}'
         self._uri_preview_row.set_subtitle(uri)
 
-    def _update_browse_sensitivity(self, *_):
-        has_required = bool(
-            self._host_row.get_text().strip()
-            and self._port_row.get_text().strip()
-            and self._username_row.get_text().strip()
-        )
-        self._browse_db_btn.set_sensitive(has_required)
-        self._browse_db_btn.set_tooltip_text(
-            'Browse available databases…' if has_required else 'Requires valid host, port and user'
-        )
-
     def _on_copy_preview_uri(self, btn):
         uri = self._uri_preview_row.get_subtitle()
         Gdk.Display.get_default().get_clipboard().set(uri)
@@ -399,83 +335,7 @@ class ConnectionDialog(Adw.Window):
         GLib.timeout_add(1500, lambda: btn.set_icon_name('edit-copy-symbolic') or False)
 
     def _on_close_request(self, _):
-        self._db_fetch_cancelled = True
         return False
-
-    def _on_browse_database(self, _btn):
-        # Clear previous state
-        child = self._db_browse_list.get_first_child()
-        while child:
-            next_child = child.get_next_sibling()
-            self._db_browse_list.remove(child)
-            child = next_child
-        self._db_browse_list.set_visible(False)
-        self._db_browse_error.set_visible(False)
-        self._browse_db_btn.set_sensitive(False)
-        self._db_browse_spinner.start()
-        self._db_popover.popup()
-
-        threading.Thread(
-            target=self._fetch_databases, args=(self._current_params(),), daemon=True
-        ).start()
-
-    def _fetch_databases(self, params):
-        try:
-            import psycopg
-            from tunnel import open_tunnel
-
-            # Prefer connecting to the entered database; fall back to 'postgres'
-            connect_db = params['database'] or 'postgres'
-            with open_tunnel(params) as (host, port):
-                with psycopg.connect(
-                    host=host,
-                    port=port,
-                    dbname=connect_db,
-                    user=params['username'],
-                    password=params['password'],
-                    connect_timeout=10,
-                ) as db:
-                    with db.cursor() as cur:
-                        cur.execute("""
-                            SELECT datname FROM pg_database
-                            WHERE datistemplate = false
-                              AND datname NOT IN ('template0', 'template1')
-                              AND has_database_privilege(current_user, datname, 'CONNECT')
-                            ORDER BY datname
-                        """)
-                        databases = [r[0] for r in cur.fetchall()]
-            GLib.idle_add(self._on_databases_fetched, databases)
-        except Exception as e:
-            GLib.idle_add(self._on_databases_fetch_error, str(e))
-
-    def _on_databases_fetched(self, databases):
-        if self._db_fetch_cancelled:
-            return
-        self._db_browse_spinner.stop()
-        self._browse_db_btn.set_sensitive(True)
-        for name in databases:
-            row = Gtk.ListBoxRow()
-            row._dbname = name
-            label = Gtk.Label(label=name, xalign=0)
-            label.set_margin_top(6)
-            label.set_margin_bottom(6)
-            label.set_margin_start(8)
-            label.set_margin_end(8)
-            row.set_child(label)
-            self._db_browse_list.append(row)
-        self._db_browse_list.set_visible(bool(databases))
-
-    def _on_databases_fetch_error(self, error):
-        if self._db_fetch_cancelled:
-            return
-        self._db_browse_spinner.stop()
-        self._browse_db_btn.set_sensitive(True)
-        self._db_browse_error.set_label(error)
-        self._db_browse_error.set_visible(True)
-
-    def _on_db_row_activated(self, _listbox, row):
-        self._database_row.set_text(row._dbname)
-        self._db_popover.popdown()
 
     def _current_params(self):
         try:
