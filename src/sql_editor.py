@@ -1036,7 +1036,7 @@ class SqlEditor(Gtk.Box):
         except Exception as e:
             results.append({'stmt': '', 'kind': 'error', 'msg': str(e)})
 
-        GLib.idle_add(self._show_multi_results, results)
+        GLib.idle_add(self._show_multi_results, results, use_autocommit)
 
     def _execute_single(self, conn, sql):
         try:
@@ -1116,7 +1116,7 @@ class SqlEditor(Gtk.Box):
         self._results_stack.set_visible_child_name('message')
         self._append_history(self._last_sql, self._elapsed_ms(), error=text)
 
-    def _show_multi_results(self, results):
+    def _show_multi_results(self, results, use_autocommit=False):
         self._finish_run()
         if any(_DDL_RE.search(r['stmt']) for r in results if r['kind'] in ('select', 'status')):
             self.emit('ddl-executed')
@@ -1198,10 +1198,13 @@ class SqlEditor(Gtk.Box):
             self._results_log.append(row)
 
         if errors:
-            rollback_row = Adw.ActionRow(
-                title='Transaction rolled back',
-                subtitle='No changes from this batch were applied to the database.',
-            )
+            if use_autocommit:
+                title = 'Batch stopped after error'
+                subtitle = 'Statements that ran before the error were committed independently.'
+            else:
+                title = 'Transaction rolled back'
+                subtitle = 'No changes from this batch were applied to the database.'
+            rollback_row = Adw.ActionRow(title=title, subtitle=subtitle)
             rollback_row.add_css_class('error')
             icon = Gtk.Image.new_from_icon_name('edit-undo-symbolic')
             icon.add_css_class('error')
