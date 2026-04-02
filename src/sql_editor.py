@@ -307,6 +307,7 @@ class SqlEditor(Gtk.Box):
         self._connection = None
         self._autosave_timer = 0
         self._save_label_timer = 0
+        self._elapsed_timer = 0
         self._dark_handler_id = 0
         self._active_conn = None
         self._cancel_event = threading.Event()
@@ -651,6 +652,9 @@ class SqlEditor(Gtk.Box):
         if self._explain_copy_confirm_timer:
             GLib.source_remove(self._explain_copy_confirm_timer)
             self._explain_copy_confirm_timer = 0
+        if self._elapsed_timer:
+            GLib.source_remove(self._elapsed_timer)
+            self._elapsed_timer = 0
         if self._dark_handler_id:
             Adw.StyleManager.get_default().disconnect(self._dark_handler_id)
             self._dark_handler_id = 0
@@ -919,6 +923,9 @@ class SqlEditor(Gtk.Box):
         self._results_stack.set_visible_child_name('message')
         self._results_message.set_label('Running…')
         self._results_message.remove_css_class('error')
+        if self._elapsed_timer:
+            GLib.source_remove(self._elapsed_timer)
+        self._elapsed_timer = GLib.timeout_add(1000, self._on_elapsed_tick)
 
         if explain_mode:
             threading.Thread(
@@ -947,8 +954,16 @@ class SqlEditor(Gtk.Box):
             except Exception:
                 pass
 
+    def _on_elapsed_tick(self):
+        elapsed = int(time.monotonic() - self._run_start_time)
+        self._results_message.set_label(f'Running… ({elapsed}s)')
+        return True  # keep firing until _finish_run removes the source
+
     def _finish_run(self):
         """Restore run buttons; called by all result-display methods."""
+        if self._elapsed_timer:
+            GLib.source_remove(self._elapsed_timer)
+            self._elapsed_timer = 0
         self._results_spinner.stop()
         self._run_stack.set_visible_child_name('run')
         has_conn = self._connection is not None
@@ -1181,6 +1196,17 @@ class SqlEditor(Gtk.Box):
                 row.add_prefix(icon)
 
             self._results_log.append(row)
+
+        if errors:
+            rollback_row = Adw.ActionRow(
+                title='Transaction rolled back',
+                subtitle='No changes from this batch were applied to the database.',
+            )
+            rollback_row.add_css_class('error')
+            icon = Gtk.Image.new_from_icon_name('edit-undo-symbolic')
+            icon.add_css_class('error')
+            rollback_row.add_prefix(icon)
+            self._results_log.append(rollback_row)
 
         self._results_stack.set_visible_child_name('log')
         # Record each statement separately in history

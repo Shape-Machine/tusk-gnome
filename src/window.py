@@ -237,6 +237,12 @@ class TuskWindow(Adw.ApplicationWindow):
 
     # ── UI construction ───────────────────────────────────────────────────────
 
+    def show_toast(self, title, timeout=2):
+        """Show a brief toast notification in the main window overlay."""
+        toast = Adw.Toast(title=title)
+        toast.set_timeout(timeout)
+        self._toast_overlay.add_toast(toast)
+
     def _build_ui(self):
         root = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
         root.set_position(300)
@@ -975,6 +981,7 @@ class TuskWindow(Adw.ApplicationWindow):
                             cur.execute(ddl_sql)
                         db.commit()
                     GLib.idle_add(self._browser.load, conn)
+                    GLib.idle_add(self.show_toast, 'Table created')
                     GLib.idle_add(on_done)
                 except Exception as e:
                     GLib.idle_add(on_done, str(e))
@@ -1025,6 +1032,7 @@ class TuskWindow(Adw.ApplicationWindow):
                     tab_id = f'table:{conn["id"]}:{schema}.{table}'
                     GLib.idle_add(self._close_tab_by_id, tab_id)
                     GLib.idle_add(self._browser.load, conn)
+                    GLib.idle_add(self.show_toast, f'{"View" if is_view else "Table"} dropped')
                 except Exception as e:
                     GLib.idle_add(self._show_drop_error, e, conn, schema, table, item_type)
 
@@ -1077,6 +1085,7 @@ class TuskWindow(Adw.ApplicationWindow):
                     # Refresh data tab if open
                     tab_id = f'table:{conn["id"]}:{schema}.{table}'
                     GLib.idle_add(self._refresh_tab_by_id, tab_id)
+                    GLib.idle_add(self.show_toast, f'"{table}" truncated')
                 except Exception as e:
                     GLib.idle_add(self._show_browser_error, 'Truncate Failed', str(e))
 
@@ -1108,6 +1117,7 @@ class TuskWindow(Adw.ApplicationWindow):
                     GLib.idle_add(self._rename_tab, old_tab_id, new_tab_id,
                                   f'{schema}.{new_name}', conn, schema, new_name)
                     GLib.idle_add(self._browser.load, conn)
+                    GLib.idle_add(self.show_toast, 'Table renamed')
                 except Exception as e:
                     GLib.idle_add(self._show_browser_error, 'Rename Failed', str(e))
 
@@ -1291,6 +1301,7 @@ class TuskWindow(Adw.ApplicationWindow):
                             ))
                         db.commit()
                     GLib.idle_add(self._browser.load, conn)
+                    GLib.idle_add(self.show_toast, 'Schema created')
                     GLib.idle_add(on_done)
                 except Exception as e:
                     GLib.idle_add(on_done, str(e))
@@ -1317,6 +1328,7 @@ class TuskWindow(Adw.ApplicationWindow):
                         db.commit()
                     GLib.idle_add(self._browser.set_rename_hint, schema, new_name)
                     GLib.idle_add(self._browser.load, conn)
+                    GLib.idle_add(self.show_toast, 'Schema renamed')
                 except Exception as e:
                     GLib.idle_add(self._show_browser_error, 'Rename Schema Failed', str(e))
             threading.Thread(target=run, daemon=True).start()
@@ -1357,6 +1369,7 @@ class TuskWindow(Adw.ApplicationWindow):
                             cur.execute(ddl)
                         db.commit()
                     GLib.idle_add(self._browser.load, conn)
+                    GLib.idle_add(self.show_toast, 'Schema dropped')
                 except Exception as e:
                     err = str(e)
                     if 'depends on' in err or (hasattr(e, 'sqlstate') and e.sqlstate == '2BP01'):
@@ -1435,6 +1448,7 @@ class TuskWindow(Adw.ApplicationWindow):
                             cur.execute(ddl)
                         db.commit()
                     GLib.idle_add(self._browser.load, conn)
+                    GLib.idle_add(self.show_toast, 'View created')
                     GLib.idle_add(on_done)
                 except Exception as e:
                     GLib.idle_add(on_done, str(e))

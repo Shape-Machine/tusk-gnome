@@ -266,7 +266,9 @@ class ConnectionDialog(Adw.Window):
         scroll.set_child(content)
         box.append(scroll)
 
-        self.set_content(box)
+        self._toast_overlay = Adw.ToastOverlay()
+        self._toast_overlay.set_child(box)
+        self.set_content(self._toast_overlay)
 
     def _on_browse_key(self, _btn):
         dialog = Gtk.FileChooserNative(
@@ -327,11 +329,12 @@ class ConnectionDialog(Adw.Window):
             uri = f'postgresql://{host}:{port}/{database}'
         self._uri_preview_row.set_subtitle(uri)
 
-    def _on_copy_preview_uri(self, btn):
+    def _on_copy_preview_uri(self, _btn):
         uri = self._uri_preview_row.get_subtitle()
         Gdk.Display.get_default().get_clipboard().set(uri)
-        btn.set_icon_name('object-select-symbolic')
-        GLib.timeout_add(1500, lambda: btn.set_icon_name('edit-copy-symbolic') or False)
+        toast = Adw.Toast(title='Copied to clipboard')
+        toast.set_timeout(2)
+        self._toast_overlay.add_toast(toast)
 
 
     def _current_params(self):
