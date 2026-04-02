@@ -240,6 +240,11 @@ class TablePanel(Gtk.Box):
         self._read_only = False
         self._build_ui()
 
+    def _show_toast(self, msg):
+        root = self.get_root()
+        if hasattr(root, 'show_toast'):
+            root.show_toast(msg)
+
     def _build_ui(self):
         # ViewSwitcher lives inside the panel (tabs visible once content loads)
         self._view_stack = Adw.ViewStack()
@@ -285,7 +290,10 @@ class TablePanel(Gtk.Box):
 
         self._schema_exact_count_btn = Gtk.Button(icon_name='view-refresh-symbolic')
         self._schema_exact_count_btn.add_css_class('flat')
-        self._schema_exact_count_btn.set_tooltip_text('Get exact row count')
+        self._schema_exact_count_btn.set_tooltip_text(
+            'Get exact row count — may be slow on very large tables. '
+            'The estimate shown is based on PostgreSQL statistics and is usually accurate.'
+        )
         self._schema_exact_count_btn.set_valign(Gtk.Align.CENTER)
         self._schema_exact_count_btn.connect('clicked', self._on_exact_count_clicked)
         self._schema_toolbar.append(self._schema_exact_count_btn)
@@ -724,6 +732,7 @@ class TablePanel(Gtk.Box):
                                 cur.execute(comment_sql)
                         db.commit()
                     GLib.idle_add(self._reload_schema_tab)
+                    GLib.idle_add(self._show_toast, 'Column added')
                 except Exception as e:
                     GLib.idle_add(self._show_edit_error, str(e))
 
@@ -776,7 +785,7 @@ class TablePanel(Gtk.Box):
                     pgsql.Identifier(item.col_name),
                     pgsql.SQL(new_type),
                 )
-            self._exec_ddl_and_reload_schema(conn, ddl)
+            self._exec_ddl_and_reload_schema(conn, ddl, toast_msg='Column type updated')
 
         ChangeTypeDialog(item.col_name, item.data_type, on_save).present(self.get_root())
 
@@ -809,7 +818,8 @@ class TablePanel(Gtk.Box):
                     pgsql.Identifier(schema), pgsql.Identifier(table),
                     pgsql.Identifier(item.col_name),
                 )
-            self._exec_ddl_and_reload_schema(conn, ddl)
+            self._exec_ddl_and_reload_schema(conn, ddl,
+                                             toast_msg='Default set' if expr else 'Default dropped')
 
         SetDefaultDialog(item.col_name, item.default_val, on_save).present(self.get_root())
 
@@ -861,7 +871,7 @@ class TablePanel(Gtk.Box):
                             pgsql.Identifier(schema), pgsql.Identifier(table),
                             pgsql.Identifier(item.col_name),
                         )
-                        self._exec_ddl_and_reload_schema(conn, ddl)
+                        self._exec_ddl_and_reload_schema(conn, ddl, toast_msg='NOT NULL set')
 
                 dialog.connect('response', on_response)
                 dialog.present(self.get_root())
@@ -889,7 +899,7 @@ class TablePanel(Gtk.Box):
                         pgsql.Identifier(schema), pgsql.Identifier(table),
                         pgsql.Identifier(item.col_name),
                     )
-                    self._exec_ddl_and_reload_schema(conn, ddl)
+                    self._exec_ddl_and_reload_schema(conn, ddl, toast_msg='NOT NULL dropped')
 
             dialog.connect('response', on_response)
             dialog.present(self.get_root())
@@ -918,7 +928,7 @@ class TablePanel(Gtk.Box):
                     pgsql.Identifier(schema), pgsql.Identifier(table),
                     pgsql.Identifier(item.col_name),
                 )
-                self._exec_ddl_and_reload_schema(conn, ddl)
+                self._exec_ddl_and_reload_schema(conn, ddl, toast_msg='Column dropped')
 
         dialog.connect('response', on_response)
         dialog.present(self.get_root())
@@ -942,7 +952,7 @@ class TablePanel(Gtk.Box):
                 pgsql.Identifier(schema), pgsql.Identifier(table),
                 pgsql.Identifier(item.col_name), pgsql.Identifier(new_name),
             )
-            self._exec_ddl_and_reload_schema(conn, ddl)
+            self._exec_ddl_and_reload_schema(conn, ddl, toast_msg='Column renamed')
 
         dlg = RenameDialog(item.col_name, on_rename, title='Rename Column')
         dlg.present(self.get_root())
@@ -1007,6 +1017,7 @@ class TablePanel(Gtk.Box):
                             )
                         db.commit()
                     GLib.idle_add(self._reload_schema_tab)
+                    GLib.idle_add(self._show_toast, 'Primary key updated')
                 except Exception as e:
                     GLib.idle_add(self._show_edit_error, str(e))
 
@@ -1015,7 +1026,7 @@ class TablePanel(Gtk.Box):
         dialog.connect('response', on_response)
         dialog.present(self.get_root())
 
-    def _exec_ddl_and_reload_schema(self, conn, ddl):
+    def _exec_ddl_and_reload_schema(self, conn, ddl, toast_msg=None):
         """Execute a DDL statement in a background thread and reload the schema tab."""
         def run():
             try:
@@ -1027,6 +1038,8 @@ class TablePanel(Gtk.Box):
                         cur.execute(ddl)
                     db.commit()
                 GLib.idle_add(self._reload_schema_tab)
+                if toast_msg:
+                    GLib.idle_add(self._show_toast, toast_msg)
             except Exception as e:
                 GLib.idle_add(self._show_edit_error, str(e))
 
@@ -1146,7 +1159,7 @@ class TablePanel(Gtk.Box):
                 itype=pgsql.SQL(idx_type),
                 cols=col_sql,
             )
-            self._exec_ddl_and_reload_indexes(conn, ddl, autocommit=concurrently)
+            self._exec_ddl_and_reload_indexes(conn, ddl, autocommit=concurrently, toast_msg='Index added')
 
         AddIndexDialog(table, col_names, on_save).present(self.get_root())
 
@@ -1175,12 +1188,12 @@ class TablePanel(Gtk.Box):
                     pgsql.Identifier(item.name),
                 )
                 # DROP INDEX CONCURRENTLY cannot run inside a transaction
-                self._exec_ddl_and_reload_indexes(conn, ddl, autocommit=True)
+                self._exec_ddl_and_reload_indexes(conn, ddl, autocommit=True, toast_msg='Index dropped')
 
         dialog.connect('response', on_response)
         dialog.present(self.get_root())
 
-    def _exec_ddl_and_reload_indexes(self, conn, ddl, autocommit=False):
+    def _exec_ddl_and_reload_indexes(self, conn, ddl, autocommit=False, toast_msg=None):
         def run():
             try:
                 import psycopg
@@ -1192,6 +1205,8 @@ class TablePanel(Gtk.Box):
                     if not autocommit:
                         db.commit()
                 GLib.idle_add(self._reload_indexes_tab)
+                if toast_msg:
+                    GLib.idle_add(self._show_toast, toast_msg)
             except Exception as e:
                 GLib.idle_add(self._show_edit_error, str(e))
 
@@ -1262,7 +1277,7 @@ class TablePanel(Gtk.Box):
                 pgsql.Identifier(name),
                 pgsql.SQL(constraint_sql),
             )
-            self._exec_ddl_and_reload_keys(conn, ddl)
+            self._exec_ddl_and_reload_keys(conn, ddl, toast_msg='Constraint added')
 
         AddConstraintDialog(table, col_names, on_save).present(self.get_root())
 
@@ -1291,12 +1306,12 @@ class TablePanel(Gtk.Box):
                     pgsql.Identifier(table),
                     pgsql.Identifier(item.name),
                 )
-                self._exec_ddl_and_reload_keys(conn, ddl)
+                self._exec_ddl_and_reload_keys(conn, ddl, toast_msg='Constraint dropped')
 
         dialog.connect('response', on_response)
         dialog.present(self.get_root())
 
-    def _exec_ddl_and_reload_keys(self, conn, ddl):
+    def _exec_ddl_and_reload_keys(self, conn, ddl, toast_msg=None):
         def run():
             try:
                 import psycopg
@@ -1307,6 +1322,8 @@ class TablePanel(Gtk.Box):
                         cur.execute(ddl)
                     db.commit()
                 GLib.idle_add(self._reload_keys_tab)
+                if toast_msg:
+                    GLib.idle_add(self._show_toast, toast_msg)
             except Exception as e:
                 GLib.idle_add(self._show_edit_error, str(e))
 
@@ -1923,6 +1940,7 @@ class TablePanel(Gtk.Box):
                             )
                         )
                 db.commit()
+            GLib.idle_add(self._show_toast, 'Row inserted')
             GLib.idle_add(self._reload_data_page, conn, schema, table, page)
         except Exception as e:
             GLib.idle_add(self._show_edit_error, str(e))
@@ -1953,6 +1971,7 @@ class TablePanel(Gtk.Box):
                     )
                     cur.execute(query, set_vals + where_vals)
                 db.commit()
+            GLib.idle_add(self._show_toast, 'Row updated')
             GLib.idle_add(self._reload_data_page, conn, schema, table, page)
         except Exception as e:
             GLib.idle_add(self._show_edit_error, str(e))
@@ -1991,6 +2010,9 @@ class TablePanel(Gtk.Box):
                         if not cur.fetchone()[0]:
                             reload_page = page - 1
                 db.commit()
+            n = len(rows_to_delete)
+            msg = '1 row deleted' if n == 1 else f'{n} rows deleted'
+            GLib.idle_add(self._show_toast, msg)
             GLib.idle_add(self._reload_data_page, conn, schema, table, reload_page)
         except Exception as e:
             GLib.idle_add(self._show_edit_error, str(e))
