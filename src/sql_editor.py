@@ -314,6 +314,7 @@ class SqlEditor(Gtk.Box):
         self._cancel_event = threading.Event()
         self._first_error_row_index = -1
         self._last_sql = ''
+        self._last_error_msg = ''
         self._history = []
         self._run_start_time = time.monotonic()
         self._explain_last_sql = ''
@@ -745,7 +746,7 @@ class SqlEditor(Gtk.Box):
             self._save_label.set_visible(True)
             self._save_label_timer = GLib.timeout_add(2000, self._hide_save_label)
         except OSError as e:
-            self.show_error(str(e))
+            self._show_save_error(str(e))
         return False  # for GLib.timeout_add
 
     def _hide_save_label(self):
@@ -1117,11 +1118,18 @@ class SqlEditor(Gtk.Box):
     def show_error(self, text):
         elapsed = self._elapsed_ms()
         self._finish_run()
+        self._last_error_msg = text
         self.emit('query-finished', elapsed, True)
         self._results_message.set_label(text)
         self._results_message.add_css_class('error')
         self._results_stack.set_visible_child_name('message')
         self._append_history(self._last_sql, self._elapsed_ms(), error=text)
+
+    def _show_save_error(self, text):
+        """Show a file I/O error without emitting query-finished or appending history."""
+        self._results_message.set_label(text)
+        self._results_message.add_css_class('error')
+        self._results_stack.set_visible_child_name('message')
 
     def _show_multi_results(self, results, use_autocommit=False):
         elapsed = self._elapsed_ms()

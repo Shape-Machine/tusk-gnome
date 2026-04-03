@@ -1057,11 +1057,24 @@ class TuskWindow(Adw.ApplicationWindow):
             return
         elapsed_label = f'{elapsed_s}s'
         title = f'Query failed ({elapsed_label})' if is_error else f'Query finished ({elapsed_label})'
-        sql_snippet = (editor._last_sql or '').split('\n')[0][:80]
+        if is_error:
+            body = (editor._last_error_msg or '').split('\n')[0][:80]
+        else:
+            body = (editor._last_sql or '').split('\n')[0][:80]
         notification = Gio.Notification.new(title)
-        notification.set_body(sql_snippet)
-        notification.set_default_action('app.activate')
+        notification.set_body(body)
+        notification.set_default_action_and_target_value(
+            'app.focus-editor',
+            GLib.Variant('s', editor.file_path or ''),
+        )
         self.get_application().send_notification('query-done', notification)
+
+    def focus_editor_tab(self, file_path):
+        if not file_path:
+            return
+        page = self._find_tab(f'file:{file_path}')
+        if page:
+            self._tab_view.set_selected_page(page)
 
     def _on_server_activity(self):
         if not self._active_conn:

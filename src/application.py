@@ -3,7 +3,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Adw, Gio, Gtk, Gdk
+from gi.repository import Adw, Gio, GLib, Gtk, Gdk
 
 import config
 from window import TuskWindow
@@ -68,6 +68,17 @@ class TuskApplication(Adw.Application):
         prefs_action = Gio.SimpleAction.new('preferences', None)
         prefs_action.connect('activate', lambda *_: self._show_prefs(win))
         self.add_action(prefs_action)
+
+        focus_editor_action = Gio.SimpleAction.new('focus-editor', GLib.VariantType('s'))
+        focus_editor_action.connect('activate', self._on_focus_editor)
+        self.add_action(focus_editor_action)
+
+    def _on_focus_editor(self, _action, param):
+        win = self.props.active_window
+        if not win:
+            return
+        win.present()
+        win.focus_editor_tab(param.get_string())
 
     def _show_prefs(self, win):
         from prefs_dialog import PrefsDialog
