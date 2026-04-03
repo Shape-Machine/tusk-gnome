@@ -20,6 +20,7 @@ class TuskApplication(Adw.Application):
     def _register_accels(self):
         self.set_accels_for_action('app.preferences',     ['<Control>comma'])
         self.set_accels_for_action('app.quit',            ['<Control>q'])
+        self.set_accels_for_action('win.quick-open',      ['<Control>p'])
         self.set_accels_for_action('win.close-tab',       ['<Control>w'])
         self.set_accels_for_action('win.next-tab',        ['<Control>Tab'])
         self.set_accels_for_action('win.prev-tab',        ['<Control><Shift>Tab'])
