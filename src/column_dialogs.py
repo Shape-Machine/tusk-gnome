@@ -1275,10 +1275,15 @@ class CreateTableDialog(Adw.Dialog):
             dst_pos = max(0, min(int(y / _ROW_HEIGHT), n - 1))
             if src_pos == dst_pos:
                 return False
-            item = self._store.get_item(src_pos)
-            self._store.remove(src_pos)
-            self._store.insert(dst_pos, item)
-            self._on_form_changed()
+            # Defer store mutation: modifying the ListStore inside the drop
+            # handler corrupts GTK's CSS node tree while DnD is still unwinding.
+            def _reorder():
+                item = self._store.get_item(src_pos)
+                self._store.remove(src_pos)
+                self._store.insert(dst_pos, item)
+                self._on_form_changed()
+                return GLib.SOURCE_REMOVE
+            GLib.idle_add(_reorder)
             return True
 
         drop_target.connect('drop', _on_drop)
