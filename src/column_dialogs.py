@@ -1227,6 +1227,7 @@ class CreateTableDialog(Adw.Dialog):
 
     def _on_close_attempt(self, _dialog):
         if not self._is_dirty():
+            self.set_can_close(True)
             self.close()
             return
         dlg = Adw.AlertDialog(
@@ -1238,7 +1239,13 @@ class CreateTableDialog(Adw.Dialog):
         dlg.set_response_appearance('discard', Adw.ResponseAppearance.DESTRUCTIVE)
         dlg.set_default_response('cancel')
         dlg.set_close_response('cancel')
-        dlg.connect('response', lambda d, r: self.close() if r == 'discard' else None)
+
+        def _on_response(_d, r):
+            if r == 'discard':
+                self.set_can_close(True)
+                self.close()
+
+        dlg.connect('response', _on_response)
         dlg.present(self)
 
     def _get_schema(self):
