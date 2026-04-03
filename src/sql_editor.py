@@ -944,13 +944,11 @@ class SqlEditor(Gtk.Box):
         if conn:
             try:
                 conn.cancel_safe()
-            except AttributeError:
+            except Exception:
                 try:
                     conn.cancel()
                 except Exception:
                     pass
-            except Exception:
-                pass
 
     def _on_elapsed_tick(self):
         elapsed = int(time.monotonic() - self._run_start_time)
@@ -1043,6 +1041,9 @@ class SqlEditor(Gtk.Box):
 
             with open_db(conn, autocommit=bool(_AUTOCOMMIT_RE.match(sql))) as db:
                 self._active_conn = db
+                if self._cancel_event.is_set():
+                    GLib.idle_add(self.show_message, 'Query cancelled')
+                    return
                 try:
                     with db.cursor() as cur:
                         cur.execute(sql)
