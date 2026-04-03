@@ -8,6 +8,7 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib, Gio, GObject, Gdk, Pango
 
 _REFRESH_INTERVAL_MS = 5000
+_css_loaded = False
 
 _QUERY_SQL = """
 SELECT
@@ -88,6 +89,7 @@ def _make_text_col(title, getter, mono=False, expand=False):
         text = getter(row)
         label.set_text(text)
         label.set_tooltip_text(text if len(text) > 40 else None)
+        label._activity_row = row
         for cls in ('activity-warn', 'activity-critical'):
             label.remove_css_class(cls)
         if row.css_class:
@@ -115,6 +117,9 @@ class ActivityPanel(Gtk.Box):
         self._refresh()
 
     def _apply_css(self):
+        global _css_loaded
+        if _css_loaded:
+            return
         provider = Gtk.CssProvider()
         provider.load_from_data(_CSS)
         Gtk.StyleContext.add_provider_for_display(
@@ -122,6 +127,7 @@ class ActivityPanel(Gtk.Box):
             provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
         )
+        _css_loaded = True
 
     def _build_ui(self):
         # ── Toolbar ──────────────────────────────────────────────────────────
@@ -248,10 +254,13 @@ class ActivityPanel(Gtk.Box):
     # ── Terminate session ────────────────────────────────────────────────────
 
     def _on_right_click(self, gesture, _n, x, y):
-        item = self._selection.get_selected_item()
-        if not item:
-            return
-        self._show_terminate_menu(item.pid, x, y)
+        widget = self._col_view.pick(x, y, Gtk.PickFlags.DEFAULT)
+        while widget and widget is not self._col_view:
+            row = getattr(widget, '_activity_row', None)
+            if row is not None:
+                self._show_terminate_menu(row.pid, x, y)
+                return
+            widget = widget.get_parent()
 
     def _show_terminate_menu(self, pid, x, y):
         menu = Gio.Menu()
