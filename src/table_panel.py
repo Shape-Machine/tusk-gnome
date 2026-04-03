@@ -464,7 +464,7 @@ class TablePanel(Gtk.Box):
         self._filter_entry.set_margin_end(MARGIN_SM)
         self._filter_entry.set_margin_top(MARGIN_XS)
         self._filter_entry.set_margin_bottom(MARGIN_XS)
-        self._filter_entry.connect('search-changed', self._apply_local_filter)
+        self._filter_entry.connect('search-changed', self._on_filter_changed)
 
         self._insert_btn = Gtk.Button(icon_name='list-add-symbolic')
         self._insert_btn.add_css_class('flat')
@@ -786,7 +786,18 @@ class TablePanel(Gtk.Box):
                     pgsql.Identifier(item.col_name),
                     pgsql.SQL(new_type),
                 )
-            self._exec_ddl_and_reload_schema(conn, ddl, toast_msg='Column type updated')
+            col_name, new_type_captured = item.col_name, new_type
+
+            def _update_type():
+                rows = list(getattr(self, '_schema_raw_rows', []))
+                for i, r in enumerate(rows):
+                    if r[0] == col_name:
+                        rows[i] = (r[0], new_type_captured, r[2], r[3], r[4])
+                        break
+                self._update_schema_view(rows, getattr(self, '_keys_raw_rows', []))
+
+            self._exec_ddl_and_reload_schema(conn, ddl, toast_msg='Column type updated',
+                                             on_success=_update_type)
 
         ChangeTypeDialog(item.col_name, item.data_type, on_save).present(self.get_root())
 
@@ -819,8 +830,19 @@ class TablePanel(Gtk.Box):
                     pgsql.Identifier(schema), pgsql.Identifier(table),
                     pgsql.Identifier(item.col_name),
                 )
+            col_name, new_default = item.col_name, expr or ''
+
+            def _update_default():
+                rows = list(getattr(self, '_schema_raw_rows', []))
+                for i, r in enumerate(rows):
+                    if r[0] == col_name:
+                        rows[i] = (r[0], r[1], r[2], r[3], new_default)
+                        break
+                self._update_schema_view(rows, getattr(self, '_keys_raw_rows', []))
+
             self._exec_ddl_and_reload_schema(conn, ddl,
-                                             toast_msg='Default set' if expr else 'Default dropped')
+                                             toast_msg='Default set' if expr else 'Default dropped',
+                                             on_success=_update_default)
 
         SetDefaultDialog(item.col_name, item.default_val, on_save).present(self.get_root())
 
@@ -830,31 +852,49 @@ class TablePanel(Gtk.Box):
         conn, schema, table = self._conn, self._current_schema, self._current_table
         is_nullable = item.is_nullable == 'YES'
 
+        col_name = item.col_name
+
+        def _nullable_update(new_val):
+            rows = list(getattr(self, '_schema_raw_rows', []))
+            for i, r in enumerate(rows):
+                if r[0] == col_name:
+                    rows[i] = (r[0], r[1], r[2], new_val, r[4])
+                    break
+            self._update_schema_view(rows, getattr(self, '_keys_raw_rows', []))
+
         if is_nullable:
-            # Setting NOT NULL — pre-check for existing NULLs
+            # Setting NOT NULL — use pg_stats estimate for instant feedback (#178)
             def check():
                 try:
-                    import psycopg
                     from psycopg import sql as pgsql
                     from tunnel import open_db
 
                     with open_db(conn) as db:
                         with db.cursor() as cur:
                             cur.execute(
-                                pgsql.SQL('SELECT COUNT(*) FROM {}.{} WHERE {} IS NULL').format(
-                                    pgsql.Identifier(schema), pgsql.Identifier(table),
-                                    pgsql.Identifier(item.col_name),
+                                """
+                                SELECT COALESCE(
+                                    (SELECT (null_frac * reltuples)::bigint
+                                     FROM pg_stats
+                                     JOIN pg_class ON relname = tablename
+                                     WHERE schemaname = %s AND tablename = %s AND attname = %s),
+                                    0
                                 )
+                                """,
+                                [schema, table, col_name],
                             )
-                            null_count = cur.fetchone()[0]
-                    GLib.idle_add(_show_confirm, null_count)
+                            null_estimate = cur.fetchone()[0]
+                    GLib.idle_add(_show_confirm, null_estimate)
                 except Exception as e:
                     GLib.idle_add(self._show_edit_error, str(e))
 
-            def _show_confirm(null_count):
-                body = f'Set column "{item.col_name}" to NOT NULL?'
-                if null_count > 0:
-                    body += f'\n\nWarning: {null_count} existing NULL value{"s" if null_count != 1 else ""} will prevent this change.'
+            def _show_confirm(null_estimate):
+                body = f'Set column "{col_name}" to NOT NULL?'
+                if null_estimate > 0:
+                    body += (
+                        f'\n\nWarning: ~{null_estimate:,} existing NULL value'
+                        f'{"s" if null_estimate != 1 else ""} (estimated) will prevent this change.'
+                    )
                 dialog = Adw.AlertDialog(heading='Toggle NOT NULL', body=body)
                 dialog.add_response('cancel', 'Cancel')
                 dialog.add_response('apply', 'Set NOT NULL')
@@ -864,15 +904,15 @@ class TablePanel(Gtk.Box):
 
                 def on_response(_d, response):
                     if response == 'apply':
-                        import psycopg
                         from psycopg import sql as pgsql
                         ddl = pgsql.SQL(
                             'ALTER TABLE {}.{} ALTER COLUMN {} SET NOT NULL'
                         ).format(
                             pgsql.Identifier(schema), pgsql.Identifier(table),
-                            pgsql.Identifier(item.col_name),
+                            pgsql.Identifier(col_name),
                         )
-                        self._exec_ddl_and_reload_schema(conn, ddl, toast_msg='NOT NULL set')
+                        self._exec_ddl_and_reload_schema(conn, ddl, toast_msg='NOT NULL set',
+                                                         on_success=lambda: _nullable_update('NO'))
 
                 dialog.connect('response', on_response)
                 dialog.present(self.get_root())
@@ -882,7 +922,7 @@ class TablePanel(Gtk.Box):
             # Dropping NOT NULL — just confirm
             dialog = Adw.AlertDialog(
                 heading='Toggle NOT NULL',
-                body=f'Allow NULL values in column "{item.col_name}"?',
+                body=f'Allow NULL values in column "{col_name}"?',
             )
             dialog.add_response('cancel', 'Cancel')
             dialog.add_response('apply', 'Drop NOT NULL')
@@ -892,15 +932,15 @@ class TablePanel(Gtk.Box):
 
             def on_response(_d, response):
                 if response == 'apply':
-                    import psycopg
                     from psycopg import sql as pgsql
                     ddl = pgsql.SQL(
                         'ALTER TABLE {}.{} ALTER COLUMN {} DROP NOT NULL'
                     ).format(
                         pgsql.Identifier(schema), pgsql.Identifier(table),
-                        pgsql.Identifier(item.col_name),
+                        pgsql.Identifier(col_name),
                     )
-                    self._exec_ddl_and_reload_schema(conn, ddl, toast_msg='NOT NULL dropped')
+                    self._exec_ddl_and_reload_schema(conn, ddl, toast_msg='NOT NULL dropped',
+                                                     on_success=lambda: _nullable_update('YES'))
 
             dialog.connect('response', on_response)
             dialog.present(self.get_root())
@@ -1027,18 +1067,22 @@ class TablePanel(Gtk.Box):
         dialog.connect('response', on_response)
         dialog.present(self.get_root())
 
-    def _exec_ddl_and_reload_schema(self, conn, ddl, toast_msg=None):
-        """Execute a DDL statement in a background thread and reload the schema tab."""
+    def _exec_ddl_and_reload_schema(self, conn, ddl, toast_msg=None, on_success=None):
+        """Execute a DDL statement in a background thread and reload the schema tab.
+
+        If on_success is provided it is called on the main thread instead of
+        _reload_schema_tab, allowing callers to do an in-place model update and
+        skip a database round-trip.
+        """
         def run():
             try:
-                import psycopg
                 from tunnel import open_db
 
                 with open_db(conn) as db:
                     with db.cursor() as cur:
                         cur.execute(ddl)
                     db.commit()
-                GLib.idle_add(self._reload_schema_tab)
+                GLib.idle_add(on_success if on_success else self._reload_schema_tab)
                 if toast_msg:
                     GLib.idle_add(self._show_toast, toast_msg)
             except Exception as e:
@@ -1235,6 +1279,7 @@ class TablePanel(Gtk.Box):
 
     def _fill_keys_scroll(self, keys_rows):
         """Build/refresh the Keys ColumnView with a per-row Drop Constraint context menu."""
+        self._keys_raw_rows = keys_rows
         if not keys_rows:
             empty = Adw.StatusPage(title='No keys')
             empty.set_vexpand(True)
@@ -1477,11 +1522,22 @@ class TablePanel(Gtk.Box):
         dialog.save(self.get_root(), None, _on_save)
 
     def _fetch_and_write(self, gfile, fmt, conn, schema, table):
+        _CHUNK = 10_000
+
+        def _quote(name):
+            return '"' + name.replace('"', '""') + '"'
+
+        def _val(v):
+            if v is None: return 'NULL'
+            if isinstance(v, bool): return 'TRUE' if v else 'FALSE'
+            if isinstance(v, (int, float)): return str(v)
+            return "'" + str(v).replace("'", "''") + "'"
+
         try:
-            import psycopg
             from psycopg import sql as pgsql
             from tunnel import open_db
 
+            path = gfile.get_path()
             with open_db(conn) as db:
                 with db.cursor() as cur:
                     cur.execute(
@@ -1490,54 +1546,73 @@ class TablePanel(Gtk.Box):
                         )
                     )
                     cols = [d.name for d in cur.description]
-                    rows = cur.fetchall()
 
-            if fmt == 'csv':
-                buf = io.StringIO()
-                w = csv.writer(buf)
-                w.writerow(cols)
-                w.writerows(rows)
-                text = buf.getvalue()
-            elif fmt == 'json':
-                text = json.dumps(
-                    [{col: v for col, v in zip(cols, row)} for row in rows],
-                    indent=2, default=str,
-                )
-            else:
-                def _quote(name):
-                    return '"' + name.replace('"', '""') + '"'
-                def _val(v):
-                    if v is None: return 'NULL'
-                    if isinstance(v, bool): return 'TRUE' if v else 'FALSE'
-                    if isinstance(v, (int, float)): return str(v)
-                    return "'" + str(v).replace("'", "''") + "'"
-                qtable = f'{_quote(schema)}.{_quote(table)}'
-                col_str = ', '.join(_quote(c) for c in cols)
-                lines = [
-                    f'INSERT INTO {qtable} ({col_str}) VALUES ({", ".join(_val(v) for v in row)});'
-                    for row in rows
-                ]
-                text = '\n'.join(lines)
+                    if fmt == 'csv':
+                        with open(path, 'w', newline='', encoding='utf-8') as f:
+                            w = csv.writer(f)
+                            w.writerow(cols)
+                            while True:
+                                chunk = cur.fetchmany(_CHUNK)
+                                if not chunk:
+                                    break
+                                w.writerows(chunk)
 
-            gfile.replace_contents(
-                text.encode(), None, False,
-                Gio.FileCreateFlags.REPLACE_DESTINATION, None,
-            )
+                    elif fmt == 'json':
+                        with open(path, 'w', encoding='utf-8') as f:
+                            f.write('[\n')
+                            first = True
+                            while True:
+                                chunk = cur.fetchmany(_CHUNK)
+                                if not chunk:
+                                    break
+                                for row in chunk:
+                                    if not first:
+                                        f.write(',\n')
+                                    f.write('  ' + json.dumps(
+                                        {col: v for col, v in zip(cols, row)},
+                                        default=str,
+                                    ))
+                                    first = False
+                            f.write('\n]\n')
+
+                    else:
+                        qtable = f'{_quote(schema)}.{_quote(table)}'
+                        col_str = ', '.join(_quote(c) for c in cols)
+                        with open(path, 'w', encoding='utf-8') as f:
+                            while True:
+                                chunk = cur.fetchmany(_CHUNK)
+                                if not chunk:
+                                    break
+                                for row in chunk:
+                                    vals = ', '.join(_val(v) for v in row)
+                                    f.write(f'INSERT INTO {qtable} ({col_str}) VALUES ({vals});\n')
+
         except Exception as e:
             GLib.idle_add(self._show_export_error, str(e))
 
     def _show_export_error(self, msg):
         self._data_page_label.set_label(f'Export failed: {msg}')
 
+    def _on_filter_changed(self, *_):
+        if hasattr(self, '_filter_debounce_id'):
+            GLib.source_remove(self._filter_debounce_id)
+        self._filter_debounce_id = GLib.timeout_add(300, self._apply_local_filter)
+
     def _apply_local_filter(self, *_):
+        self._filter_debounce_id = None
         if not hasattr(self, '_all_data_rows'):
-            return
+            return False
         text = self._filter_entry.get_text().strip().lower()
         if text:
-            filtered = [r for r in self._all_data_rows if any(text in str(v).lower() for v in r)]
+            cache = getattr(self, '_row_filter_cache', None)
+            if cache is not None:
+                filtered = [r for r, c in zip(self._all_data_rows, cache) if text in c]
+            else:
+                filtered = [r for r in self._all_data_rows if any(text in str(v).lower() for v in r)]
         else:
             filtered = self._all_data_rows
         self._render_data_rows(filtered)
+        return False
 
     def _render_data_rows(self, rows):
         table_name = (
@@ -1630,48 +1705,55 @@ class TablePanel(Gtk.Box):
             from tunnel import open_db
 
             with open_db(conn) as db:
-                with db.cursor() as cur:
-                    cur.execute(_SCHEMA_SQL, [schema, table])
-                    schema_rows = cur.fetchall()
+                # Use psycopg3 pipeline to send all metadata queries in one round-trip
+                cur_schema   = db.cursor()
+                cur_keys     = db.cursor()
+                cur_rel      = db.cursor()
+                cur_idx      = db.cursor()
+                cur_ddl      = db.cursor()
+                cur_stats    = db.cursor()
+                cur_def      = db.cursor()
+                cur_triggers = db.cursor()
+                cur_data     = db.cursor()
 
+                with db.pipeline():
+                    cur_schema.execute(_SCHEMA_SQL, [schema, table])
                     if item_type == 'table':
-                        cur.execute(_KEYS_SQL, [schema, table])
-                        keys_rows = cur.fetchall()
-
-                        cur.execute(_RELATIONS_SQL, [schema, table])
-                        relations_rows = cur.fetchall()
-
-                        cur.execute(_INDEXES_SQL, [schema, table])
-                        indexes_rows = cur.fetchall()
-
-                        cur.execute(_DDL_SQL, [schema, table])
-                        row = cur.fetchone()
-                        ddl = row[0] if row else ''
-                        definition = None
-
-                        cur.execute(_STATS_SQL, [schema, table])
-                        stats_row = cur.fetchone()  # (n_live_tup, total_bytes)
+                        cur_keys.execute(_KEYS_SQL, [schema, table])
+                        cur_rel.execute(_RELATIONS_SQL, [schema, table])
+                        cur_idx.execute(_INDEXES_SQL, [schema, table])
+                        cur_ddl.execute(_DDL_SQL, [schema, table])
+                        cur_stats.execute(_STATS_SQL, [schema, table])
                     else:
-                        keys_rows = relations_rows = indexes_rows = []
-                        ddl = ''
-                        stats_row = None
-
-                        cur.execute(_DEFINITION_SQL, [schema, table])
-                        row = cur.fetchone()
-                        definition = row[0] if row else ''
-
-                    cur.execute(_TRIGGERS_SQL, [schema, table])
-                    triggers_rows = cur.fetchall()
-
-                    cur.execute(
+                        cur_def.execute(_DEFINITION_SQL, [schema, table])
+                    cur_triggers.execute(_TRIGGERS_SQL, [schema, table])
+                    cur_data.execute(
                         sql.SQL('SELECT * FROM {}.{} LIMIT %s OFFSET %s').format(
-                            sql.Identifier(schema),
-                            sql.Identifier(table),
+                            sql.Identifier(schema), sql.Identifier(table),
                         ),
                         [self._page_size + 1, 0],
                     )
-                    data_cols = [d.name for d in cur.description]
-                    data_rows = cur.fetchall()
+
+                schema_rows = cur_schema.fetchall()
+
+                if item_type == 'table':
+                    keys_rows = cur_keys.fetchall()
+                    relations_rows = cur_rel.fetchall()
+                    indexes_rows = cur_idx.fetchall()
+                    row = cur_ddl.fetchone()
+                    ddl = row[0] if row else ''
+                    definition = None
+                    stats_row = cur_stats.fetchone()
+                else:
+                    keys_rows = relations_rows = indexes_rows = []
+                    ddl = ''
+                    stats_row = None
+                    row = cur_def.fetchone()
+                    definition = row[0] if row else ''
+
+                triggers_rows = cur_triggers.fetchall()
+                data_cols = [d.name for d in cur_data.description]
+                data_rows = cur_data.fetchall()
 
             GLib.idle_add(
                 self._populate,
@@ -1740,6 +1822,7 @@ class TablePanel(Gtk.Box):
 
         self._all_data_cols = cols
         self._all_data_rows = rows
+        self._row_filter_cache = [' '.join(str(v).lower() for v in r) for r in rows]
         self._filter_entry.set_text('')
         self._data_scroll.set_child(None)  # force fresh ColumnView; reuse is unsafe across tables
         self._render_data_rows(rows)
