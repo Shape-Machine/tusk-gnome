@@ -1244,7 +1244,11 @@ class CreateTableDialog(Adw.Dialog):
             return True
         for i in range(self._store.get_n_items()):
             item = self._store.get_item(i)
-            if item.name.strip():
+            if (item.name.strip()
+                    or item.pg_type.strip() != 'text'
+                    or item.default.strip()
+                    or item.is_pk
+                    or not item.nullable):
                 return True
         return False
 
@@ -1303,9 +1307,13 @@ class CreateTableDialog(Adw.Dialog):
 
         drop_target = Gtk.DropTarget.new(str, Gdk.DragAction.MOVE)
 
+        def _insertion_index(y, n):
+            """Map a y-coordinate to an insertion index in [0, n]."""
+            return max(0, min(round((y - _HEADER_HEIGHT) / _ROW_HEIGHT), n))
+
         def _on_motion(_target, _x, y):
             n = self._store.get_n_items()
-            row_idx = max(0, min(round((y - _HEADER_HEIGHT) / _ROW_HEIGHT), n))
+            row_idx = _insertion_index(y, n)
             self._drop_indicator_y = _HEADER_HEIGHT + row_idx * _ROW_HEIGHT
             self._drop_indicator.set_margin_top(self._drop_indicator_y)
             self._drop_indicator.set_visible(True)
@@ -1323,7 +1331,7 @@ class CreateTableDialog(Adw.Dialog):
             src_pos = self._drag_src_pos
             self._drag_src_pos = -1
             n = self._store.get_n_items()
-            dst_pos = max(0, min(int((y - _HEADER_HEIGHT) / _ROW_HEIGHT), n - 1))
+            dst_pos = _insertion_index(y, n)
             if src_pos == dst_pos:
                 return False
             # Defer store mutation: modifying the ListStore inside the drop
@@ -1331,7 +1339,9 @@ class CreateTableDialog(Adw.Dialog):
             def _reorder():
                 item = self._store.get_item(src_pos)
                 self._store.remove(src_pos)
-                self._store.insert(dst_pos, item)
+                # Adjust destination after removal when dragging downward.
+                adjusted = dst_pos - 1 if dst_pos > src_pos else dst_pos
+                self._store.insert(adjusted, item)
                 self._on_form_changed()
                 return GLib.SOURCE_REMOVE
             GLib.idle_add(_reorder)
@@ -1584,9 +1594,10 @@ class CreateTableDialog(Adw.Dialog):
             item = li.get_item()
 
             def _clicked(_b):
-                pos = self._store.find(item)[1]
-                self._store.remove(pos)
-                self._on_form_changed()
+                found, pos = self._store.find(item)
+                if found:
+                    self._store.remove(pos)
+                    self._on_form_changed()
 
             btn._handler = btn.connect('clicked', _clicked)
 
@@ -1609,6 +1620,10 @@ class CreateTableDialog(Adw.Dialog):
     # ── Store helpers ────────────────────────────────────────────────────────
 
     def _add_col_row(self, name='', pg_type='text', nullable=True, default='', is_pk=False, focus=True):
+        if is_pk:
+            # Enforce single-PK invariant at the model level (covers prefill path).
+            for i in range(self._store.get_n_items()):
+                self._store.get_item(i).set_property('is_pk', False)
         item = _ColDef(name=name, pg_type=pg_type or 'text',
                        nullable=nullable, is_pk=is_pk, default=default or '')
         if not name and focus:
