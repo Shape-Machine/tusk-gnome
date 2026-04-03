@@ -179,8 +179,8 @@ class CommandPalette(Adw.Dialog):
 
     def _on_row_activated(self, _listbox, row):
         if isinstance(row, _ResultRow):
-            self.emit('item-activated', row.conn, row.schema, row.name, row.item_type)
-            self.close()
+            self._listbox.select_row(row)
+            self._activate_selected()
 
     def _on_key_pressed(self, _ctrl, keyval, _code, _state):
         if keyval == Gdk.KEY_Escape:
