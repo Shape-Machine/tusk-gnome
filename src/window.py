@@ -982,16 +982,18 @@ class TuskWindow(Adw.ApplicationWindow):
     def _get_sql_file_items(self):
         folder = self._file_explorer.current_dir
         try:
-            scan = os.scandir(folder)
+            result = []
+            with os.scandir(folder) as scan:
+                for entry in scan:
+                    try:
+                        if entry.is_file() and entry.name.lower().endswith('.sql'):
+                            result.append((None, '', entry.path, 'file', entry.name))
+                    except OSError:
+                        pass
+            result.sort(key=lambda t: t[4].lower())
+            return result
         except OSError:
             return []
-        result = []
-        with scan:
-            for entry in scan:
-                if entry.is_file() and entry.name.lower().endswith('.sql'):
-                    result.append((None, '', entry.path, 'file', entry.name))
-        result.sort(key=lambda t: t[4].lower())
-        return result
 
     def _on_palette_item_activated(self, _palette, conn, schema, name, item_type):
         if item_type == 'function':
