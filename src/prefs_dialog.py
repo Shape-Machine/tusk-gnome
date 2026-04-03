@@ -44,30 +44,9 @@ class PrefsDialog(Adw.PreferencesDialog):
     def _size_slider_row(self, key):
         current = prefs.get(f'{key}_size', SIZE_DEFAULT)
 
-        scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 8, 20, 1)
-        scale.set_hexpand(True)
-        scale.set_draw_value(False)
-        scale.set_size_request(180, -1)
-        scale.set_valign(Gtk.Align.CENTER)
-        for s in [8, 10, 12, 14, 16, 18, 20]:
-            scale.add_mark(s, Gtk.PositionType.BOTTOM, str(s) if s in (8, 14, 20) else None)
-        scale.set_value(current)
-
-        size_label = Gtk.Label(label=f'{current} pt')
-        size_label.set_width_chars(5)
-        size_label.set_xalign(1.0)
-        size_label.set_valign(Gtk.Align.CENTER)
-
-        def on_value_changed(s, lbl=size_label, k=key):
-            v = int(s.get_value())
-            lbl.set_label(f'{v} pt')
-            self._save(f'{k}_size', v)
-
-        scale.connect('value-changed', on_value_changed)
-
-        row = Adw.ActionRow(title='Size')
-        row.add_suffix(scale)
-        row.add_suffix(size_label)
+        adj = Gtk.Adjustment(value=current, lower=8, upper=20, step_increment=1, page_increment=2)
+        row = Adw.SpinRow(title='Size', adjustment=adj)
+        row.connect('notify::value', lambda r, _, k=key: self._save(f'{k}_size', int(r.get_value())))
         return row
 
     def _save(self, key, value):

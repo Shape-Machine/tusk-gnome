@@ -13,7 +13,7 @@ from gi.repository import Gtk, Adw, GObject, GLib, Gdk
 from connections import KEYRING_SERVICE
 
 
-class ConnectionDialog(Adw.Window):
+class ConnectionDialog(Adw.Dialog):
     __gsignals__ = {
         'connection-saved': (GObject.SignalFlags.RUN_FIRST, None, (GObject.TYPE_PYOBJECT,))
     }
@@ -25,25 +25,17 @@ class ConnectionDialog(Adw.Window):
             title = 'New Connection'
         else:
             title = 'Edit Connection'
-        super().__init__(
-            title=title,
-            transient_for=parent,
-            modal=True,
-            default_width=820,
-            resizable=False,
-        )
+        super().__init__(title=title, content_width=820)
         self._connection = connection
         self._duplicate = duplicate
+        self._parent = parent
         self._build_ui()
         if duplicate:
             self.connect('map', lambda _: self._name_row.grab_focus())
 
 
     def _build_ui(self):
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-
         header = Adw.HeaderBar()
-        box.append(header)
 
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
         content.set_margin_top(12)
@@ -190,13 +182,10 @@ class ConnectionDialog(Adw.Window):
         self._ssh_passphrase_row.set_text(ssh_passphrase)
         self._default_schema_row.set_text(conn.get('default_schema', '') if conn else '')
 
-        self._keyring_warning = Gtk.Label(
-            label="Passwords can't be saved. GNOME Keyring isn't running — you'll need to re-enter your password each time you open Tusk."
+        self._keyring_banner = Adw.Banner(
+            title="Passwords can't be saved. GNOME Keyring isn't running — you'll need to re-enter your password each time you open Tusk."
         )
-        self._keyring_warning.add_css_class('warning')
-        self._keyring_warning.set_wrap(True)
-        self._keyring_warning.set_xalign(0)
-        self._keyring_warning.set_visible(keyring_failed)
+        self._keyring_banner.set_revealed(keyring_failed)
 
         # Connect live preview signals
         for row in (self._host_row, self._port_row, self._database_row, self._username_row):
@@ -228,13 +217,12 @@ class ConnectionDialog(Adw.Window):
         content.append(uri_group)
         content.append(self._uri_error_label)
         content.append(two_col)
-        content.append(self._keyring_warning)
+        content.append(self._keyring_banner)
 
         # ── Test / Save ───────────────────────────────────────────────────────
         self._test_bar = Gtk.CenterBox()
 
         self._test_btn = Gtk.Button(label='Test Connection')
-        self._test_btn.add_css_class('pill')
         self._test_btn.connect('clicked', self._on_test)
 
         self._test_spinner = Gtk.Spinner()
@@ -264,16 +252,19 @@ class ConnectionDialog(Adw.Window):
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroll.set_propagate_natural_height(True)
         scroll.set_child(content)
-        box.append(scroll)
+
+        toolbar_view = Adw.ToolbarView()
+        toolbar_view.add_top_bar(header)
+        toolbar_view.set_content(scroll)
 
         self._toast_overlay = Adw.ToastOverlay()
-        self._toast_overlay.set_child(box)
-        self.set_content(self._toast_overlay)
+        self._toast_overlay.set_child(toolbar_view)
+        self.set_child(self._toast_overlay)
 
     def _on_browse_key(self, _btn):
         dialog = Gtk.FileChooserNative(
             title='Select Private Key',
-            transient_for=self,
+            transient_for=self._parent,
             action=Gtk.FileChooserAction.OPEN,
         )
         dialog.connect('response', self._on_key_chosen)

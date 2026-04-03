@@ -11,6 +11,7 @@ from gi.repository import Gtk, Adw, Gio, GLib, GObject, Gdk, Pango
 import prefs
 from connections import ConnectionStore, KeyringUnavailableError
 from connection_dialog import ConnectionDialog
+from style import MARGIN_XS, MARGIN_SM, MARGIN_MD
 from db_browser import DbBrowser
 from file_explorer import FileExplorer
 from sql_editor import SqlEditor
@@ -318,10 +319,10 @@ class TuskWindow(Adw.ApplicationWindow):
         )
 
         conn_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        conn_bar.set_margin_top(4)
-        conn_bar.set_margin_bottom(4)
-        conn_bar.set_margin_start(6)
-        conn_bar.set_margin_end(6)
+        conn_bar.set_margin_top(MARGIN_XS)
+        conn_bar.set_margin_bottom(MARGIN_XS)
+        conn_bar.set_margin_start(MARGIN_SM)
+        conn_bar.set_margin_end(MARGIN_SM)
         conn_bar.append(self._conn_dropdown)
         sidebar.append(conn_bar)
 
@@ -533,7 +534,7 @@ class TuskWindow(Adw.ApplicationWindow):
     def _on_add_connection(self, _btn):
         dlg = ConnectionDialog(parent=self)
         dlg.connect('connection-saved', self._on_connection_added)
-        dlg.present()
+        dlg.present(self)
 
     def _on_copy_as_uri(self, row):
         from urllib.parse import quote
@@ -590,7 +591,7 @@ class TuskWindow(Adw.ApplicationWindow):
 
         dlg = PgpassImportDialog(parent=self, entries=entries, warnings=warnings)
         dlg.connect('entries-selected', self._on_pgpass_entries_selected)
-        dlg.present()
+        dlg.present(self)
 
     def _on_pgpass_entries_selected(self, _dlg, entries):
         if self._main_stack.get_visible_child_name() == 'welcome':
@@ -637,7 +638,7 @@ class TuskWindow(Adw.ApplicationWindow):
     def _on_edit_connection(self, row):
         dlg = ConnectionDialog(parent=self, connection=row._conn)
         dlg.connect('connection-saved', self._on_connection_updated, row)
-        dlg.present()
+        dlg.present(self)
 
     def _on_duplicate_connection(self, row):
         try:
@@ -647,7 +648,7 @@ class TuskWindow(Adw.ApplicationWindow):
             return
         dlg = ConnectionDialog(parent=self, connection=conn, duplicate=True)
         dlg.connect('connection-saved', self._on_connection_duplicated, row)
-        dlg.present()
+        dlg.present(self)
 
     def _on_connection_duplicated(self, _dlg, conn, source_row):
         try:
