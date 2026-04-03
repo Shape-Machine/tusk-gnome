@@ -3,7 +3,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Gtk, Adw, Gio, GObject, Pango, Gdk
+from gi.repository import Gtk, Adw, Gio, GObject, GLib, Pango, Gdk
 
 try:
     gi.require_version('GtkSource', '5')
@@ -1310,29 +1310,32 @@ class CreateTableDialog(Adw.Dialog):
 
         # ── Name column ──────────────────────────────────────────────────────
         def _name_setup(_f, li):
-            el = Gtk.EditableLabel(text='')
-            el.set_hexpand(True)
-            el.set_alignment(0)
-            li.set_child(el)
+            entry = Gtk.Entry()
+            entry.set_has_frame(False)
+            entry.set_hexpand(True)
+            entry.set_placeholder_text('column name…')
+            li.set_child(entry)
 
         def _name_bind(_f, li):
-            el = li.get_child()
+            entry = li.get_child()
             item = li.get_item()
-            el.set_text(item.name)
-            el._binding = item.bind_property(
-                'name', el, 'text',
+            entry._binding = item.bind_property(
+                'name', entry, 'text',
                 GObject.BindingFlags.BIDIRECTIONAL | GObject.BindingFlags.SYNC_CREATE,
             )
-            el._handler = el.connect('changed', lambda *_: self._on_form_changed())
+            entry._changed_handler = entry.connect('changed', lambda *_: self._on_form_changed())
+            entry._activate_handler = entry.connect('activate', lambda *_: self._add_col_row_after(item))
+            if getattr(self, '_pending_focus_item', None) is item:
+                self._pending_focus_item = None
+                GLib.idle_add(entry.grab_focus)
 
         def _name_unbind(_f, li):
-            el = li.get_child()
-            if hasattr(el, '_binding'):
-                el._binding.unbind()
-                del el._binding
-            if hasattr(el, '_handler'):
-                el.disconnect(el._handler)
-                del el._handler
+            entry = li.get_child()
+            for attr in ('_binding', '_changed_handler', '_activate_handler'):
+                val = getattr(entry, attr, None)
+                if val is not None:
+                    (val.unbind if attr == '_binding' else entry.disconnect)(val)
+                    delattr(entry, attr)
 
         name_factory = Gtk.SignalListItemFactory()
         name_factory.connect('setup', _name_setup)
@@ -1365,15 +1368,18 @@ class CreateTableDialog(Adw.Dialog):
                 GObject.BindingFlags.BIDIRECTIONAL | GObject.BindingFlags.SYNC_CREATE,
             )
             entry._handler = entry.connect('changed', lambda *_: self._on_form_changed())
+            entry._activate_handler = entry.connect('activate', lambda *_: self._add_col_row_after(item))
 
         def _type_unbind(_f, li):
             entry = li.get_child().get_first_child()
             if hasattr(entry, '_binding'):
                 entry._binding.unbind()
                 del entry._binding
-            if hasattr(entry, '_handler'):
-                entry.disconnect(entry._handler)
-                del entry._handler
+            for attr in ('_handler', '_activate_handler'):
+                val = getattr(entry, attr, None)
+                if val is not None:
+                    entry.disconnect(val)
+                    delattr(entry, attr)
 
         type_factory = Gtk.SignalListItemFactory()
         type_factory.connect('setup', _type_setup)
@@ -1421,25 +1427,29 @@ class CreateTableDialog(Adw.Dialog):
 
         # ── Default column ───────────────────────────────────────────────────
         def _default_setup(_f, li):
-            el = Gtk.EditableLabel(text='')
-            el.set_hexpand(True)
-            el.set_alignment(0)
-            li.set_child(el)
+            entry = Gtk.Entry()
+            entry.set_has_frame(False)
+            entry.set_hexpand(True)
+            entry.set_placeholder_text('default…')
+            li.set_child(entry)
 
         def _default_bind(_f, li):
-            el = li.get_child()
+            entry = li.get_child()
             item = li.get_item()
-            el.set_text(item.default or '')
-            el._binding = item.bind_property(
-                'default', el, 'text',
+            entry._binding = item.bind_property(
+                'default', entry, 'text',
                 GObject.BindingFlags.BIDIRECTIONAL | GObject.BindingFlags.SYNC_CREATE,
             )
+            entry._activate_handler = entry.connect('activate', lambda *_: self._add_col_row_after(item))
 
         def _default_unbind(_f, li):
-            el = li.get_child()
-            if hasattr(el, '_binding'):
-                el._binding.unbind()
-                del el._binding
+            entry = li.get_child()
+            if hasattr(entry, '_binding'):
+                entry._binding.unbind()
+                del entry._binding
+            if hasattr(entry, '_activate_handler'):
+                entry.disconnect(entry._activate_handler)
+                del entry._activate_handler
 
         default_factory = Gtk.SignalListItemFactory()
         default_factory.connect('setup', _default_setup)
@@ -1491,7 +1501,22 @@ class CreateTableDialog(Adw.Dialog):
     def _add_col_row(self, name='', pg_type='text', nullable=True, default='', is_pk=False):
         item = _ColDef(name=name, pg_type=pg_type or 'text',
                        nullable=nullable, is_pk=is_pk, default=default or '')
+        if not name:
+            self._pending_focus_item = item
         self._store.append(item)
+        self._on_form_changed()
+
+    def _add_col_row_after(self, item):
+        """Insert a blank row after the given item and focus its Name cell."""
+        n = self._store.get_n_items()
+        pos = n  # fallback: append
+        for i in range(n):
+            if self._store.get_item(i) is item:
+                pos = i + 1
+                break
+        new_item = _ColDef(name='', pg_type='text', nullable=True, is_pk=False, default='')
+        self._pending_focus_item = new_item
+        self._store.insert(pos, new_item)
         self._on_form_changed()
 
     def _generate_ddl(self):
