@@ -1131,11 +1131,11 @@ class CreateTableDialog(Adw.Dialog):
         self._drop_indicator.set_valign(Gtk.Align.START)
         self._drop_indicator.set_can_target(False)
         self._drop_indicator.set_visible(False)
-        _ind_css = Gtk.CssProvider()
-        _ind_css.load_from_string('.tusk-drop-line { background-color: @accent_bg_color; }')
+        self._ind_css = Gtk.CssProvider()
+        self._ind_css.load_from_string('.tusk-drop-line { background-color: @accent_bg_color; }')
         self._drop_indicator.add_css_class('tusk-drop-line')
         self._drop_indicator.get_style_context().add_provider(
-            _ind_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+            self._ind_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
 
         col_overlay = Gtk.Overlay()
@@ -1253,6 +1253,9 @@ class CreateTableDialog(Adw.Dialog):
             self.set_can_close(True)
             self.close()
             return
+        if getattr(self, '_discard_dlg_open', False):
+            return
+        self._discard_dlg_open = True
         dlg = Adw.AlertDialog(
             heading='Discard changes?',
             body='You have unsaved changes to this table. Close anyway?',
@@ -1264,6 +1267,7 @@ class CreateTableDialog(Adw.Dialog):
         dlg.set_close_response('cancel')
 
         def _on_response(_d, r):
+            self._discard_dlg_open = False
             if r == 'discard':
                 self.set_can_close(True)
                 self.close()
@@ -1372,6 +1376,7 @@ class CreateTableDialog(Adw.Dialog):
         def _pk_bind(_f, li):
             cb = li.get_child()
             item = li.get_item()
+            cb._item = item
             cb.set_active(item.is_pk)
 
             def _toggled(b):
@@ -1386,8 +1391,19 @@ class CreateTableDialog(Adw.Dialog):
 
             cb._handler = cb.connect('toggled', _toggled)
 
+            def _on_model_changed(_item, _pspec):
+                cb.handler_block(cb._handler)
+                cb.set_active(item.is_pk)
+                cb.handler_unblock(cb._handler)
+
+            cb._notify_handler = item.connect('notify::is-pk', _on_model_changed)
+
         def _pk_unbind(_f, li):
             cb = li.get_child()
+            if hasattr(cb, '_notify_handler') and hasattr(cb, '_item'):
+                cb._item.disconnect(cb._notify_handler)
+                del cb._notify_handler
+                del cb._item
             if hasattr(cb, '_handler'):
                 cb.disconnect(cb._handler)
                 del cb._handler
@@ -1457,7 +1473,6 @@ class CreateTableDialog(Adw.Dialog):
             box = li.get_child()
             entry = box.get_first_child()
             item = li.get_item()
-            entry.set_text(item.pg_type or 'text')
             entry._binding = item.bind_property(
                 'pg_type', entry, 'text',
                 GObject.BindingFlags.BIDIRECTIONAL | GObject.BindingFlags.SYNC_CREATE,
@@ -1603,12 +1618,8 @@ class CreateTableDialog(Adw.Dialog):
 
     def _add_col_row_after(self, item):
         """Insert a blank row after the given item and focus its Name cell."""
-        n = self._store.get_n_items()
-        pos = n  # fallback: append
-        for i in range(n):
-            if self._store.get_item(i) is item:
-                pos = i + 1
-                break
+        found, idx = self._store.find(item)
+        pos = idx + 1 if found else self._store.get_n_items()
         new_item = _ColDef(name='', pg_type='text', nullable=True, is_pk=False, default='')
         self._pending_focus_item = new_item
         self._store.insert(pos, new_item)
@@ -1672,7 +1683,8 @@ class CreateTableDialog(Adw.Dialog):
     def _on_create_clicked(self, _btn):
         forbidden = (';', '--', '/*', '*/', '\x00')
         for i in range(self._store.get_n_items()):
-            pg_type = self._store.get_item(i).pg_type.strip()
+            item = self._store.get_item(i)
+            pg_type = item.pg_type.strip()
             for token in forbidden:
                 if token in pg_type:
                     dlg = Adw.AlertDialog(
@@ -1682,12 +1694,24 @@ class CreateTableDialog(Adw.Dialog):
                     dlg.add_response('ok', 'OK')
                     dlg.present(self)
                     return
+            default = item.default.strip()
+            if default:
+                for token in forbidden:
+                    if token in default:
+                        dlg = Adw.AlertDialog(
+                            heading='Invalid Default Value',
+                            body=f'Default value for "{item.name or "column"}" contains disallowed characters: "{token}"',
+                        )
+                        dlg.add_response('ok', 'OK')
+                        dlg.present(self)
+                        return
         ddl = self._generate_ddl()
         self._create_btn.set_sensitive(False)
         self._on_save(ddl, self._on_execute_done)
 
     def _on_execute_done(self, error=None):
         if error is None:
+            self.set_can_close(True)
             self.close()
         else:
             self._create_btn.set_sensitive(True)
