@@ -151,6 +151,8 @@ class MembershipsTab(Gtk.Box):
         # Cache: conn id → {role_name: [(group_role, admin_opt), ...]}
         # Prefetched on first load per connection; invalidated on grant/revoke.
         self._cache = {}
+        # In-flight set: conn ids for which a prefetch thread is already running.
+        self._loading = set()
 
         toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         toolbar.set_margin_top(MARGIN_SM)
@@ -191,6 +193,10 @@ class MembershipsTab(Gtk.Box):
             self._populate(rows, None)
             return
         self._status_label.set_label('Loading…')
+        if conn_key in self._loading:
+            # A prefetch is already in-flight; result will populate via _store_cache_and_populate
+            return
+        self._loading.add(conn_key)
         threading.Thread(
             target=self._fetch_all_memberships, args=(conn, role_name), daemon=True
         ).start()
@@ -208,17 +214,25 @@ class MembershipsTab(Gtk.Box):
                 cache.setdefault(member, []).append((group_role, admin_opt))
             GLib.idle_add(self._store_cache_and_populate, conn, cache, role_name)
         except Exception as e:
-            GLib.idle_add(self._populate, None, str(e))
+            GLib.idle_add(self._on_fetch_error, conn, str(e))
+
+    def _on_fetch_error(self, conn, msg):
+        self._loading.discard(id(conn))
+        self._populate(None, msg)
 
     def _store_cache_and_populate(self, conn, cache, role_name):
+        self._loading.discard(id(conn))
         self._cache[id(conn)] = cache
         if self._conn is conn and self._role_name == role_name:
             self._populate(cache.get(role_name, []), None)
 
     def _on_refresh_clicked(self, _btn):
         if self._conn:
-            self._cache.pop(id(self._conn), None)
+            conn_key = id(self._conn)
+            self._cache.pop(conn_key, None)
+            self._loading.discard(conn_key)
             self._status_label.set_label('Loading…')
+            self._loading.add(conn_key)
             threading.Thread(
                 target=self._fetch_all_memberships, args=(self._conn, self._role_name), daemon=True
             ).start()

@@ -100,6 +100,12 @@ class DbBrowser(Gtk.Box):
         self._load_gen = 0
         self._search_debounce_id = None
         self._build_ui()
+        self.connect('destroy', self._on_destroy)
+
+    def _on_destroy(self, _widget):
+        if self._search_debounce_id is not None:
+            GLib.source_remove(self._search_debounce_id)
+            self._search_debounce_id = None
 
     def _build_ui(self):
         # Loading bar
