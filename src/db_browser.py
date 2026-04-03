@@ -14,6 +14,20 @@ COL_CONN = 3
 COL_SCHEMA = 4
 COL_TABLE = 5
 
+_PG_ERROR_MAP = {
+    '42P01': 'This table no longer exists — it may have been dropped.',
+    '42501': "You don't have permission to access this.",
+    '08006': 'Lost connection to the database.',
+    '28P01': 'Authentication failed — check your username and password.',
+}
+
+
+def _friendly_pg_error(e):
+    code = getattr(e, 'pgcode', None) or getattr(e, 'sqlstate', None)
+    if code and code in _PG_ERROR_MAP:
+        return _PG_ERROR_MAP[code]
+    return str(e)
+
 
 class DbBrowser(Gtk.Box):
     __gsignals__ = {
@@ -174,6 +188,37 @@ class DbBrowser(Gtk.Box):
         ))
         self._schema_warning_bar.append(edit_conn_btn)
         self.append(self._schema_warning_bar)
+
+        # Connection error bar (shown when load fails)
+        self._conn_error_bar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self._conn_error_bar.set_margin_start(8)
+        self._conn_error_bar.set_margin_end(6)
+        self._conn_error_bar.set_margin_top(6)
+        self._conn_error_bar.set_margin_bottom(4)
+        self._conn_error_bar.set_visible(False)
+        self._conn_error_label = Gtk.Label()
+        self._conn_error_label.add_css_class('caption')
+        self._conn_error_label.add_css_class('error')
+        self._conn_error_label.set_xalign(0)
+        self._conn_error_label.set_wrap(True)
+        self._conn_error_label.set_hexpand(True)
+        self._conn_error_bar.append(self._conn_error_label)
+        error_btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        error_btn_box.set_margin_top(2)
+        edit_btn = Gtk.Button(label='Edit Connection')
+        edit_btn.add_css_class('flat')
+        edit_btn.add_css_class('caption')
+        edit_btn.connect('clicked', lambda _: self.emit(
+            'edit-connection-requested', self._last_conn
+        ))
+        retry_btn = Gtk.Button(label='Retry')
+        retry_btn.add_css_class('flat')
+        retry_btn.add_css_class('caption')
+        retry_btn.connect('clicked', lambda _: self.load(self._last_conn) if self._last_conn else None)
+        error_btn_box.append(edit_btn)
+        error_btn_box.append(retry_btn)
+        self._conn_error_bar.append(error_btn_box)
+        self.append(self._conn_error_bar)
 
         # Search + New Schema toolbar
         search_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
@@ -389,6 +434,7 @@ class DbBrowser(Gtk.Box):
         self._loading_bar.set_visible(False)
         self._db_switcher_bar.set_visible(False)
         self._schema_warning_bar.set_visible(False)
+        self._conn_error_bar.set_visible(False)
         self._search_entry.set_text('')
         self._search_bar.set_visible(False)
         self._store.clear()
@@ -419,10 +465,15 @@ class DbBrowser(Gtk.Box):
             }
             self._rename_hint = None
         self._store.clear()
+        self._conn_error_bar.set_visible(False)
         self._search_entry.set_text('')
         self._loading_label.set_label('Connecting…')
         self._loading_bar.set_visible(True)
         self._loading_spinner.start()
+        # Placeholder row so the tree area shows loading feedback immediately
+        self._store.append(None, [
+            'content-loading-symbolic', 'Loading…', 'loading', conn, '', ''
+        ])
         threading.Thread(target=self._fetch_schema, args=(conn, gen), daemon=True).start()
 
     def _fetch_schema(self, conn, gen):
@@ -593,7 +644,7 @@ class DbBrowser(Gtk.Box):
                           schema_warning, current_role_attrs, roles_list, gen)
 
         except Exception as e:
-            GLib.idle_add(self._show_error, str(e), gen)
+            GLib.idle_add(self._show_error, _friendly_pg_error(e), gen)
 
     def _populate(self, conn, schema_items, all_databases,
                   schema_warning, current_role_attrs, roles_list, gen):
@@ -601,6 +652,7 @@ class DbBrowser(Gtk.Box):
             return
         self._loading_spinner.stop()
         self._loading_bar.set_visible(False)
+        self._conn_error_bar.set_visible(False)
         self._store.clear()
 
         # Emit badge signal so window.py can update the connection row indicator
@@ -770,9 +822,8 @@ class DbBrowser(Gtk.Box):
         self._loading_spinner.stop()
         self._loading_bar.set_visible(False)
         self._store.clear()
-        self._store.append(None, [
-            'dialog-error-symbolic', f'Error: {error_msg}', 'error', None, '', ''
-        ])
+        self._conn_error_label.set_label(error_msg)
+        self._conn_error_bar.set_visible(True)
 
     def get_loaded_schemas(self):
         """Return list of schema names currently loaded in the tree."""

@@ -54,6 +54,20 @@ def _apply_scheme(buf, dark):
 
 _PAGE_SIZES = [100, 500, 1000]
 
+_PG_ERROR_MAP = {
+    '42P01': 'This table no longer exists — it may have been dropped.',
+    '42501': "You don't have permission to access this table.",
+    '08006': 'Lost connection to the database.',
+    '28P01': 'Authentication failed — check your username and password.',
+}
+
+
+def _friendly_pg_error(e):
+    code = getattr(e, 'pgcode', None) or getattr(e, 'sqlstate', None)
+    if code and code in _PG_ERROR_MAP:
+        return _PG_ERROR_MAP[code]
+    return str(e)
+
 _SCHEMA_SQL = """
     SELECT column_name, data_type,
            COALESCE(character_maximum_length::text,
@@ -1678,7 +1692,7 @@ class TablePanel(Gtk.Box):
                 indexes_rows, ddl, definition, data_cols, data_rows, stats_row, gen,
             )
         except Exception as e:
-            GLib.idle_add(self._show_error, str(e), gen)
+            GLib.idle_add(self._show_error, _friendly_pg_error(e), gen)
 
     def _populate(self, schema_rows, keys_rows, relations_rows, triggers_rows,
                   indexes_rows, ddl, definition, data_cols, data_rows, stats_row, gen):

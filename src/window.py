@@ -421,6 +421,34 @@ class TuskWindow(Adw.ApplicationWindow):
         tabs_box.append(self._tab_view)
         self._main_stack.add_named(tabs_box, 'tabs')
 
+        # Welcome state: shown when no connections exist yet
+        welcome = Adw.StatusPage()
+        welcome.set_title('Welcome to Tusk')
+        welcome.set_description('Tusk is a native PostgreSQL client for GNOME.')
+        welcome.set_icon_name('xyz.shapemachine.tusk-gnome')
+
+        welcome_btn = Gtk.Button(label='Add your first connection')
+        welcome_btn.add_css_class('suggested-action')
+        welcome_btn.add_css_class('pill')
+        welcome_btn.set_halign(Gtk.Align.CENTER)
+        welcome_btn.connect('clicked', self._on_add_connection)
+
+        welcome_hint = Gtk.Label(
+            label="You'll need: hostname, port (default 5432), database name, and credentials."
+        )
+        welcome_hint.add_css_class('dim-label')
+        welcome_hint.set_wrap(True)
+        welcome_hint.set_halign(Gtk.Align.CENTER)
+        welcome_hint.set_margin_top(8)
+
+        welcome_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        welcome_box.set_halign(Gtk.Align.CENTER)
+        welcome_box.append(welcome_btn)
+        welcome_box.append(welcome_hint)
+        welcome.set_child(welcome_box)
+
+        self._main_stack.add_named(welcome, 'welcome')
+
         self._main_stack.set_visible_child_name('empty')
         main_box.append(self._main_stack)
         return main_box
@@ -428,8 +456,11 @@ class TuskWindow(Adw.ApplicationWindow):
     # ── Connections ───────────────────────────────────────────────────────────
 
     def _load_connections(self):
-        for conn in self._store.list():
+        connections = list(self._store.list())
+        for conn in connections:
             self._add_connection_row(conn)
+        if not connections:
+            self._main_stack.set_visible_child_name('welcome')
 
     @staticmethod
     def _conn_subtitle(conn):
@@ -597,6 +628,8 @@ class TuskWindow(Adw.ApplicationWindow):
         except KeyringUnavailableError as e:
             self._show_keyring_error(str(e))
             return
+        if self._main_stack.get_visible_child_name() == 'welcome':
+            self._main_stack.set_visible_child_name('empty')
         self._add_connection_row(conn)
 
     def _on_edit_connection(self, row):
@@ -998,13 +1031,29 @@ class TuskWindow(Adw.ApplicationWindow):
         body = ('This removes the view definition.' if is_view else
                 'All data will be permanently deleted. This action cannot be undone.')
 
+        qi = lambda n: '"' + n.replace('"', '""') + '"'
+        obj_type = 'VIEW' if is_view else 'TABLE'
+        preview_ddl = f'DROP {obj_type} {qi(schema)}.{qi(table)};'
+        sql_label = Gtk.Label(label=preview_ddl)
+        sql_label.add_css_class('monospace')
+        sql_label.set_xalign(0)
+        sql_label.set_selectable(True)
+        sql_label.set_wrap(True)
+        sql_label.set_margin_top(4)
+
         cascade_check = Gtk.CheckButton(label='Drop with CASCADE — also drops all dependent views and constraints')
         cascade_check.set_margin_top(8)
         cascade_check.set_margin_start(4)
 
+        if is_view:
+            extra = sql_label
+        else:
+            extra = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            extra.append(sql_label)
+            extra.append(cascade_check)
+
         dialog = Adw.AlertDialog(heading=heading, body=body)
-        if not is_view:
-            dialog.set_extra_child(cascade_check)
+        dialog.set_extra_child(extra)
         dialog.add_response('cancel', 'Cancel')
         drop_label = 'Drop View' if is_view else 'Drop Table'
         dialog.add_response('drop', drop_label)
@@ -1013,8 +1062,6 @@ class TuskWindow(Adw.ApplicationWindow):
         dialog.set_close_response('cancel')
 
         def execute_drop(cascade):
-            obj_type = 'VIEW' if is_view else 'TABLE'
-            qi = lambda n: '"' + n.replace('"', '""') + '"'
             ddl = f'DROP {obj_type} {qi(schema)}.{qi(table)}'
             if cascade:
                 ddl += ' CASCADE'
@@ -1049,15 +1096,28 @@ class TuskWindow(Adw.ApplicationWindow):
     # ── Truncate Table (from browser right-click) ─────────────────────────────
 
     def _on_truncate_table_requested(self, _browser, conn, schema, table):
+        qi = lambda n: '"' + n.replace('"', '""') + '"'
+        preview_ddl = f'TRUNCATE TABLE {qi(schema)}.{qi(table)};'
+        sql_label = Gtk.Label(label=preview_ddl)
+        sql_label.add_css_class('monospace')
+        sql_label.set_xalign(0)
+        sql_label.set_selectable(True)
+        sql_label.set_wrap(True)
+        sql_label.set_margin_top(4)
+
         restart_check = Gtk.CheckButton(label='Restart identity sequences (RESTART IDENTITY)')
         restart_check.set_margin_top(8)
         restart_check.set_margin_start(4)
+
+        extra = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        extra.append(sql_label)
+        extra.append(restart_check)
 
         dialog = Adw.AlertDialog(
             heading=f'Truncate "{schema}.{table}"?',
             body='Truncate empties the table but keeps its structure and indexes. This cannot be undone.',
         )
-        dialog.set_extra_child(restart_check)
+        dialog.set_extra_child(extra)
         dialog.add_response('cancel', 'Cancel')
         dialog.add_response('truncate', 'Truncate')
         dialog.set_response_appearance('truncate', Adw.ResponseAppearance.DESTRUCTIVE)
@@ -1067,7 +1127,6 @@ class TuskWindow(Adw.ApplicationWindow):
         def on_response(_d, response):
             if response != 'truncate':
                 return
-            qi = lambda n: '"' + n.replace('"', '""') + '"'
             ddl = f'TRUNCATE TABLE {qi(schema)}.{qi(table)}'
             if restart_check.get_active():
                 ddl += ' RESTART IDENTITY'
@@ -1337,15 +1396,28 @@ class TuskWindow(Adw.ApplicationWindow):
         dlg.present(self)
 
     def _on_drop_schema_requested(self, _browser, conn, schema):
+        qi = lambda n: '"' + n.replace('"', '""') + '"'
+        preview_ddl = f'DROP SCHEMA {qi(schema)};'
+        sql_label = Gtk.Label(label=preview_ddl)
+        sql_label.add_css_class('monospace')
+        sql_label.set_xalign(0)
+        sql_label.set_selectable(True)
+        sql_label.set_wrap(True)
+        sql_label.set_margin_top(4)
+
         cascade_check = Gtk.CheckButton(label='Drop with CASCADE — also drops all tables, views and other objects in this schema')
         cascade_check.set_margin_top(8)
         cascade_check.set_margin_start(4)
+
+        extra = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        extra.append(sql_label)
+        extra.append(cascade_check)
 
         dialog = Adw.AlertDialog(
             heading=f'Drop schema "{schema}"?',
             body='This will permanently remove the schema. Non-empty schemas require CASCADE.',
         )
-        dialog.set_extra_child(cascade_check)
+        dialog.set_extra_child(extra)
         dialog.add_response('cancel', 'Cancel')
         dialog.add_response('drop', 'Drop Schema')
         dialog.set_response_appearance('drop', Adw.ResponseAppearance.DESTRUCTIVE)

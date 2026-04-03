@@ -73,7 +73,7 @@ class ConnectionDialog(Adw.Window):
         name_group.add(self._name_row)
 
         # ── Database ─────────────────────────────────────────────────────────
-        details_group = Adw.PreferencesGroup(title='Database')
+        details_group = Adw.PreferencesGroup(title='Server')
 
         self._host_row = Adw.EntryRow(title='Host')
         self._port_row = Adw.EntryRow(title='Port')
@@ -191,7 +191,7 @@ class ConnectionDialog(Adw.Window):
         self._default_schema_row.set_text(conn.get('default_schema', '') if conn else '')
 
         self._keyring_warning = Gtk.Label(
-            label='Could not load passwords from keyring. Make sure a secrets service is running.'
+            label="Passwords can't be saved. GNOME Keyring isn't running — you'll need to re-enter your password each time you open Tusk."
         )
         self._keyring_warning.add_css_class('warning')
         self._keyring_warning.set_wrap(True)
