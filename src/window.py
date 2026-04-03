@@ -18,6 +18,7 @@ from sql_editor import SqlEditor
 from table_panel import TablePanel
 from role_panel import RolePanel
 from function_editor import FunctionEditor
+from command_palette import CommandPalette
 
 
 class TuskWindow(Adw.ApplicationWindow):
@@ -64,6 +65,7 @@ class TuskWindow(Adw.ApplicationWindow):
             a.connect('activate', cb)
             self.add_action(a)
 
+        add('quick-open',     lambda *_: self._on_quick_open())
         add('close-tab',      lambda *_: self._close_current_tab())
         add('next-tab',       lambda *_: self._tab_view.select_next_page())
         add('prev-tab',       lambda *_: self._tab_view.select_previous_page())
@@ -203,6 +205,17 @@ class TuskWindow(Adw.ApplicationWindow):
               <object class="GtkShortcutsShortcut">
                 <property name="title">Save File</property>
                 <property name="accelerator">&lt;ctrl&gt;s</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkShortcutsGroup">
+            <property name="title">Navigation</property>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Quick Open</property>
+                <property name="accelerator">&lt;ctrl&gt;p</property>
               </object>
             </child>
           </object>
@@ -955,6 +968,25 @@ class TuskWindow(Adw.ApplicationWindow):
 
         self._show_tabs()
         self._tab_view.set_selected_page(page)
+
+    def _on_quick_open(self):
+        items = self._browser.get_palette_items()
+        if not items:
+            self.show_toast('No tables loaded — connect to a database first')
+            return
+        palette = CommandPalette(items)
+        palette.connect('item-activated', self._on_palette_item_activated)
+        palette.present(self)
+
+    def _on_palette_item_activated(self, _palette, conn, schema, name, item_type):
+        if item_type == 'function':
+            # name is 'proname(args)' — split to recover fn_name and fn_args
+            paren = name.index('(')
+            fn_name = name[:paren]
+            fn_args = name[paren + 1:-1]
+            self._on_function_selected(None, conn, schema, fn_name, fn_args)
+        else:
+            self._on_table_selected(None, conn, schema, name, item_type)
 
     def _on_file_activated(self, _explorer, file_path):
         tab_id = f'file:{file_path}'

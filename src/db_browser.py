@@ -384,6 +384,37 @@ class DbBrowser(Gtk.Box):
             self._restore_expansion_node(child, keys)
             child = self._store.iter_next(child)
 
+    def get_palette_items(self):
+        """Return a list of (conn, schema, name, item_type, display) for all
+        table, view and function nodes currently in the tree store.
+
+        For functions, *name* is the full label 'proname(args)' so the caller
+        can recover fn_name and fn_args by parsing it.
+        """
+        results = []
+        _NAVIGABLE = {'table', 'view', 'function'}
+
+        def _walk(it):
+            while it:
+                item_type = self._store.get_value(it, COL_TYPE)
+                if item_type in _NAVIGABLE:
+                    conn   = self._store.get_value(it, COL_CONN)
+                    schema = self._store.get_value(it, COL_SCHEMA)
+                    label  = self._store.get_value(it, COL_LABEL)
+                    # For functions, label is 'name(args)'; for tables/views it
+                    # equals COL_TABLE.  Use label as the canonical name so the
+                    # receiver can always parse fn_name/fn_args from it.
+                    name   = label
+                    display = f'{schema}.{label}' if schema else label
+                    results.append((conn, schema, name, item_type, display))
+                child = self._store.iter_children(it)
+                if child:
+                    _walk(child)
+                it = self._store.iter_next(it)
+
+        _walk(self._store.get_iter_first())
+        return results
+
     def _expand_schema(self, schema_name):
         """Expand the row for *schema_name* in the tree."""
         it = self._store.get_iter_first()

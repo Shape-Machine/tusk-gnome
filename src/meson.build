@@ -30,6 +30,7 @@ tusk_sources = [
   'connection_dialog.py',
   'connections.py',
   'data_grid.py',
+  'command_palette.py',
   'db_browser.py',
   'table_panel.py',
   'role_panel.py',
