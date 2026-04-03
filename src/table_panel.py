@@ -12,6 +12,7 @@ from gi.repository import Gtk, Adw, GLib, Gio, GObject, Pango, Gdk
 
 import prefs
 from data_grid import make_column_view, update_column_view, make_pinnable_column_view, PinColumnView
+from pg_errors import friendly_pg_error as _friendly_pg_error
 
 try:
     gi.require_version('GtkSource', '5')
@@ -53,20 +54,6 @@ def _apply_scheme(buf, dark):
         buf.set_style_scheme(scheme)
 
 _PAGE_SIZES = [100, 500, 1000]
-
-_PG_ERROR_MAP = {
-    '42P01': 'This table no longer exists — it may have been dropped.',
-    '42501': "You don't have permission to access this table.",
-    '08006': 'Lost connection to the database.',
-    '28P01': 'Authentication failed — check your username and password.',
-}
-
-
-def _friendly_pg_error(e):
-    code = getattr(e, 'pgcode', None) or getattr(e, 'sqlstate', None)
-    if code and code in _PG_ERROR_MAP:
-        return _PG_ERROR_MAP[code]
-    return str(e)
 
 _SCHEMA_SQL = """
     SELECT column_name, data_type,
@@ -1968,6 +1955,9 @@ class TablePanel(Gtk.Box):
             # Exclude PK columns from SET clause — they identify the row, not change it
             pk_set = set(pk_cols)
             set_cols = [c for c in new_values if c not in pk_set]
+            if not set_cols:
+                GLib.idle_add(self._show_toast, 'Nothing to update')
+                return
             set_vals = [new_values[c] for c in set_cols]
             where_vals = [original_values[c] for c in pk_cols]
 

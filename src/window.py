@@ -593,6 +593,8 @@ class TuskWindow(Adw.ApplicationWindow):
         dlg.present()
 
     def _on_pgpass_entries_selected(self, _dlg, entries):
+        if self._main_stack.get_visible_child_name() == 'welcome':
+            self._main_stack.set_visible_child_name('empty')
         for entry in entries:
             conn = {
                 'name': (
@@ -704,6 +706,8 @@ class TuskWindow(Adw.ApplicationWindow):
         if self._active_conn_id == conn['id']:
             self._set_active_conn(None)
             self._browser.clear()
+        if self._conn_list.get_first_child() is None:
+            self._main_stack.set_visible_child_name('welcome')
 
     def _conn_with_password(self, conn):
         return {
