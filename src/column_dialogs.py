@@ -117,6 +117,21 @@ def _attach_type_picker(entry_row):
 
 
 # ---------------------------------------------------------------------------
+# Column definition GObject (backing model for CreateTableDialog ColumnView)
+# ---------------------------------------------------------------------------
+
+class _ColDef(GObject.Object):
+    """One column definition row in the Create Table grid."""
+    __gtype_name__ = 'TuskColDef'
+
+    name     = GObject.Property(type=str,  default='')
+    pg_type  = GObject.Property(type=str,  default='text')
+    nullable = GObject.Property(type=bool, default=True)
+    is_pk    = GObject.Property(type=bool, default=False)
+    default  = GObject.Property(type=str,  default='')
+
+
+# ---------------------------------------------------------------------------
 # SQL preview helpers (shared by CreateTableDialog and AddColumnDialog)
 # ---------------------------------------------------------------------------
 
@@ -1048,11 +1063,10 @@ class CreateTableDialog(Adw.Dialog):
         prefill_columns – optional list of dicts: {name, type, nullable, default, is_pk}
                           used by Clone Structure to pre-populate column rows
         """
-        super().__init__(title='Create Table', content_width=540, content_height=520)
+        super().__init__(title='Create Table', content_width=600, content_height=520)
         self._on_save = on_save
         self._schemas = schemas if schemas else ['public']
-        self._col_rows = []
-        self._pk_updating = False
+        self._store = Gio.ListStore(item_type=_ColDef)
 
         header = Adw.HeaderBar()
         self._create_btn = Gtk.Button(label='Create')
@@ -1105,26 +1119,10 @@ class CreateTableDialog(Adw.Dialog):
         col_header.append(add_col_btn)
         outer.append(col_header)
 
-        self._col_list = Gtk.ListBox()
-        self._col_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
-        self._col_list.add_css_class('boxed-list')
+        col_view = self._build_col_view()
         col_frame = Gtk.Frame()
-        col_frame.set_child(self._col_list)
+        col_frame.set_child(col_view)
         outer.append(col_frame)
-
-        reorder_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        reorder_box.set_halign(Gtk.Align.START)
-        self._up_btn = Gtk.Button(icon_name='go-up-symbolic')
-        self._up_btn.add_css_class('flat')
-        self._up_btn.set_tooltip_text('Move column up')
-        self._up_btn.connect('clicked', self._move_up)
-        self._down_btn = Gtk.Button(icon_name='go-down-symbolic')
-        self._down_btn.add_css_class('flat')
-        self._down_btn.set_tooltip_text('Move column down')
-        self._down_btn.connect('clicked', self._move_down)
-        reorder_box.append(self._up_btn)
-        reorder_box.append(self._down_btn)
-        outer.append(reorder_box)
 
         # ── DDL preview (collapsible) ───────────────────────────────────────
         self._preview_buf, preview_view = _make_sql_preview_view()
@@ -1220,109 +1218,285 @@ class CreateTableDialog(Adw.Dialog):
             return self._schemas[idx] if 0 <= idx < len(self._schemas) else self._schemas[0]
         return self._schemas[0]
 
+    # ── ColumnView builder ───────────────────────────────────────────────────
+
+    def _build_col_view(self):
+        col_view = Gtk.ColumnView()
+        col_view.set_show_row_separators(True)
+        col_view.set_show_column_separators(True)
+        col_view.set_hexpand(True)
+        col_view.set_model(Gtk.NoSelection(model=self._store))
+
+        _ROW_HEIGHT = 38  # approximate px per row for drop-position calc
+
+        # ── Drag-to-reorder ──────────────────────────────────────────────────
+        drop_target = Gtk.DropTarget.new(GObject.TYPE_UINT, Gdk.DragAction.MOVE)
+
+        def _on_drop(_target, src_pos, _x, y):
+            n = self._store.get_n_items()
+            dst_pos = max(0, min(int(y / _ROW_HEIGHT), n - 1))
+            if src_pos == dst_pos:
+                return False
+            item = self._store.get_item(src_pos)
+            self._store.remove(src_pos)
+            self._store.insert(dst_pos, item)
+            self._on_form_changed()
+            return True
+
+        drop_target.connect('drop', _on_drop)
+        col_view.add_controller(drop_target)
+
+        # ── Handle column (drag grip) ────────────────────────────────────────
+        def _handle_setup(_f, li):
+            icon = Gtk.Image.new_from_icon_name('list-drag-handle-symbolic')
+            icon.add_css_class('dim-label')
+            icon.set_margin_start(4)
+            icon.set_margin_end(4)
+            drag_src = Gtk.DragSource()
+            drag_src.set_actions(Gdk.DragAction.MOVE)
+
+            def _prepare(_src, _x, _y):
+                pos = li.get_position()
+                return Gdk.ContentProvider.new_for_value(GObject.Value(GObject.TYPE_UINT, pos))
+
+            drag_src.connect('prepare', _prepare)
+            icon.add_controller(drag_src)
+            li.set_child(icon)
+
+        handle_factory = Gtk.SignalListItemFactory()
+        handle_factory.connect('setup', _handle_setup)
+        handle_col = Gtk.ColumnViewColumn(title='', factory=handle_factory)
+        handle_col.set_resizable(False)
+        col_view.append_column(handle_col)
+
+        # ── PK column ────────────────────────────────────────────────────────
+        def _pk_setup(_f, li):
+            cb = Gtk.CheckButton()
+            cb.set_tooltip_text('Primary key')
+            cb.set_halign(Gtk.Align.CENTER)
+            cb.set_valign(Gtk.Align.CENTER)
+            li.set_child(cb)
+
+        def _pk_bind(_f, li):
+            cb = li.get_child()
+            item = li.get_item()
+            cb.set_active(item.is_pk)
+
+            def _toggled(b):
+                if b.get_active():
+                    n = self._store.get_n_items()
+                    for i in range(n):
+                        other = self._store.get_item(i)
+                        if other is not item:
+                            other.set_property('is_pk', False)
+                item.set_property('is_pk', b.get_active())
+                self._on_form_changed()
+
+            cb._handler = cb.connect('toggled', _toggled)
+
+        def _pk_unbind(_f, li):
+            cb = li.get_child()
+            if hasattr(cb, '_handler'):
+                cb.disconnect(cb._handler)
+                del cb._handler
+
+        pk_factory = Gtk.SignalListItemFactory()
+        pk_factory.connect('setup', _pk_setup)
+        pk_factory.connect('bind', _pk_bind)
+        pk_factory.connect('unbind', _pk_unbind)
+        pk_col = Gtk.ColumnViewColumn(title='PK', factory=pk_factory)
+        pk_col.set_resizable(False)
+        col_view.append_column(pk_col)
+
+        # ── Name column ──────────────────────────────────────────────────────
+        def _name_setup(_f, li):
+            el = Gtk.EditableLabel(text='')
+            el.set_hexpand(True)
+            el.set_alignment(0)
+            li.set_child(el)
+
+        def _name_bind(_f, li):
+            el = li.get_child()
+            item = li.get_item()
+            el.set_text(item.name)
+            el._binding = item.bind_property(
+                'name', el, 'text',
+                GObject.BindingFlags.BIDIRECTIONAL | GObject.BindingFlags.SYNC_CREATE,
+            )
+            el._handler = el.connect('changed', lambda *_: self._on_form_changed())
+
+        def _name_unbind(_f, li):
+            el = li.get_child()
+            if hasattr(el, '_binding'):
+                el._binding.unbind()
+                del el._binding
+            if hasattr(el, '_handler'):
+                el.disconnect(el._handler)
+                del el._handler
+
+        name_factory = Gtk.SignalListItemFactory()
+        name_factory.connect('setup', _name_setup)
+        name_factory.connect('bind', _name_bind)
+        name_factory.connect('unbind', _name_unbind)
+        name_col = Gtk.ColumnViewColumn(title='Name', factory=name_factory)
+        name_col.set_expand(True)
+        name_col.set_resizable(True)
+        col_view.append_column(name_col)
+
+        # ── Type column ──────────────────────────────────────────────────────
+        def _type_setup(_f, li):
+            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+            entry = Gtk.Entry()
+            entry.set_has_frame(False)
+            entry.set_hexpand(True)
+            entry.set_placeholder_text('type…')
+            box.append(entry)
+            picker_btn = _make_type_picker_popover(entry)
+            box.append(picker_btn)
+            li.set_child(box)
+
+        def _type_bind(_f, li):
+            box = li.get_child()
+            entry = box.get_first_child()
+            item = li.get_item()
+            entry.set_text(item.pg_type or 'text')
+            entry._binding = item.bind_property(
+                'pg_type', entry, 'text',
+                GObject.BindingFlags.BIDIRECTIONAL | GObject.BindingFlags.SYNC_CREATE,
+            )
+            entry._handler = entry.connect('changed', lambda *_: self._on_form_changed())
+
+        def _type_unbind(_f, li):
+            entry = li.get_child().get_first_child()
+            if hasattr(entry, '_binding'):
+                entry._binding.unbind()
+                del entry._binding
+            if hasattr(entry, '_handler'):
+                entry.disconnect(entry._handler)
+                del entry._handler
+
+        type_factory = Gtk.SignalListItemFactory()
+        type_factory.connect('setup', _type_setup)
+        type_factory.connect('bind', _type_bind)
+        type_factory.connect('unbind', _type_unbind)
+        type_col = Gtk.ColumnViewColumn(title='Type', factory=type_factory)
+        type_col.set_expand(True)
+        type_col.set_resizable(True)
+        col_view.append_column(type_col)
+
+        # ── Nullable column ──────────────────────────────────────────────────
+        def _null_setup(_f, li):
+            cb = Gtk.CheckButton()
+            cb.set_tooltip_text('Allow NULL values')
+            cb.set_halign(Gtk.Align.CENTER)
+            cb.set_valign(Gtk.Align.CENTER)
+            li.set_child(cb)
+
+        def _null_bind(_f, li):
+            cb = li.get_child()
+            item = li.get_item()
+            cb.set_active(item.nullable)
+            cb._binding = item.bind_property(
+                'nullable', cb, 'active',
+                GObject.BindingFlags.BIDIRECTIONAL | GObject.BindingFlags.SYNC_CREATE,
+            )
+            cb._handler = cb.connect('toggled', lambda *_: self._on_form_changed())
+
+        def _null_unbind(_f, li):
+            cb = li.get_child()
+            if hasattr(cb, '_binding'):
+                cb._binding.unbind()
+                del cb._binding
+            if hasattr(cb, '_handler'):
+                cb.disconnect(cb._handler)
+                del cb._handler
+
+        null_factory = Gtk.SignalListItemFactory()
+        null_factory.connect('setup', _null_setup)
+        null_factory.connect('bind', _null_bind)
+        null_factory.connect('unbind', _null_unbind)
+        null_col = Gtk.ColumnViewColumn(title='Nullable', factory=null_factory)
+        null_col.set_resizable(False)
+        col_view.append_column(null_col)
+
+        # ── Default column ───────────────────────────────────────────────────
+        def _default_setup(_f, li):
+            el = Gtk.EditableLabel(text='')
+            el.set_hexpand(True)
+            el.set_alignment(0)
+            li.set_child(el)
+
+        def _default_bind(_f, li):
+            el = li.get_child()
+            item = li.get_item()
+            el.set_text(item.default or '')
+            el._binding = item.bind_property(
+                'default', el, 'text',
+                GObject.BindingFlags.BIDIRECTIONAL | GObject.BindingFlags.SYNC_CREATE,
+            )
+
+        def _default_unbind(_f, li):
+            el = li.get_child()
+            if hasattr(el, '_binding'):
+                el._binding.unbind()
+                del el._binding
+
+        default_factory = Gtk.SignalListItemFactory()
+        default_factory.connect('setup', _default_setup)
+        default_factory.connect('bind', _default_bind)
+        default_factory.connect('unbind', _default_unbind)
+        default_col = Gtk.ColumnViewColumn(title='Default', factory=default_factory)
+        default_col.set_expand(True)
+        default_col.set_resizable(True)
+        col_view.append_column(default_col)
+
+        # ── Remove column ────────────────────────────────────────────────────
+        def _rm_setup(_f, li):
+            btn = Gtk.Button(icon_name='list-remove-symbolic')
+            btn.add_css_class('flat')
+            btn.add_css_class('circular')
+            btn.set_tooltip_text('Remove column')
+            btn.set_valign(Gtk.Align.CENTER)
+            li.set_child(btn)
+
+        def _rm_bind(_f, li):
+            btn = li.get_child()
+            item = li.get_item()
+
+            def _clicked(_b):
+                pos = self._store.find(item)[1]
+                self._store.remove(pos)
+                self._on_form_changed()
+
+            btn._handler = btn.connect('clicked', _clicked)
+
+        def _rm_unbind(_f, li):
+            btn = li.get_child()
+            if hasattr(btn, '_handler'):
+                btn.disconnect(btn._handler)
+                del btn._handler
+
+        rm_factory = Gtk.SignalListItemFactory()
+        rm_factory.connect('setup', _rm_setup)
+        rm_factory.connect('bind', _rm_bind)
+        rm_factory.connect('unbind', _rm_unbind)
+        rm_col = Gtk.ColumnViewColumn(title='', factory=rm_factory)
+        rm_col.set_resizable(False)
+        col_view.append_column(rm_col)
+
+        return col_view
+
+    # ── Store helpers ────────────────────────────────────────────────────────
+
     def _add_col_row(self, name='', pg_type='text', nullable=True, default='', is_pk=False):
-        row = Gtk.ListBoxRow()
-
-        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-
-        name_entry = Adw.EntryRow(title='Name')
-        name_entry.set_text(name)
-        name_entry.connect('changed', self._on_form_changed)
-
-        type_entry = Adw.EntryRow(title='Type')
-        type_entry.set_text(pg_type or 'text')
-        _attach_type_picker(type_entry)
-        type_entry.connect('changed', self._on_form_changed)
-
-        null_btn = Adw.SwitchRow(title='Nullable', subtitle='Allow NULL values')
-        null_btn.set_active(nullable)
-        null_btn.connect('notify::active', lambda *_: self._on_form_changed())
-
-        pk_btn = Adw.SwitchRow(title='Primary key')
-        pk_btn.set_active(is_pk)
-        pk_btn.connect('notify::active', lambda r, _p, rw=row: self._on_pk_toggled(r, rw))
-
-        default_entry = Adw.EntryRow(title='Default value')
-        default_entry.set_text(default or '')
-        default_entry.connect('changed', self._on_form_changed)
-
-        rm_btn = Gtk.Button(icon_name='list-remove-symbolic')
-        rm_btn.add_css_class('flat')
-        rm_btn.set_tooltip_text('Remove column')
-        rm_btn.set_valign(Gtk.Align.CENTER)
-        rm_btn.connect('clicked', self._remove_col_row, row)
-        name_entry.add_suffix(rm_btn)
-
-        inner.append(name_entry)
-        inner.append(type_entry)
-        inner.append(null_btn)
-        inner.append(pk_btn)
-        inner.append(default_entry)
-        row.set_child(inner)
-
-        row._name_entry = name_entry
-        row._type_entry = type_entry
-        row._null_btn = null_btn
-        row._pk_btn = pk_btn
-        row._default_entry = default_entry
-
-        self._col_list.append(row)
-        self._col_rows.append(row)
-        self._on_form_changed()
-        if not name:
-            name_entry.grab_focus()
-
-    def _remove_col_row(self, _btn, row):
-        self._col_list.remove(row)
-        self._col_rows.remove(row)
-        self._on_form_changed()
-
-    def _on_pk_toggled(self, switch_row, row):
-        if self._pk_updating:
-            return
-        self._pk_updating = True
-        if switch_row.get_active():
-            for r in self._col_rows:
-                if r is not row and r._pk_btn.get_active():
-                    r._pk_btn.set_active(False)
-        self._pk_updating = False
-        self._on_form_changed()
-
-    def _selected_idx(self):
-        row = self._col_list.get_selected_row()
-        if row is None or row not in self._col_rows:
-            return -1
-        return self._col_rows.index(row)
-
-    def _move_up(self, _btn):
-        idx = self._selected_idx()
-        if idx <= 0:
-            return
-        self._col_rows.insert(idx - 1, self._col_rows.pop(idx))
-        self._rebuild_col_list(idx - 1)
-
-    def _move_down(self, _btn):
-        idx = self._selected_idx()
-        if idx < 0 or idx >= len(self._col_rows) - 1:
-            return
-        self._col_rows.insert(idx + 1, self._col_rows.pop(idx))
-        self._rebuild_col_list(idx + 1)
-
-    def _rebuild_col_list(self, select_idx=None):
-        child = self._col_list.get_first_child()
-        while child:
-            nxt = child.get_next_sibling()
-            self._col_list.remove(child)
-            child = nxt
-        for row in self._col_rows:
-            self._col_list.append(row)
-        if select_idx is not None and 0 <= select_idx < len(self._col_rows):
-            self._col_list.select_row(self._col_rows[select_idx])
+        item = _ColDef(name=name, pg_type=pg_type or 'text',
+                       nullable=nullable, is_pk=is_pk, default=default or '')
+        self._store.append(item)
         self._on_form_changed()
 
     def _generate_ddl(self):
-        def qi(name):
-            return '"' + name.replace('"', '""') + '"'
+        def qi(s):
+            return '"' + s.replace('"', '""') + '"'
 
         schema = self._get_schema()
         table = self._name_row.get_text().strip()
@@ -1331,21 +1505,19 @@ class CreateTableDialog(Adw.Dialog):
 
         col_defs = []
         pk_cols = []
-        for row in self._col_rows:
-            name = row._name_entry.get_text().strip()
-            pg_type = row._type_entry.get_text().strip() or 'text'
-            nullable = row._null_btn.get_active()
-            is_pk = row._pk_btn.get_active()
-            default = row._default_entry.get_text().strip()
+        for i in range(self._store.get_n_items()):
+            item = self._store.get_item(i)
+            name = item.name.strip()
+            pg_type = item.pg_type.strip() or 'text'
             if not name:
                 continue
             parts = [f'{qi(name)} {pg_type}']
-            if not nullable:
+            if not item.nullable:
                 parts.append('NOT NULL')
-            if default:
-                parts.append(f'DEFAULT {default}')
+            if item.default.strip():
+                parts.append(f'DEFAULT {item.default.strip()}')
             col_defs.append('    ' + ' '.join(parts))
-            if is_pk:
+            if item.is_pk:
                 pk_cols.append(name)
 
         if pk_cols:
@@ -1362,7 +1534,10 @@ class CreateTableDialog(Adw.Dialog):
 
     def _on_form_changed(self, *_):
         table = self._name_row.get_text().strip()
-        has_named_col = any(r._name_entry.get_text().strip() for r in self._col_rows)
+        has_named_col = any(
+            self._store.get_item(i).name.strip()
+            for i in range(self._store.get_n_items())
+        )
         self._create_btn.set_sensitive(bool(table) and has_named_col)
         self._preview_buf.set_text(self._generate_ddl())
 
@@ -1376,8 +1551,8 @@ class CreateTableDialog(Adw.Dialog):
 
     def _on_create_clicked(self, _btn):
         forbidden = (';', '--', '/*', '*/', '\x00')
-        for row in self._col_rows:
-            pg_type = row._type_entry.get_text().strip()
+        for i in range(self._store.get_n_items()):
+            pg_type = self._store.get_item(i).pg_type.strip()
             for token in forbidden:
                 if token in pg_type:
                     dlg = Adw.AlertDialog(
