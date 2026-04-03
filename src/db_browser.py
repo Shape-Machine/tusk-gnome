@@ -5,7 +5,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Gtk, GLib, GObject, Gdk, Gio
+from gi.repository import Gtk, Adw, GLib, GObject, Gdk, Gio
 
 from pg_errors import friendly_pg_error as _friendly_pg_error
 from style import MARGIN_XS, MARGIN_SM, MARGIN_MD
