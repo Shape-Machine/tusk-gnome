@@ -1327,7 +1327,7 @@ class CreateTableDialog(Adw.Dialog):
             entry._activate_handler = entry.connect('activate', lambda *_: self._add_col_row_after(item))
             if getattr(self, '_pending_focus_item', None) is item:
                 self._pending_focus_item = None
-                GLib.idle_add(entry.grab_focus)
+                GLib.idle_add(lambda e=entry: (e.grab_focus(), GLib.SOURCE_REMOVE)[1])
 
         def _name_unbind(_f, li):
             entry = li.get_child()
