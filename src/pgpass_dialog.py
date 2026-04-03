@@ -85,27 +85,19 @@ def parse_pgpass(path):
     return entries, warnings
 
 
-class PgpassImportDialog(Adw.Window):
+class PgpassImportDialog(Adw.Dialog):
     __gsignals__ = {
         'entries-selected': (GObject.SignalFlags.RUN_FIRST, None, (GObject.TYPE_PYOBJECT,))
     }
 
     def __init__(self, parent, entries, warnings):
-        super().__init__(
-            title='Import from .pgpass',
-            transient_for=parent,
-            modal=True,
-            default_width=460,
-            resizable=False,
-        )
+        super().__init__(title='Import from .pgpass', content_width=460)
         self._entries = entries
         self._switches = []
         self._build_ui(warnings)
 
     def _build_ui(self, warnings):
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         header = Adw.HeaderBar()
-        box.append(header)
 
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
         content.set_margin_top(12)
@@ -114,11 +106,9 @@ class PgpassImportDialog(Adw.Window):
         content.set_margin_end(16)
 
         for warning in warnings:
-            lbl = Gtk.Label(label=warning)
-            lbl.add_css_class('warning')
-            lbl.set_wrap(True)
-            lbl.set_xalign(0)
-            content.append(lbl)
+            banner = Adw.Banner(title=warning)
+            banner.set_revealed(True)
+            content.append(banner)
 
         entries_group = Adw.PreferencesGroup(title='Entries')
 
@@ -148,9 +138,11 @@ class PgpassImportDialog(Adw.Window):
         clamp = Adw.Clamp(maximum_size=420)
         clamp.set_child(content)
         scroll.set_child(clamp)
-        box.append(scroll)
 
-        self.set_content(box)
+        toolbar_view = Adw.ToolbarView()
+        toolbar_view.add_top_bar(header)
+        toolbar_view.set_content(scroll)
+        self.set_child(toolbar_view)
 
     def _on_import(self, _btn):
         selected = [sw._pgpass_entry for sw in self._switches if sw.get_active()]

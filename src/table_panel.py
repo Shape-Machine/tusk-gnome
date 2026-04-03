@@ -13,6 +13,7 @@ from gi.repository import Gtk, Adw, GLib, Gio, GObject, Pango, Gdk
 import prefs
 from data_grid import make_column_view, update_column_view, make_pinnable_column_view, PinColumnView
 from pg_errors import friendly_pg_error as _friendly_pg_error
+from style import MARGIN_XS, MARGIN_SM, MARGIN_MD
 
 try:
     gi.require_version('GtkSource', '5')
@@ -277,10 +278,10 @@ class TablePanel(Gtk.Box):
 
         # Schema toolbar (tables only — hidden for views)
         self._schema_toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        self._schema_toolbar.set_margin_start(6)
-        self._schema_toolbar.set_margin_end(6)
-        self._schema_toolbar.set_margin_top(2)
-        self._schema_toolbar.set_margin_bottom(2)
+        self._schema_toolbar.set_margin_start(MARGIN_SM)
+        self._schema_toolbar.set_margin_end(MARGIN_SM)
+        self._schema_toolbar.set_margin_top(MARGIN_XS)
+        self._schema_toolbar.set_margin_bottom(MARGIN_XS)
         self._schema_toolbar.set_visible(False)
 
         self._schema_count_label = Gtk.Label()
@@ -400,10 +401,10 @@ class TablePanel(Gtk.Box):
         self._data_scroll.set_vexpand(True)
 
         self._data_nav_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        self._data_nav_bar.set_margin_start(6)
-        self._data_nav_bar.set_margin_end(6)
-        self._data_nav_bar.set_margin_top(2)
-        self._data_nav_bar.set_margin_bottom(2)
+        self._data_nav_bar.set_margin_start(MARGIN_SM)
+        self._data_nav_bar.set_margin_end(MARGIN_SM)
+        self._data_nav_bar.set_margin_top(MARGIN_XS)
+        self._data_nav_bar.set_margin_bottom(MARGIN_XS)
         self._data_nav_bar.set_visible(False)
 
         self._data_prev_btn = Gtk.Button(icon_name='go-previous-symbolic')
@@ -459,10 +460,10 @@ class TablePanel(Gtk.Box):
 
         self._filter_entry = Gtk.SearchEntry()
         self._filter_entry.set_placeholder_text('Filter rows…')
-        self._filter_entry.set_margin_start(6)
-        self._filter_entry.set_margin_end(6)
-        self._filter_entry.set_margin_top(4)
-        self._filter_entry.set_margin_bottom(4)
+        self._filter_entry.set_margin_start(MARGIN_SM)
+        self._filter_entry.set_margin_end(MARGIN_SM)
+        self._filter_entry.set_margin_top(MARGIN_XS)
+        self._filter_entry.set_margin_bottom(MARGIN_XS)
         self._filter_entry.connect('search-changed', self._apply_local_filter)
 
         self._insert_btn = Gtk.Button(icon_name='list-add-symbolic')
@@ -544,10 +545,10 @@ class TablePanel(Gtk.Box):
         Returns (toolbar, btn).
         """
         toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        toolbar.set_margin_start(6)
-        toolbar.set_margin_end(6)
-        toolbar.set_margin_top(2)
-        toolbar.set_margin_bottom(2)
+        toolbar.set_margin_start(MARGIN_SM)
+        toolbar.set_margin_end(MARGIN_SM)
+        toolbar.set_margin_top(MARGIN_XS)
+        toolbar.set_margin_bottom(MARGIN_XS)
         toolbar.set_visible(False)
         spacer = Gtk.Box()
         spacer.set_hexpand(True)
@@ -576,7 +577,6 @@ class TablePanel(Gtk.Box):
         if not schema_rows:
             empty = Adw.StatusPage(title='Could not load columns')
             retry_btn = Gtk.Button(label='Retry')
-            retry_btn.add_css_class('pill')
             retry_btn.connect('clicked', lambda _: self._refresh_schema())
             empty.set_child(retry_btn)
             empty.set_vexpand(True)

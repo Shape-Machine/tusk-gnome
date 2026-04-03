@@ -89,41 +89,21 @@ def _attach_type_picker(entry_row):
     list_box.set_selection_mode(Gtk.SelectionMode.NONE)
     list_box.add_css_class('boxed-list-separate')
 
-    def _make_row(name, desc):
-        row = Gtk.ListBoxRow()
-        row._type_name = name
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        box.set_margin_top(6)
-        box.set_margin_bottom(6)
-        box.set_margin_start(10)
-        box.set_margin_end(10)
-        name_lbl = Gtk.Label(label=name)
-        name_lbl.set_xalign(0)
-        name_lbl.set_halign(Gtk.Align.START)
-        desc_lbl = Gtk.Label(label=desc)
-        desc_lbl.set_xalign(0)
-        desc_lbl.add_css_class('caption')
-        desc_lbl.add_css_class('dim-label')
-        box.append(name_lbl)
-        box.append(desc_lbl)
-        row.set_child(box)
-        return row
-
     all_rows = []
     for type_name, desc in _PG_TYPES:
-        r = _make_row(type_name, desc)
-        list_box.append(r)
-        all_rows.append(r)
+        row = Adw.ActionRow(title=type_name, subtitle=desc)
+        list_box.append(row)
+        all_rows.append(row)
 
     def _on_search(entry):
         text = entry.get_text().strip().lower()
         for r in all_rows:
-            r.set_visible(not text or text in r._type_name.lower())
+            r.set_visible(not text or text in r.get_title().lower())
 
     search.connect('search-changed', _on_search)
 
     def _on_row_activated(_lb, row):
-        entry_row.set_text(row._type_name)
+        entry_row.set_text(row.get_title())
         popover.popdown()
 
     list_box.connect('row-activated', _on_row_activated)
@@ -202,34 +182,19 @@ def _make_type_picker_popover(entry):
 
     all_rows = []
     for type_name, desc in _PG_TYPES:
-        row = Gtk.ListBoxRow()
-        row._type_name = type_name
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        box.set_margin_top(6)
-        box.set_margin_bottom(6)
-        box.set_margin_start(10)
-        box.set_margin_end(10)
-        name_lbl = Gtk.Label(label=type_name)
-        name_lbl.set_xalign(0)
-        desc_lbl = Gtk.Label(label=desc)
-        desc_lbl.set_xalign(0)
-        desc_lbl.add_css_class('caption')
-        desc_lbl.add_css_class('dim-label')
-        box.append(name_lbl)
-        box.append(desc_lbl)
-        row.set_child(box)
+        row = Adw.ActionRow(title=type_name, subtitle=desc)
         list_box.append(row)
         all_rows.append(row)
 
     def _on_search(e):
         text = e.get_text().strip().lower()
         for r in all_rows:
-            r.set_visible(not text or text in r._type_name.lower())
+            r.set_visible(not text or text in r.get_title().lower())
 
     search.connect('search-changed', _on_search)
 
     def _on_row_activated(_lb, row):
-        entry.set_text(row._type_name)
+        entry.set_text(row.get_title())
         popover.popdown()
 
     list_box.connect('row-activated', _on_row_activated)
@@ -1258,57 +1223,42 @@ class CreateTableDialog(Adw.Dialog):
     def _add_col_row(self, name='', pg_type='text', nullable=True, default='', is_pk=False):
         row = Gtk.ListBoxRow()
 
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        box.set_margin_top(6)
-        box.set_margin_bottom(6)
-        box.set_margin_start(8)
-        box.set_margin_end(8)
+        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
 
-        name_entry = Gtk.Entry()
-        name_entry.set_placeholder_text('column_name')
-        name_entry.set_hexpand(True)
+        name_entry = Adw.EntryRow(title='Name')
         name_entry.set_text(name)
         name_entry.connect('changed', self._on_form_changed)
 
-        type_entry = Gtk.Entry()
+        type_entry = Adw.EntryRow(title='Type')
         type_entry.set_text(pg_type or 'text')
-        type_entry.set_width_chars(8)
+        _attach_type_picker(type_entry)
         type_entry.connect('changed', self._on_form_changed)
 
-        type_btn = _make_type_picker_popover(type_entry)
-
-        null_btn = Gtk.ToggleButton(label='NULL')
-        null_btn.set_tooltip_text('Allow NULL values')
+        null_btn = Adw.SwitchRow(title='Nullable', subtitle='Allow NULL values')
         null_btn.set_active(nullable)
-        null_btn.add_css_class('flat')
-        null_btn.connect('toggled', self._on_form_changed)
+        null_btn.connect('notify::active', lambda *_: self._on_form_changed())
 
-        pk_btn = Gtk.ToggleButton(label='PK')
-        pk_btn.set_tooltip_text('Set as primary key')
+        pk_btn = Adw.SwitchRow(title='Primary key')
         pk_btn.set_active(is_pk)
-        pk_btn.add_css_class('flat')
-        pk_btn.connect('toggled', self._on_pk_toggled, row)
+        pk_btn.connect('notify::active', lambda r, _p, rw=row: self._on_pk_toggled(r, rw))
 
-        default_entry = Gtk.Entry()
-        default_entry.set_placeholder_text('default')
-        default_entry.set_width_chars(7)
+        default_entry = Adw.EntryRow(title='Default value')
         default_entry.set_text(default or '')
-        default_entry.set_tooltip_text('DEFAULT value (optional)')
         default_entry.connect('changed', self._on_form_changed)
 
         rm_btn = Gtk.Button(icon_name='list-remove-symbolic')
         rm_btn.add_css_class('flat')
         rm_btn.set_tooltip_text('Remove column')
+        rm_btn.set_valign(Gtk.Align.CENTER)
         rm_btn.connect('clicked', self._remove_col_row, row)
+        name_entry.add_suffix(rm_btn)
 
-        box.append(name_entry)
-        box.append(type_entry)
-        box.append(type_btn)
-        box.append(null_btn)
-        box.append(pk_btn)
-        box.append(default_entry)
-        box.append(rm_btn)
-        row.set_child(box)
+        inner.append(name_entry)
+        inner.append(type_entry)
+        inner.append(null_btn)
+        inner.append(pk_btn)
+        inner.append(default_entry)
+        row.set_child(inner)
 
         row._name_entry = name_entry
         row._type_entry = type_entry
@@ -1327,11 +1277,11 @@ class CreateTableDialog(Adw.Dialog):
         self._col_rows.remove(row)
         self._on_form_changed()
 
-    def _on_pk_toggled(self, btn, row):
+    def _on_pk_toggled(self, switch_row, row):
         if self._pk_updating:
             return
         self._pk_updating = True
-        if btn.get_active():
+        if switch_row.get_active():
             for r in self._col_rows:
                 if r is not row and r._pk_btn.get_active():
                     r._pk_btn.set_active(False)

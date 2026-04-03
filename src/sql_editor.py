@@ -362,7 +362,6 @@ class SqlEditor(Gtk.Box):
 
         self._run_sel_btn = Gtk.Button(label='Run Selected')
         self._run_sel_btn.set_icon_name('media-playback-start-symbolic')
-        self._run_sel_btn.add_css_class('pill')
         self._run_sel_btn.set_sensitive(False)
         self._run_sel_btn.set_tooltip_text('Run selected / at cursor  Ctrl+Enter')
         self._run_sel_btn.connect('clicked', lambda _: self.emit('run-selected-sql'))
@@ -409,8 +408,7 @@ class SqlEditor(Gtk.Box):
 
         self._cancel_btn = Gtk.Button(label='Cancel')
         self._cancel_btn.set_icon_name('media-playback-stop-symbolic')
-        self._cancel_btn.add_css_class('destructive-action')
-        self._cancel_btn.add_css_class('pill')
+        self._cancel_btn.add_css_class('flat')
         self._cancel_btn.set_tooltip_text('Cancel running query')
         self._cancel_btn.connect('clicked', self._on_cancel)
 

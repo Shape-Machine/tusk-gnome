@@ -7,6 +7,8 @@ gi.require_version('Adw', '1')
 
 from gi.repository import Gtk, Adw, GLib, Gio, GObject, Pango
 
+from style import MARGIN_XS, MARGIN_SM, MARGIN_MD
+
 
 # ── SQL ───────────────────────────────────────────────────────────────────────
 
@@ -140,10 +142,10 @@ class MembershipsTab(Gtk.Box):
         self._memberships = []
 
         toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        toolbar.set_margin_top(6)
-        toolbar.set_margin_bottom(6)
-        toolbar.set_margin_start(10)
-        toolbar.set_margin_end(10)
+        toolbar.set_margin_top(MARGIN_SM)
+        toolbar.set_margin_bottom(MARGIN_SM)
+        toolbar.set_margin_start(MARGIN_MD)
+        toolbar.set_margin_end(MARGIN_MD)
 
         self._grant_btn = Gtk.Button(label='Grant Membership…')
         self._grant_btn.add_css_class('suggested-action')
@@ -283,15 +285,13 @@ class _GrantMembershipDialog(Adw.Dialog):
                                          subtitle='Allows this role to grant the group to others')
         prefs_group.add(self._admin_row)
 
-        self._error_label = Gtk.Label()
-        self._error_label.add_css_class('error')
-        self._error_label.add_css_class('caption')
-        self._error_label.set_margin_start(12)
-        self._error_label.set_margin_end(12)
-        self._error_label.set_margin_bottom(8)
-        self._error_label.set_visible(False)
-        self._error_label.set_wrap(True)
-        box.append(self._error_label)
+        self._error_status = Adw.StatusPage(
+            icon_name='dialog-error-symbolic',
+            title='Could Not Load Roles',
+        )
+        self._error_status.set_visible(False)
+        box.append(prefs_group)
+        box.append(self._error_status)
 
         self.set_child(box)
 
@@ -309,8 +309,8 @@ class _GrantMembershipDialog(Adw.Dialog):
             GLib.idle_add(self._show_load_error, str(e))
 
     def _show_load_error(self, msg):
-        self._error_label.set_label(f'Could not load group roles: {msg}')
-        self._error_label.set_visible(True)
+        self._error_status.set_description(msg)
+        self._error_status.set_visible(True)
 
     def _populate_groups(self, groups):
         for g in groups:
@@ -368,10 +368,10 @@ class EffectivePermissionsTab(Gtk.Box):
         self._role_name = None
 
         toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        toolbar.set_margin_top(6)
-        toolbar.set_margin_bottom(6)
-        toolbar.set_margin_start(10)
-        toolbar.set_margin_end(10)
+        toolbar.set_margin_top(MARGIN_SM)
+        toolbar.set_margin_bottom(MARGIN_SM)
+        toolbar.set_margin_start(MARGIN_MD)
+        toolbar.set_margin_end(MARGIN_MD)
 
         self._status_label = Gtk.Label()
         self._status_label.add_css_class('dim-label')

@@ -8,6 +8,7 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, GLib, GObject, Gdk, Gio
 
 from pg_errors import friendly_pg_error as _friendly_pg_error
+from style import MARGIN_XS, MARGIN_SM, MARGIN_MD
 
 COL_ICON = 0
 COL_LABEL = 1
@@ -102,9 +103,9 @@ class DbBrowser(Gtk.Box):
     def _build_ui(self):
         # Loading bar
         self._loading_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        self._loading_bar.set_margin_start(8)
-        self._loading_bar.set_margin_top(4)
-        self._loading_bar.set_margin_bottom(4)
+        self._loading_bar.set_margin_start(MARGIN_SM)
+        self._loading_bar.set_margin_top(MARGIN_XS)
+        self._loading_bar.set_margin_bottom(MARGIN_XS)
         self._loading_spinner = Gtk.Spinner()
         self._loading_spinner.set_size_request(16, 16)
         self._loading_label = Gtk.Label(label='Connecting…')
@@ -117,10 +118,10 @@ class DbBrowser(Gtk.Box):
 
         # Database switcher bar
         db_switcher_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        db_switcher_bar.set_margin_start(6)
-        db_switcher_bar.set_margin_end(6)
-        db_switcher_bar.set_margin_top(4)
-        db_switcher_bar.set_margin_bottom(2)
+        db_switcher_bar.set_margin_start(MARGIN_SM)
+        db_switcher_bar.set_margin_end(MARGIN_SM)
+        db_switcher_bar.set_margin_top(MARGIN_XS)
+        db_switcher_bar.set_margin_bottom(MARGIN_XS)
         db_switcher_bar.set_visible(False)
         self._db_switcher_bar = db_switcher_bar
 
@@ -154,28 +155,13 @@ class DbBrowser(Gtk.Box):
 
         self.append(db_switcher_bar)
 
-        # Schema warning bar
-        self._schema_warning_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        self._schema_warning_bar.set_margin_start(8)
-        self._schema_warning_bar.set_margin_end(6)
-        self._schema_warning_bar.set_margin_bottom(2)
-        self._schema_warning_bar.set_margin_top(2)
-        self._schema_warning_bar.set_visible(False)
-        self._schema_warning_label = Gtk.Label()
-        self._schema_warning_label.add_css_class('caption')
-        self._schema_warning_label.add_css_class('warning')
-        self._schema_warning_label.set_xalign(0)
-        self._schema_warning_label.set_wrap(True)
-        self._schema_warning_label.set_hexpand(True)
-        self._schema_warning_bar.append(self._schema_warning_label)
-        edit_conn_btn = Gtk.Button(label='Edit Connection')
-        edit_conn_btn.add_css_class('flat')
-        edit_conn_btn.add_css_class('caption')
-        edit_conn_btn.connect('clicked', lambda _: self.emit(
+        # Schema warning banner
+        self._schema_warning_banner = Adw.Banner(title='')
+        self._schema_warning_banner.set_button_label('Edit Connection')
+        self._schema_warning_banner.connect('button-clicked', lambda _: self.emit(
             'edit-connection-requested', self._last_conn
         ))
-        self._schema_warning_bar.append(edit_conn_btn)
-        self.append(self._schema_warning_bar)
+        self.append(self._schema_warning_banner)
 
         # Connection error bar (shown when load fails)
         self._conn_error_bar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -210,10 +196,10 @@ class DbBrowser(Gtk.Box):
 
         # Search + New Schema toolbar
         search_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        search_bar.set_margin_start(6)
-        search_bar.set_margin_end(6)
-        search_bar.set_margin_top(4)
-        search_bar.set_margin_bottom(4)
+        search_bar.set_margin_start(MARGIN_SM)
+        search_bar.set_margin_end(MARGIN_SM)
+        search_bar.set_margin_top(MARGIN_XS)
+        search_bar.set_margin_bottom(MARGIN_XS)
         search_bar.set_visible(False)
         self._search_bar = search_bar
 
@@ -421,7 +407,7 @@ class DbBrowser(Gtk.Box):
         self._loading_spinner.stop()
         self._loading_bar.set_visible(False)
         self._db_switcher_bar.set_visible(False)
-        self._schema_warning_bar.set_visible(False)
+        self._schema_warning_banner.set_revealed(False)
         self._conn_error_bar.set_visible(False)
         self._search_entry.set_text('')
         self._search_bar.set_visible(False)
@@ -660,10 +646,10 @@ class DbBrowser(Gtk.Box):
 
         # Show schema warning if default schema not found
         if schema_warning:
-            self._schema_warning_label.set_label(schema_warning)
-            self._schema_warning_bar.set_visible(True)
+            self._schema_warning_banner.set_title(schema_warning)
+            self._schema_warning_banner.set_revealed(True)
         else:
-            self._schema_warning_bar.set_visible(False)
+            self._schema_warning_banner.set_revealed(False)
 
         if not schema_items:
             self._store.append(None, [
