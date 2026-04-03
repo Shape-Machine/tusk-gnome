@@ -980,16 +980,16 @@ class TuskWindow(Adw.ApplicationWindow):
         palette.present(self)
 
     def _get_sql_file_items(self):
-        import os
         folder = self._file_explorer.current_dir
         try:
-            entries = os.scandir(folder)
+            scan = os.scandir(folder)
         except OSError:
             return []
         result = []
-        for entry in entries:
-            if entry.is_file() and entry.name.lower().endswith('.sql'):
-                result.append((None, '', entry.path, 'file', entry.name))
+        with scan:
+            for entry in scan:
+                if entry.is_file() and entry.name.lower().endswith('.sql'):
+                    result.append((None, '', entry.path, 'file', entry.name))
         result.sort(key=lambda t: t[4].lower())
         return result
 
