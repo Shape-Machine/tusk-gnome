@@ -17,6 +17,7 @@ from file_explorer import FileExplorer
 from sql_editor import SqlEditor
 from table_panel import TablePanel
 from role_panel import RolePanel
+from function_editor import FunctionEditor
 
 
 class TuskWindow(Adw.ApplicationWindow):
@@ -339,6 +340,7 @@ class TuskWindow(Adw.ApplicationWindow):
 
         self._browser = DbBrowser()
         self._browser.connect('table-selected', self._on_table_selected)
+        self._browser.connect('function-selected', self._on_function_selected)
         self._browser.connect('create-table-requested', self._on_create_table_requested)
         self._browser.connect('drop-table-requested', self._on_drop_table_requested)
         self._browser.connect('truncate-table-requested', self._on_truncate_table_requested)
@@ -925,6 +927,24 @@ class TuskWindow(Adw.ApplicationWindow):
         page = self._tab_view.append(panel)
         page.set_title(role_name)
         page.set_icon(Gio.ThemedIcon.new('person-symbolic'))
+        page._tab_id = tab_id
+
+        self._show_tabs()
+        self._tab_view.set_selected_page(page)
+
+    def _on_function_selected(self, _browser, conn, schema, fn_name, fn_args):
+        signature = f'{fn_name}({fn_args})'
+        tab_id = f'fn:{conn["id"]}:{schema}.{signature}'
+        existing = self._find_tab(tab_id)
+        if existing:
+            self._tab_view.set_selected_page(existing)
+            return
+
+        editor = FunctionEditor(conn, schema, fn_name, fn_args)
+
+        page = self._tab_view.append(editor)
+        page.set_title(f'fn: {signature}')
+        page.set_icon(Gio.ThemedIcon.new('system-run-symbolic'))
         page._tab_id = tab_id
 
         self._show_tabs()
