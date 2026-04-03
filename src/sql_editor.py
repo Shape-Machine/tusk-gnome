@@ -1042,6 +1042,7 @@ class SqlEditor(Gtk.Box):
             with open_db(conn, autocommit=bool(_AUTOCOMMIT_RE.match(sql))) as db:
                 self._active_conn = db
                 if self._cancel_event.is_set():
+                    self._active_conn = None
                     GLib.idle_add(self.show_message, 'Query cancelled')
                     return
                 try:
