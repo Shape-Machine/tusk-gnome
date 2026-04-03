@@ -532,11 +532,13 @@ class TuskWindow(Adw.ApplicationWindow):
         return row
 
     def _on_add_connection(self, _btn):
+        self._conn_popover.popdown()
         dlg = ConnectionDialog(parent=self)
         dlg.connect('connection-saved', self._on_connection_added)
         dlg.present(self)
 
     def _on_copy_as_uri(self, row):
+        self._conn_popover.popdown()
         from urllib.parse import quote
         conn = row._conn
         user = quote(conn['username'], safe='')
@@ -636,11 +638,13 @@ class TuskWindow(Adw.ApplicationWindow):
         self._add_connection_row(conn)
 
     def _on_edit_connection(self, row):
+        self._conn_popover.popdown()
         dlg = ConnectionDialog(parent=self, connection=row._conn)
         dlg.connect('connection-saved', self._on_connection_updated, row)
         dlg.present(self)
 
     def _on_duplicate_connection(self, row):
+        self._conn_popover.popdown()
         try:
             conn = self._conn_with_password(row._conn)
         except KeyringUnavailableError as e:
@@ -680,6 +684,7 @@ class TuskWindow(Adw.ApplicationWindow):
             self._browser.clear()
 
     def _on_delete_connection(self, row):
+        self._conn_popover.popdown()
         conn = row._conn
         dialog = Adw.MessageDialog(
             transient_for=self,
