@@ -1123,11 +1123,18 @@ class CreateTableDialog(Adw.Dialog):
         col_frame = Gtk.Frame()
         col_frame.set_child(col_view)
 
-        self._drop_indicator = Gtk.DrawingArea()
-        self._drop_indicator.set_can_target(False)
+        self._drop_indicator = Gtk.Box()
+        self._drop_indicator.set_size_request(-1, 2)
         self._drop_indicator.set_hexpand(True)
-        self._drop_indicator.set_vexpand(True)
-        self._drop_indicator.set_draw_func(self._draw_drop_indicator)
+        self._drop_indicator.set_valign(Gtk.Align.START)
+        self._drop_indicator.set_can_target(False)
+        self._drop_indicator.set_visible(False)
+        _ind_css = Gtk.CssProvider()
+        _ind_css.load_from_string('.tusk-drop-line { background-color: @accent_bg_color; }')
+        self._drop_indicator.add_css_class('tusk-drop-line')
+        self._drop_indicator.get_style_context().add_provider(
+            _ind_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
 
         col_overlay = Gtk.Overlay()
         col_overlay.set_child(col_frame)
@@ -1226,20 +1233,6 @@ class CreateTableDialog(Adw.Dialog):
             'pan-down-symbolic' if revealed else 'pan-up-symbolic'
         )
 
-    def _draw_drop_indicator(self, _area, cr, width, _height):
-        if self._drop_indicator_y < 0:
-            return
-        style = self._drop_indicator.get_style_context()
-        found, color = style.lookup_color('accent_bg_color')
-        if found:
-            cr.set_source_rgba(color.red, color.green, color.blue, 0.9)
-        else:
-            cr.set_source_rgba(0.27, 0.52, 0.87, 0.9)
-        cr.set_line_width(2)
-        cr.move_to(4, self._drop_indicator_y)
-        cr.line_to(width - 4, self._drop_indicator_y)
-        cr.stroke()
-
     def _is_dirty(self):
         if self._name_row.get_text().strip():
             return True
@@ -1304,16 +1297,17 @@ class CreateTableDialog(Adw.Dialog):
             n = self._store.get_n_items()
             row_idx = max(0, min(round((y - _HEADER_HEIGHT) / _ROW_HEIGHT), n))
             self._drop_indicator_y = _HEADER_HEIGHT + row_idx * _ROW_HEIGHT
-            self._drop_indicator.queue_draw()
+            self._drop_indicator.set_margin_top(self._drop_indicator_y)
+            self._drop_indicator.set_visible(True)
             return Gdk.DragAction.MOVE
 
         def _on_leave(_target):
             self._drop_indicator_y = -1
-            self._drop_indicator.queue_draw()
+            self._drop_indicator.set_visible(False)
 
         def _on_drop(_target, value, _x, y):
             self._drop_indicator_y = -1
-            self._drop_indicator.queue_draw()
+            self._drop_indicator.set_visible(False)
             if value != _DRAG_SENTINEL or self._drag_src_pos < 0:
                 return False
             src_pos = self._drag_src_pos
