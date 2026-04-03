@@ -1220,7 +1220,9 @@ class CreateTableDialog(Adw.Dialog):
                     is_pk=col.get('is_pk', False),
                 )
         else:
-            self._add_col_row()
+            self._add_col_row(focus=False)
+
+        GLib.idle_add(lambda: (self._name_row.grab_focus(), GLib.SOURCE_REMOVE)[1])
 
         # Guard against accidental dismissal via Escape when the form is dirty
         self.set_can_close(False)
@@ -1587,10 +1589,10 @@ class CreateTableDialog(Adw.Dialog):
 
     # ── Store helpers ────────────────────────────────────────────────────────
 
-    def _add_col_row(self, name='', pg_type='text', nullable=True, default='', is_pk=False):
+    def _add_col_row(self, name='', pg_type='text', nullable=True, default='', is_pk=False, focus=True):
         item = _ColDef(name=name, pg_type=pg_type or 'text',
                        nullable=nullable, is_pk=is_pk, default=default or '')
-        if not name:
+        if not name and focus:
             self._pending_focus_item = item
         self._store.append(item)
         self._on_form_changed()
