@@ -62,24 +62,27 @@ class RowEditDialog(Adw.Dialog):
             is_pk = col in pk_cols
 
             if data_type == 'boolean':
-                widget = Adw.SwitchRow(title=col_name, subtitle='boolean')
-                # Track whether this switch started in an "unset" state so that
-                # saving without interaction preserves NULL (edit) or skips the
-                # column to let PostgreSQL apply the default (insert).
-                widget._starts_as_unset = (init_val is None) or (mode == 'insert' and bool(default_val))
-                widget._user_touched = False
-                if init_val is not None:
-                    widget.set_active(bool(init_val))
+                is_required_bool = (mode == 'insert') and (col in self._required)
+                bool_title = f'{col_name} *' if is_required_bool else col_name
+                widget = Adw.SwitchRow(title=bool_title, subtitle='boolean')
+                # In insert mode with a default, start unset so the DB uses its default.
+                # For required booleans (NOT NULL, no default), force a choice: default to False.
+                if is_required_bool:
+                    widget._starts_as_unset = False
+                    widget._user_touched = True
+                    widget.set_active(False)
+                else:
+                    widget._starts_as_unset = (init_val is None) or (mode == 'insert' and bool(default_val))
+                    widget._user_touched = False
+                    if init_val is not None:
+                        widget.set_active(bool(init_val))
                 def _on_active(_w, _p, w=widget):
                     w._user_touched = True
                 widget.connect('notify::active', _on_active)
             else:
-                # In insert mode: mark required fields with asterisk, show (auto) for defaults
-                if mode == 'insert':
-                    if col in self._required:
-                        row_title = f'{col_name} *'
-                    else:
-                        row_title = col_name
+                # In insert mode: mark required fields with asterisk
+                if mode == 'insert' and col in self._required:
+                    row_title = f'{col_name} *'
                 else:
                     row_title = col_name
 
@@ -87,8 +90,13 @@ class RowEditDialog(Adw.Dialog):
 
                 if init_val is not None:
                     widget.set_text(str(init_val))
-                elif mode == 'insert' and default_val:
-                    widget.set_text('')
+
+                # (auto) hint for insert-mode columns that have a DB default
+                if mode == 'insert' and default_val and col not in self._required:
+                    auto_label = Gtk.Label(label='(auto)')
+                    auto_label.add_css_class('dim-label')
+                    auto_label.add_css_class('caption')
+                    widget.add_suffix(auto_label)
 
                 type_label = Gtk.Label(label=data_type)
                 type_label.add_css_class('caption')

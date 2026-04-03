@@ -1033,8 +1033,14 @@ class TuskWindow(Adw.ApplicationWindow):
 
         qi = lambda n: '"' + n.replace('"', '""') + '"'
         obj_type = 'VIEW' if is_view else 'TABLE'
-        preview_ddl = f'DROP {obj_type} {qi(schema)}.{qi(table)};'
-        sql_label = Gtk.Label(label=preview_ddl)
+
+        def _drop_table_ddl(cascade=False):
+            ddl = f'DROP {obj_type} {qi(schema)}.{qi(table)}'
+            if cascade:
+                ddl += ' CASCADE'
+            return ddl + ';'
+
+        sql_label = Gtk.Label(label=_drop_table_ddl())
         sql_label.add_css_class('monospace')
         sql_label.set_xalign(0)
         sql_label.set_selectable(True)
@@ -1044,6 +1050,7 @@ class TuskWindow(Adw.ApplicationWindow):
         cascade_check = Gtk.CheckButton(label='Drop with CASCADE — also drops all dependent views and constraints')
         cascade_check.set_margin_top(8)
         cascade_check.set_margin_start(4)
+        cascade_check.connect('toggled', lambda cb: sql_label.set_label(_drop_table_ddl(cb.get_active())))
 
         if is_view:
             extra = sql_label
@@ -1062,10 +1069,7 @@ class TuskWindow(Adw.ApplicationWindow):
         dialog.set_close_response('cancel')
 
         def execute_drop(cascade):
-            ddl = f'DROP {obj_type} {qi(schema)}.{qi(table)}'
-            if cascade:
-                ddl += ' CASCADE'
-            ddl += ';'
+            ddl = _drop_table_ddl(cascade)
 
             def run():
                 try:
@@ -1097,8 +1101,14 @@ class TuskWindow(Adw.ApplicationWindow):
 
     def _on_truncate_table_requested(self, _browser, conn, schema, table):
         qi = lambda n: '"' + n.replace('"', '""') + '"'
-        preview_ddl = f'TRUNCATE TABLE {qi(schema)}.{qi(table)};'
-        sql_label = Gtk.Label(label=preview_ddl)
+
+        def _truncate_ddl(restart=False):
+            ddl = f'TRUNCATE TABLE {qi(schema)}.{qi(table)}'
+            if restart:
+                ddl += ' RESTART IDENTITY'
+            return ddl + ';'
+
+        sql_label = Gtk.Label(label=_truncate_ddl())
         sql_label.add_css_class('monospace')
         sql_label.set_xalign(0)
         sql_label.set_selectable(True)
@@ -1108,6 +1118,7 @@ class TuskWindow(Adw.ApplicationWindow):
         restart_check = Gtk.CheckButton(label='Restart identity sequences (RESTART IDENTITY)')
         restart_check.set_margin_top(8)
         restart_check.set_margin_start(4)
+        restart_check.connect('toggled', lambda cb: sql_label.set_label(_truncate_ddl(cb.get_active())))
 
         extra = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         extra.append(sql_label)
@@ -1127,10 +1138,7 @@ class TuskWindow(Adw.ApplicationWindow):
         def on_response(_d, response):
             if response != 'truncate':
                 return
-            ddl = f'TRUNCATE TABLE {qi(schema)}.{qi(table)}'
-            if restart_check.get_active():
-                ddl += ' RESTART IDENTITY'
-            ddl += ';'
+            ddl = _truncate_ddl(restart_check.get_active())
 
             def run():
                 try:
@@ -1397,8 +1405,14 @@ class TuskWindow(Adw.ApplicationWindow):
 
     def _on_drop_schema_requested(self, _browser, conn, schema):
         qi = lambda n: '"' + n.replace('"', '""') + '"'
-        preview_ddl = f'DROP SCHEMA {qi(schema)};'
-        sql_label = Gtk.Label(label=preview_ddl)
+
+        def _drop_schema_ddl(cascade=False):
+            ddl = f'DROP SCHEMA {qi(schema)}'
+            if cascade:
+                ddl += ' CASCADE'
+            return ddl + ';'
+
+        sql_label = Gtk.Label(label=_drop_schema_ddl())
         sql_label.add_css_class('monospace')
         sql_label.set_xalign(0)
         sql_label.set_selectable(True)
@@ -1408,6 +1422,7 @@ class TuskWindow(Adw.ApplicationWindow):
         cascade_check = Gtk.CheckButton(label='Drop with CASCADE — also drops all tables, views and other objects in this schema')
         cascade_check.set_margin_top(8)
         cascade_check.set_margin_start(4)
+        cascade_check.connect('toggled', lambda cb: sql_label.set_label(_drop_schema_ddl(cb.get_active())))
 
         extra = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         extra.append(sql_label)
