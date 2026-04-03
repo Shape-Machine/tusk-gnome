@@ -786,13 +786,13 @@ class TablePanel(Gtk.Box):
                     pgsql.Identifier(item.col_name),
                     pgsql.SQL(new_type),
                 )
-            col_name, new_type_captured = item.col_name, new_type
+            col_name = item.col_name
 
             def _update_type():
                 rows = list(getattr(self, '_schema_raw_rows', []))
                 for i, r in enumerate(rows):
                     if r[0] == col_name:
-                        rows[i] = (r[0], new_type_captured, r[2], r[3], r[4])
+                        rows[i] = (r[0], new_type, r[2], r[3], r[4])
                         break
                 self._update_schema_view(rows, getattr(self, '_keys_raw_rows', []))
 
@@ -874,10 +874,12 @@ class TablePanel(Gtk.Box):
                             cur.execute(
                                 """
                                 SELECT COALESCE(
-                                    (SELECT (null_frac * reltuples)::bigint
-                                     FROM pg_stats
-                                     JOIN pg_class ON relname = tablename
-                                     WHERE schemaname = %s AND tablename = %s AND attname = %s),
+                                    (SELECT (s.null_frac * c.reltuples)::bigint
+                                     FROM pg_stats s
+                                     JOIN pg_class c ON c.relname = s.tablename
+                                     JOIN pg_namespace n ON n.oid = c.relnamespace
+                                                        AND n.nspname = s.schemaname
+                                     WHERE s.schemaname = %s AND s.tablename = %s AND s.attname = %s),
                                     0
                                 )
                                 """,
@@ -1538,6 +1540,10 @@ class TablePanel(Gtk.Box):
             from tunnel import open_db
 
             path = gfile.get_path()
+            if path is None:
+                GLib.idle_add(self._show_export_error,
+                              'Export to network locations is not supported. Save to a local folder.')
+                return
             with open_db(conn) as db:
                 with db.cursor() as cur:
                     cur.execute(
