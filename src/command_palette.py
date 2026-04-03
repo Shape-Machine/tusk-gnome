@@ -3,18 +3,20 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Gtk, Adw, GLib, GObject, Gdk
+from gi.repository import Gtk, Adw, GObject, Gdk, Pango
 
 _ICONS = {
     'table':    'x-office-spreadsheet-symbolic',
     'view':     'view-grid-symbolic',
     'function': 'system-run-symbolic',
+    'file':     'text-x-script-symbolic',
 }
 
 _TYPE_LABELS = {
     'table':    'table',
     'view':     'view',
     'function': 'fn',
+    'file':     'sql',
 }
 
 _MAX_RESULTS = 100
@@ -55,7 +57,7 @@ class _ResultRow(Gtk.ListBoxRow):
         name_label = Gtk.Label(label=label)
         name_label.set_hexpand(True)
         name_label.set_xalign(0)
-        name_label.set_ellipsize(3)  # PANGO_ELLIPSIZE_END
+        name_label.set_ellipsize(Pango.EllipsizeMode.END)
         box.append(name_label)
 
         type_badge = Gtk.Label(label=_TYPE_LABELS.get(item_type, item_type))
@@ -99,6 +101,7 @@ class CommandPalette(Adw.Dialog):
         self._entry.set_margin_top(12)
         self._entry.set_margin_bottom(8)
         self._entry.connect('search-changed', self._on_search_changed)
+        self._entry.connect('stop-search', lambda _: self.close())
         outer.append(self._entry)
 
         outer.append(Gtk.Separator())
@@ -149,8 +152,7 @@ class CommandPalette(Adw.Dialog):
         query = query.strip().lower()
         count = 0
         for conn, schema, name, item_type, label in self._items:
-            search_text = f'{schema}.{label}'.lower()
-            if _fuzzy_match(query, search_text) or _fuzzy_match(query, label.lower()):
+            if _fuzzy_match(query, label.lower()):
                 self._listbox.append(_ResultRow(conn, schema, name, item_type, label))
                 count += 1
                 if count >= _MAX_RESULTS:
