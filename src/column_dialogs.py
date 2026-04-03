@@ -1257,11 +1257,20 @@ class CreateTableDialog(Adw.Dialog):
         col_view.set_model(Gtk.NoSelection(model=self._store))
 
         _ROW_HEIGHT = 38  # approximate px per row for drop-position calc
+        _DRAG_SENTINEL = 'tusk-col-reorder'
 
         # ── Drag-to-reorder ──────────────────────────────────────────────────
-        drop_target = Gtk.DropTarget.new(GObject.TYPE_UINT, Gdk.DragAction.MOVE)
+        # Source position is stored on self at drag-start to avoid passing
+        # GObject.Value through the pipeline (causes segfault via GC mid-drag).
+        self._drag_src_pos = -1
 
-        def _on_drop(_target, src_pos, _x, y):
+        drop_target = Gtk.DropTarget.new(str, Gdk.DragAction.MOVE)
+
+        def _on_drop(_target, value, _x, y):
+            if value != _DRAG_SENTINEL or self._drag_src_pos < 0:
+                return False
+            src_pos = self._drag_src_pos
+            self._drag_src_pos = -1
             n = self._store.get_n_items()
             dst_pos = max(0, min(int(y / _ROW_HEIGHT), n - 1))
             if src_pos == dst_pos:
@@ -1285,8 +1294,8 @@ class CreateTableDialog(Adw.Dialog):
             drag_src.set_actions(Gdk.DragAction.MOVE)
 
             def _prepare(_src, _x, _y):
-                pos = li.get_position()
-                return Gdk.ContentProvider.new_for_value(GObject.Value(GObject.TYPE_UINT, pos))
+                self._drag_src_pos = int(li.get_position())
+                return Gdk.ContentProvider.new_for_value(_DRAG_SENTINEL)
 
             drag_src.connect('prepare', _prepare)
             icon.add_controller(drag_src)
