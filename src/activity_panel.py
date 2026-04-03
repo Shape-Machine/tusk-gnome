@@ -22,7 +22,7 @@ SELECT
         ELSE -1
     END AS duration_s,
     COALESCE(wait_event_type || ': ' || wait_event, '') AS wait_event,
-    COALESCE(LEFT(query, 200), '') AS query
+    COALESCE(query, '') AS query
 FROM pg_stat_activity
 WHERE pid <> pg_backend_pid()
 ORDER BY COALESCE(query_start, backend_start) DESC NULLS LAST
@@ -111,6 +111,7 @@ class ActivityPanel(Gtk.Box):
         self._conn = conn
         self._refresh_id = 0
         self._alive = True
+        self._fetching = False
         self._apply_css()
         self._build_ui()
         self.connect('destroy', self._on_destroy)
@@ -218,6 +219,9 @@ class ActivityPanel(Gtk.Box):
     # ── Data fetch ───────────────────────────────────────────────────────────
 
     def _refresh(self):
+        if self._fetching:
+            return
+        self._fetching = True
         self._status_label.set_label('Refreshing…')
         threading.Thread(target=self._fetch, daemon=True).start()
 
@@ -237,8 +241,12 @@ class ActivityPanel(Gtk.Box):
         except Exception as e:
             if self._alive:
                 GLib.idle_add(self._on_fetch_error, str(e))
+        finally:
+            self._fetching = False
 
     def _populate(self, rows):
+        if not self._alive:
+            return
         self._store.remove_all()
         for pid, user, db, state, duration_s, wait, query in rows:
             self._store.append(_ActivityRow(pid, user, db, state, duration_s, wait, query))
@@ -247,6 +255,11 @@ class ActivityPanel(Gtk.Box):
         self._error_banner.set_revealed(False)
 
     def _on_fetch_error(self, msg):
+        if not self._alive:
+            return
+        if 'permission denied' in msg.lower() or '42501' in msg:
+            msg = ('Permission denied. Viewing Server Activity requires '
+                   'superuser or membership in pg_monitor.')
         self._status_label.set_label('')
         self._error_banner.set_title(msg)
         self._error_banner.set_revealed(True)
@@ -314,11 +327,15 @@ class ActivityPanel(Gtk.Box):
                 GLib.idle_add(self._on_terminate_error, str(e))
 
     def _on_terminated(self, pid, success):
+        if not self._alive:
+            return
         msg = f'Session {pid} terminated' if success else f'Session {pid} not found'
         self._status_label.set_label(msg)
         self._refresh()
 
     def _on_terminate_error(self, msg):
+        if not self._alive:
+            return
         self._error_banner.set_title(f'Terminate failed: {msg}')
         self._error_banner.set_revealed(True)
 
