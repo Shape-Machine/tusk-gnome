@@ -1594,7 +1594,7 @@ class TablePanel(Gtk.Box):
         self._data_page_label.set_label(f'Export failed: {msg}')
 
     def _on_filter_changed(self, *_):
-        if hasattr(self, '_filter_debounce_id'):
+        if getattr(self, '_filter_debounce_id', None) is not None:
             GLib.source_remove(self._filter_debounce_id)
         self._filter_debounce_id = GLib.timeout_add(300, self._apply_local_filter)
 
