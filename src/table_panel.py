@@ -1886,7 +1886,7 @@ class TablePanel(Gtk.Box):
         bitset = self._column_view.get_model().get_selection()
         if bitset.get_size() != 1:
             return
-        valid, pos, _ = Gtk.BitsetIter.init_first(bitset)
+        valid, it, pos = Gtk.BitsetIter.init_first(bitset)
         if not valid:
             return
         row = self._column_view.get_model().get_item(pos)
@@ -1902,7 +1902,7 @@ class TablePanel(Gtk.Box):
         if n == 0:
             return
         rows_to_delete = []
-        valid, pos, it = Gtk.BitsetIter.init_first(bitset)
+        valid, it, pos = Gtk.BitsetIter.init_first(bitset)
         while valid:
             row = selection.get_item(pos)
             rows_to_delete.append({col: row.raw(i) for i, col in enumerate(self._all_data_cols)})
