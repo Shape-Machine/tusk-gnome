@@ -191,9 +191,11 @@ class MembershipsTab(Gtk.Box):
             self._populate(rows, None)
             return
         self._status_label.set_label('Loading…')
-        threading.Thread(target=self._fetch_all_memberships, args=(conn,), daemon=True).start()
+        threading.Thread(
+            target=self._fetch_all_memberships, args=(conn, role_name), daemon=True
+        ).start()
 
-    def _fetch_all_memberships(self, conn):
+    def _fetch_all_memberships(self, conn, role_name):
         """Fetch all role memberships in one query and populate the cache."""
         try:
             from tunnel import open_db
@@ -204,21 +206,21 @@ class MembershipsTab(Gtk.Box):
             cache = {}
             for member, group_role, admin_opt in rows:
                 cache.setdefault(member, []).append((group_role, admin_opt))
-            GLib.idle_add(self._store_cache_and_populate, conn, cache)
+            GLib.idle_add(self._store_cache_and_populate, conn, cache, role_name)
         except Exception as e:
             GLib.idle_add(self._populate, None, str(e))
 
-    def _store_cache_and_populate(self, conn, cache):
+    def _store_cache_and_populate(self, conn, cache, role_name):
         self._cache[id(conn)] = cache
-        rows = cache.get(self._role_name, [])
-        self._populate(rows, None)
+        if self._conn is conn and self._role_name == role_name:
+            self._populate(cache.get(role_name, []), None)
 
     def _on_refresh_clicked(self, _btn):
         if self._conn:
             self._cache.pop(id(self._conn), None)
             self._status_label.set_label('Loading…')
             threading.Thread(
-                target=self._fetch_all_memberships, args=(self._conn,), daemon=True
+                target=self._fetch_all_memberships, args=(self._conn, self._role_name), daemon=True
             ).start()
 
     def _populate(self, rows, error):
