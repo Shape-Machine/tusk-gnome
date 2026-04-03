@@ -240,7 +240,14 @@ class TablePanel(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._load_gen = 0
         self._read_only = False
+        self._filter_debounce_id = None
         self._build_ui()
+        self.connect('destroy', self._on_destroy)
+
+    def _on_destroy(self, _widget):
+        if self._filter_debounce_id is not None:
+            GLib.source_remove(self._filter_debounce_id)
+            self._filter_debounce_id = None
 
     def _show_toast(self, msg):
         root = self.get_root()
@@ -786,18 +793,8 @@ class TablePanel(Gtk.Box):
                     pgsql.Identifier(item.col_name),
                     pgsql.SQL(new_type),
                 )
-            col_name = item.col_name
-
-            def _update_type():
-                rows = list(getattr(self, '_schema_raw_rows', []))
-                for i, r in enumerate(rows):
-                    if r[0] == col_name:
-                        rows[i] = (r[0], new_type, r[2], r[3], r[4])
-                        break
-                self._update_schema_view(rows, getattr(self, '_keys_raw_rows', []))
-
-            self._exec_ddl_and_reload_schema(conn, ddl, toast_msg='Column type updated',
-                                             on_success=_update_type)
+            # Fall back to a full reload so the DB-computed length field is accurate
+            self._exec_ddl_and_reload_schema(conn, ddl, toast_msg='Column type updated')
 
         ChangeTypeDialog(item.col_name, item.data_type, on_save).present(self.get_root())
 
@@ -1544,54 +1541,72 @@ class TablePanel(Gtk.Box):
                 GLib.idle_add(self._show_export_error,
                               'Export to network locations is not supported. Save to a local folder.')
                 return
-            with open_db(conn) as db:
-                with db.cursor() as cur:
-                    cur.execute(
-                        pgsql.SQL('SELECT * FROM {}.{}').format(
-                            pgsql.Identifier(schema), pgsql.Identifier(table)
+
+            import os
+            import tempfile
+            dir_ = os.path.dirname(path) or '.'
+            tmp_path = None
+            try:
+                fd, tmp_path = tempfile.mkstemp(dir=dir_, suffix='.tmp')
+                with open_db(conn) as db:
+                    with db.cursor() as cur:
+                        cur.execute(
+                            pgsql.SQL('SELECT * FROM {}.{}').format(
+                                pgsql.Identifier(schema), pgsql.Identifier(table)
+                            )
                         )
-                    )
-                    cols = [d.name for d in cur.description]
+                        cols = [d.name for d in cur.description]
 
-                    if fmt == 'csv':
-                        with open(path, 'w', newline='', encoding='utf-8') as f:
-                            w = csv.writer(f)
-                            w.writerow(cols)
-                            while True:
-                                chunk = cur.fetchmany(_CHUNK)
-                                if not chunk:
-                                    break
-                                w.writerows(chunk)
+                        if fmt == 'csv':
+                            with os.fdopen(fd, 'w', newline='', encoding='utf-8') as f:
+                                fd = None  # fdopen takes ownership
+                                w = csv.writer(f)
+                                w.writerow(cols)
+                                while True:
+                                    chunk = cur.fetchmany(_CHUNK)
+                                    if not chunk:
+                                        break
+                                    w.writerows(chunk)
 
-                    elif fmt == 'json':
-                        with open(path, 'w', encoding='utf-8') as f:
-                            f.write('[\n')
-                            first = True
-                            while True:
-                                chunk = cur.fetchmany(_CHUNK)
-                                if not chunk:
-                                    break
-                                for row in chunk:
-                                    if not first:
-                                        f.write(',\n')
-                                    f.write('  ' + json.dumps(
-                                        {col: v for col, v in zip(cols, row)},
-                                        default=str,
-                                    ))
-                                    first = False
-                            f.write('\n]\n')
+                        elif fmt == 'json':
+                            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                                fd = None
+                                f.write('[\n')
+                                first = True
+                                while True:
+                                    chunk = cur.fetchmany(_CHUNK)
+                                    if not chunk:
+                                        break
+                                    for row in chunk:
+                                        if not first:
+                                            f.write(',\n')
+                                        f.write('  ' + json.dumps(
+                                            {col: v for col, v in zip(cols, row)},
+                                            default=str,
+                                        ))
+                                        first = False
+                                f.write('\n]\n')
 
-                    else:
-                        qtable = f'{_quote(schema)}.{_quote(table)}'
-                        col_str = ', '.join(_quote(c) for c in cols)
-                        with open(path, 'w', encoding='utf-8') as f:
-                            while True:
-                                chunk = cur.fetchmany(_CHUNK)
-                                if not chunk:
-                                    break
-                                for row in chunk:
-                                    vals = ', '.join(_val(v) for v in row)
-                                    f.write(f'INSERT INTO {qtable} ({col_str}) VALUES ({vals});\n')
+                        else:
+                            qtable = f'{_quote(schema)}.{_quote(table)}'
+                            col_str = ', '.join(_quote(c) for c in cols)
+                            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                                fd = None
+                                while True:
+                                    chunk = cur.fetchmany(_CHUNK)
+                                    if not chunk:
+                                        break
+                                    for row in chunk:
+                                        vals = ', '.join(_val(v) for v in row)
+                                        f.write(f'INSERT INTO {qtable} ({col_str}) VALUES ({vals});\n')
+
+                os.replace(tmp_path, path)
+                tmp_path = None
+            finally:
+                if fd is not None:
+                    os.close(fd)
+                if tmp_path is not None:
+                    os.unlink(tmp_path)
 
         except Exception as e:
             GLib.idle_add(self._show_export_error, str(e))
