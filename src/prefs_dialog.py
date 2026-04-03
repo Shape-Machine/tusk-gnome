@@ -19,17 +19,27 @@ class PrefsDialog(Adw.PreferencesDialog):
         self._build_ui()
 
     def _build_ui(self):
-        page = Adw.PreferencesPage(
+        appearance_page = Adw.PreferencesPage(
             title='Appearance',
             icon_name='preferences-desktop-symbolic',
         )
-        self.add(page)
+        self.add(appearance_page)
 
         for key, title in [('sidebar', 'Sidebar'), ('main', 'Main Content')]:
             group = Adw.PreferencesGroup(title=title)
-            page.add(group)
+            appearance_page.add(group)
             group.add(self._font_combo_row(key))
             group.add(self._size_slider_row(key))
+
+        editor_page = Adw.PreferencesPage(
+            title='SQL Editor',
+            icon_name='utilities-terminal-symbolic',
+        )
+        self.add(editor_page)
+
+        notif_group = Adw.PreferencesGroup(title='Notifications')
+        editor_page.add(notif_group)
+        notif_group.add(self._notify_threshold_row())
 
     def _font_combo_row(self, key):
         model = Gtk.StringList()
@@ -47,6 +57,17 @@ class PrefsDialog(Adw.PreferencesDialog):
         adj = Gtk.Adjustment(value=current, lower=8, upper=20, step_increment=1, page_increment=2)
         row = Adw.SpinRow(title='Size', adjustment=adj)
         row.connect('notify::value', lambda r, _, k=key: self._save(f'{k}_size', int(r.get_value())))
+        return row
+
+    def _notify_threshold_row(self):
+        current = prefs.get('notify_threshold_s', 10)
+        adj = Gtk.Adjustment(value=current, lower=0, upper=3600, step_increment=5, page_increment=30)
+        row = Adw.SpinRow(
+            title='Notify when query exceeds',
+            subtitle='Seconds — set to 0 to disable',
+            adjustment=adj,
+        )
+        row.connect('notify::value', lambda r, _: prefs.put('notify_threshold_s', int(r.get_value())))
         return row
 
     def _save(self, key, value):

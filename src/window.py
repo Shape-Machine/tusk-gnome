@@ -19,6 +19,7 @@ from table_panel import TablePanel
 from role_panel import RolePanel
 from function_editor import FunctionEditor
 from command_palette import CommandPalette
+from activity_panel import ActivityPanel
 
 
 class TuskWindow(Adw.ApplicationWindow):
@@ -66,6 +67,7 @@ class TuskWindow(Adw.ApplicationWindow):
             self.add_action(a)
 
         add('quick-open',     lambda *_: self._on_quick_open())
+        add('server-activity', lambda *_: self._on_server_activity())
         add('close-tab',      lambda *_: self._close_current_tab())
         add('next-tab',       lambda *_: self._tab_view.select_next_page())
         add('prev-tab',       lambda *_: self._tab_view.select_previous_page())
@@ -395,6 +397,7 @@ class TuskWindow(Adw.ApplicationWindow):
         util_section = Gio.Menu()
         util_section.append('Preferences', 'app.preferences')
         util_section.append('Keyboard Shortcuts', 'win.show-help-overlay')
+        util_section.append('Server Activity', 'win.server-activity')
         menu.append_section(None, util_section)
 
         app_section = Gio.Menu()
@@ -1019,6 +1022,7 @@ class TuskWindow(Adw.ApplicationWindow):
         editor.connect('run-sql', lambda e: e.run())
         editor.connect('run-selected-sql', lambda e: e.run_selected())
         editor.connect('ddl-executed', lambda _: self._on_ddl_executed())
+        editor.connect('query-finished', self._on_query_finished)
 
         page = self._tab_view.append(editor)
         page.set_title(os.path.basename(file_path))
@@ -1041,6 +1045,41 @@ class TuskWindow(Adw.ApplicationWindow):
             page._tab_id = f'file:{new_path}'
             page.set_title(os.path.basename(new_path))
             page.get_child().file_path = new_path
+
+    def _on_query_finished(self, editor, elapsed_ms, is_error):
+        threshold_s = prefs.get('notify_threshold_s', 10)
+        if threshold_s <= 0:
+            return
+        elapsed_s = elapsed_ms // 1000
+        if elapsed_s < threshold_s:
+            return
+        if self.is_active():
+            return
+        elapsed_label = f'{elapsed_s}s'
+        title = f'Query failed ({elapsed_label})' if is_error else f'Query finished ({elapsed_label})'
+        sql_snippet = (editor._last_sql or '').split('\n')[0][:80]
+        notification = Gio.Notification.new(title)
+        notification.set_body(sql_snippet)
+        notification.set_default_action('app.activate')
+        self.get_application().send_notification('query-done', notification)
+
+    def _on_server_activity(self):
+        if not self._active_conn:
+            self.show_toast('Connect to a database first')
+            return
+        conn = self._active_conn
+        tab_id = f'activity:{conn["id"]}'
+        existing = self._find_tab(tab_id)
+        if existing:
+            self._tab_view.set_selected_page(existing)
+            return
+        panel = ActivityPanel(conn)
+        page = self._tab_view.append(panel)
+        page.set_title('Server Activity')
+        page.set_icon(Gio.ThemedIcon.new('utilities-system-monitor-symbolic'))
+        page._tab_id = tab_id
+        self._show_tabs()
+        self._tab_view.set_selected_page(page)
 
     def _find_tab(self, tab_id):
         pages = self._tab_view.get_pages()

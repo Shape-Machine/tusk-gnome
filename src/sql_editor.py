@@ -298,6 +298,7 @@ class SqlEditor(Gtk.Box):
         'run-sql':          (GObject.SignalFlags.RUN_FIRST, None, ()),
         'run-selected-sql': (GObject.SignalFlags.RUN_FIRST, None, ()),
         'ddl-executed':     (GObject.SignalFlags.RUN_FIRST, None, ()),
+        'query-finished':   (GObject.SignalFlags.RUN_FIRST, None, (int, bool)),  # elapsed_ms, is_error
     }
 
     def __init__(self, file_path):
@@ -1084,7 +1085,9 @@ class SqlEditor(Gtk.Box):
         return int((time.monotonic() - self._run_start_time) * 1000)
 
     def show_results(self, columns, rows):
+        elapsed = self._elapsed_ms()
         self._finish_run()
+        self.emit('query-finished', elapsed, False)
         if _DDL_RE.search(self._last_sql):
             self.emit('ddl-executed')
         n = len(rows)
@@ -1101,7 +1104,9 @@ class SqlEditor(Gtk.Box):
         self._results_stack.set_visible_child_name('grid')
 
     def show_message(self, text):
+        elapsed = self._elapsed_ms()
         self._finish_run()
+        self.emit('query-finished', elapsed, False)
         if _DDL_RE.search(self._last_sql):
             self.emit('ddl-executed')
         self._results_message.set_label(text)
@@ -1110,14 +1115,19 @@ class SqlEditor(Gtk.Box):
         self._append_history(self._last_sql, self._elapsed_ms())
 
     def show_error(self, text):
+        elapsed = self._elapsed_ms()
         self._finish_run()
+        self.emit('query-finished', elapsed, True)
         self._results_message.set_label(text)
         self._results_message.add_css_class('error')
         self._results_stack.set_visible_child_name('message')
         self._append_history(self._last_sql, self._elapsed_ms(), error=text)
 
     def _show_multi_results(self, results, use_autocommit=False):
+        elapsed = self._elapsed_ms()
         self._finish_run()
+        errors = sum(1 for r in results if r['kind'] == 'error')
+        self.emit('query-finished', elapsed, errors > 0)
         if any(_DDL_RE.search(r['stmt']) for r in results if r['kind'] in ('select', 'status')):
             self.emit('ddl-executed')
 
