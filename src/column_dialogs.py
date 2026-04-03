@@ -1176,15 +1176,16 @@ class CreateTableDialog(Adw.Dialog):
         preview_toggle_lbl.add_css_class('caption')
         toggle_row.append(preview_toggle_lbl)
 
-        copy_btn = Gtk.Button(label='Copy')
-        copy_btn.set_tooltip_text('Copy SQL to clipboard')
-        copy_btn.add_css_class('flat')
-        copy_btn.connect('clicked', self._copy_preview)
-        toggle_row.append(copy_btn)
-
         spacer = Gtk.Box()
         spacer.set_hexpand(True)
         toggle_row.append(spacer)
+
+        self._copy_btn = Gtk.Button(icon_name='edit-copy-symbolic')
+        self._copy_btn.set_tooltip_text('Copy SQL to clipboard')
+        self._copy_btn.add_css_class('flat')
+        self._copy_btn.set_visible(False)
+        self._copy_btn.connect('clicked', self._copy_preview)
+        toggle_row.append(self._copy_btn)
 
         self._preview_chevron = Gtk.Image.new_from_icon_name('pan-up-symbolic')
         toggle_row.append(self._preview_chevron)
@@ -1234,6 +1235,7 @@ class CreateTableDialog(Adw.Dialog):
         self._preview_chevron.set_from_icon_name(
             'pan-down-symbolic' if revealed else 'pan-up-symbolic'
         )
+        self._copy_btn.set_visible(revealed)
 
     def _is_dirty(self):
         if self._name_row.get_text().strip():
