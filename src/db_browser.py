@@ -7,26 +7,14 @@ gi.require_version('Adw', '1')
 
 from gi.repository import Gtk, GLib, GObject, Gdk, Gio
 
+from pg_errors import friendly_pg_error as _friendly_pg_error
+
 COL_ICON = 0
 COL_LABEL = 1
 COL_TYPE = 2    # 'schema' | 'group' | 'table' | 'view' | 'sequence' | 'enum' | 'function' | 'users' | 'role' | 'loading' | 'error'
 COL_CONN = 3
 COL_SCHEMA = 4
 COL_TABLE = 5
-
-_PG_ERROR_MAP = {
-    '42P01': 'This table no longer exists — it may have been dropped.',
-    '42501': "You don't have permission to access this.",
-    '08006': 'Lost connection to the database.',
-    '28P01': 'Authentication failed — check your username and password.',
-}
-
-
-def _friendly_pg_error(e):
-    code = getattr(e, 'pgcode', None) or getattr(e, 'sqlstate', None)
-    if code and code in _PG_ERROR_MAP:
-        return _PG_ERROR_MAP[code]
-    return str(e)
 
 
 class DbBrowser(Gtk.Box):
@@ -822,6 +810,8 @@ class DbBrowser(Gtk.Box):
         self._loading_spinner.stop()
         self._loading_bar.set_visible(False)
         self._store.clear()
+        self._db_switcher_bar.set_visible(False)
+        self._search_bar.set_visible(False)
         self._conn_error_label.set_label(error_msg)
         self._conn_error_bar.set_visible(True)
 
