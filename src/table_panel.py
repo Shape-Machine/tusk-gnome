@@ -1965,8 +1965,10 @@ class TablePanel(Gtk.Box):
             from psycopg import sql as pgsql
             from tunnel import open_db
 
-            set_cols = list(new_values.keys())
-            set_vals = list(new_values.values())
+            # Exclude PK columns from SET clause — they identify the row, not change it
+            pk_set = set(pk_cols)
+            set_cols = [c for c in new_values if c not in pk_set]
+            set_vals = [new_values[c] for c in set_cols]
             where_vals = [original_values[c] for c in pk_cols]
 
             with open_db(conn) as db:

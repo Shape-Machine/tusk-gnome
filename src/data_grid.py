@@ -166,10 +166,10 @@ def make_column_view(columns, rows, table_name=None):
     def get_selected_rows():
         bitset = selection.get_selection()
         result = []
-        valid, pos, _ = Gtk.BitsetIter.init_first(bitset)
+        valid, it, pos = Gtk.BitsetIter.init_first(bitset)
         while valid:
             result.append(sort_model.get_item(pos))
-            valid, pos = Gtk.BitsetIter.next(_)
+            valid, pos = Gtk.BitsetIter.next(it)
         return result
 
     def get_all_rows():
@@ -514,7 +514,7 @@ class PinColumnView(Gtk.Box):
         def get_selected_rows():
             bitset = self._selection.get_selection()
             result = []
-            valid, pos, it = Gtk.BitsetIter.init_first(bitset)
+            valid, it, pos = Gtk.BitsetIter.init_first(bitset)
             while valid:
                 result.append(self._sort_model.get_item(pos))
                 valid, pos = Gtk.BitsetIter.next(it)
