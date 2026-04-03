@@ -735,14 +735,15 @@ class TuskWindow(Adw.ApplicationWindow):
         self._browser.load(conn)
 
     def _on_database_switched(self, _browser, conn, new_dbname):
-        # Close all table tabs from the current database before switching
+        # Close all table and function tabs from the current database before switching
         if self._active_conn_id:
-            prefix = f'table:{self._active_conn_id}:'
             pages = self._tab_view.get_pages()
             to_close = [
                 pages.get_item(i)
                 for i in range(pages.get_n_items())
-                if getattr(pages.get_item(i), '_tab_id', '').startswith(prefix)
+                if getattr(pages.get_item(i), '_tab_id', '').startswith(
+                    (f'table:{self._active_conn_id}:', f'fn:{self._active_conn_id}:')
+                )
             ]
             for page in to_close:
                 self._tab_view.close_page(page)
@@ -852,14 +853,15 @@ class TuskWindow(Adw.ApplicationWindow):
             self._browser.clear()
 
     def _set_active_conn(self, conn):
-        # Close all table tabs belonging to the previous connection
+        # Close all table and function tabs belonging to the previous connection
         if self._active_conn_id:
-            prefix = f'table:{self._active_conn_id}:'
             pages = self._tab_view.get_pages()
             to_close = [
                 pages.get_item(i)
                 for i in range(pages.get_n_items())
-                if getattr(pages.get_item(i), '_tab_id', '').startswith(prefix)
+                if getattr(pages.get_item(i), '_tab_id', '').startswith(
+                    (f'table:{self._active_conn_id}:', f'fn:{self._active_conn_id}:')
+                )
             ]
             for page in to_close:
                 self._tab_view.close_page(page)
@@ -946,6 +948,10 @@ class TuskWindow(Adw.ApplicationWindow):
         page.set_title(f'fn: {signature}')
         page.set_icon(Gio.ThemedIcon.new('system-run-symbolic'))
         page._tab_id = tab_id
+
+        editor.connect('modified-changed', lambda _ed, dirty: page.set_title(
+            f'● fn: {signature}' if dirty else f'fn: {signature}'
+        ))
 
         self._show_tabs()
         self._tab_view.set_selected_page(page)

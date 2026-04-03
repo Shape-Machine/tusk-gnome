@@ -51,6 +51,10 @@ _FETCH_SQL = """
 
 
 class FunctionEditor(Gtk.Box):
+    __gsignals__ = {
+        'modified-changed': (GObject.SignalFlags.RUN_FIRST, None, (bool,)),
+    }
+
     def __init__(self, conn, schema, fn_name, fn_args):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._conn = conn
@@ -149,6 +153,7 @@ class FunctionEditor(Gtk.Box):
 
     def _set_modified(self, value):
         self._modified_dot.set_visible(value)
+        self.emit('modified-changed', value)
 
     def _load(self):
         self._status_label.set_label('Loading…')

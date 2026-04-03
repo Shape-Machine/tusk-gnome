@@ -35,6 +35,7 @@ tusk_sources = [
   'role_panel.py',
   'sql_editor.py',
   'file_explorer.py',
+  'function_editor.py',
   'prefs.py',
   'prefs_dialog.py',
   'sponsor_dialog.py',
