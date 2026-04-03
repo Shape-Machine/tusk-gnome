@@ -58,6 +58,7 @@ class FunctionEditor(Gtk.Box):
         self._fn_name = fn_name
         self._fn_args = fn_args
         self._dark_handler_id = 0
+        self._saving = False
         self._build_ui()
         self.connect('destroy', self._on_destroy)
 
@@ -90,6 +91,13 @@ class FunctionEditor(Gtk.Box):
         save_btn.connect('clicked', lambda _: self._save())
         toolbar.append(save_btn)
 
+        self._reload_btn = Gtk.Button(icon_name='view-refresh-symbolic')
+        self._reload_btn.add_css_class('flat')
+        self._reload_btn.set_tooltip_text('Reload from database')
+        self._reload_btn.set_visible(False)
+        self._reload_btn.connect('clicked', lambda _: self._load())
+        toolbar.append(self._reload_btn)
+
         self._status_label = Gtk.Label()
         self._status_label.add_css_class('caption')
         self._status_label.add_css_class('dim-label')
@@ -102,7 +110,10 @@ class FunctionEditor(Gtk.Box):
 
         # ── Error banner ──────────────────────────────────────────────────────
         self._error_banner = Adw.Banner(title='')
+        self._error_banner.set_button_label('Dismiss')
         self._error_banner.set_revealed(False)
+        self._error_banner.connect('button-clicked',
+            lambda _: self._error_banner.set_revealed(False))
         self.append(self._error_banner)
 
         # ── Source view ───────────────────────────────────────────────────────
@@ -161,19 +172,24 @@ class FunctionEditor(Gtk.Box):
         self._loading = False
         self._view.set_editable(True)
         self._set_modified(False)
+        self._reload_btn.set_visible(False)
         self._status_label.set_label('')
         self._error_banner.set_revealed(False)
 
     def _on_load_error(self, msg):
         self._loading = False
         self._status_label.set_label(f'Error: {msg}')
+        self._reload_btn.set_visible(True)
 
     def _save(self):
+        if self._saving:
+            return
         start = self._buffer.get_start_iter()
         end = self._buffer.get_end_iter()
         sql = self._buffer.get_text(start, end, False).strip()
         if not sql:
             return
+        self._saving = True
         self._status_label.set_label('Saving…')
         self._error_banner.set_revealed(False)
         threading.Thread(target=self._do_save, args=(sql,), daemon=True).start()
@@ -190,6 +206,7 @@ class FunctionEditor(Gtk.Box):
             GLib.idle_add(self._on_save_error, str(e))
 
     def _on_saved(self):
+        self._saving = False
         self._set_modified(False)
         self._status_label.set_label('Saved')
         GLib.timeout_add(2000, self._clear_status)
@@ -199,6 +216,7 @@ class FunctionEditor(Gtk.Box):
         return False
 
     def _on_save_error(self, msg):
+        self._saving = False
         self._status_label.set_label('')
         self._error_banner.set_title(msg)
         self._error_banner.set_revealed(True)
