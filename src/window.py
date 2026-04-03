@@ -971,12 +971,27 @@ class TuskWindow(Adw.ApplicationWindow):
 
     def _on_quick_open(self):
         items = self._browser.get_palette_items()
+        items += self._get_sql_file_items()
         if not items:
-            self.show_toast('No tables loaded — connect to a database first')
+            self.show_toast('No tables or SQL files found')
             return
         palette = CommandPalette(items)
         palette.connect('item-activated', self._on_palette_item_activated)
         palette.present(self)
+
+    def _get_sql_file_items(self):
+        import os
+        folder = self._file_explorer.current_dir
+        try:
+            entries = os.scandir(folder)
+        except OSError:
+            return []
+        result = []
+        for entry in entries:
+            if entry.is_file() and entry.name.lower().endswith('.sql'):
+                result.append((None, '', entry.path, 'file', entry.name))
+        result.sort(key=lambda t: t[4].lower())
+        return result
 
     def _on_palette_item_activated(self, _palette, conn, schema, name, item_type):
         if item_type == 'function':
@@ -985,6 +1000,8 @@ class TuskWindow(Adw.ApplicationWindow):
             fn_name = name[:paren]
             fn_args = name[paren + 1:-1]
             self._on_function_selected(None, conn, schema, fn_name, fn_args)
+        elif item_type == 'file':
+            self._on_file_activated(None, name)
         else:
             self._on_table_selected(None, conn, schema, name, item_type)
 

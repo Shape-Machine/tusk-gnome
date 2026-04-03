@@ -31,6 +31,10 @@ class FileExplorer(Gtk.Box):
         self._build_ui()
         self._refresh()
 
+    @property
+    def current_dir(self):
+        return self._current_dir
+
     def _build_ui(self):
         # ── Nav bar ───────────────────────────────────────────────────────────
         nav = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
