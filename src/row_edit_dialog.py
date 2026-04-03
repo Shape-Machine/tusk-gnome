@@ -90,10 +90,6 @@ class RowEditDialog(Adw.Dialog):
                 elif mode == 'insert' and default_val:
                     widget.set_text('')
 
-                # Show (auto) placeholder for insert mode columns with defaults
-                if mode == 'insert' and default_val and col not in self._required:
-                    widget.set_show_apply_button(False)
-
                 type_label = Gtk.Label(label=data_type)
                 type_label.add_css_class('caption')
                 type_label.add_css_class('dim-label')
@@ -101,8 +97,7 @@ class RowEditDialog(Adw.Dialog):
 
                 if mode == 'edit':
                     if is_pk:
-                        # Lock primary key fields — they cannot be modified
-                        widget.set_editable(False)
+                        # Lock primary key fields — mark as read-only visually
                         lock = Gtk.Image.new_from_icon_name('changes-prevent-symbolic')
                         lock.add_css_class('dim-label')
                         lock.set_tooltip_text('Primary key — cannot be changed')
