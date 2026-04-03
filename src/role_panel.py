@@ -28,6 +28,14 @@ _ALL_GROUP_ROLES_SQL = """
     ORDER BY rolname
 """
 
+_ALL_MEMBERSHIPS_SQL = """
+    SELECT r.rolname AS member, g.rolname AS group_role, m.admin_option
+    FROM pg_auth_members m
+    JOIN pg_roles r ON r.oid = m.member
+    JOIN pg_roles g ON g.oid = m.roleid
+    ORDER BY r.rolname, g.rolname
+"""
+
 _EFFECTIVE_PERMS_SQL = """
     WITH RECURSIVE role_tree(member, roleid) AS (
         SELECT m.member, m.roleid
@@ -140,6 +148,9 @@ class MembershipsTab(Gtk.Box):
         self._conn = None
         self._role_name = None
         self._memberships = []
+        # Cache: conn id → {role_name: [(group_role, admin_opt), ...]}
+        # Prefetched on first load per connection; invalidated on grant/revoke.
+        self._cache = {}
 
         toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         toolbar.set_margin_top(MARGIN_SM)
@@ -157,6 +168,12 @@ class MembershipsTab(Gtk.Box):
         self._status_label.add_css_class('caption')
         toolbar.append(self._status_label)
 
+        refresh_btn = Gtk.Button(icon_name='view-refresh-symbolic')
+        refresh_btn.add_css_class('flat')
+        refresh_btn.set_tooltip_text('Refresh')
+        refresh_btn.connect('clicked', self._on_refresh_clicked)
+        toolbar.append(refresh_btn)
+
         self.append(toolbar)
         self.append(Gtk.Separator())
 
@@ -167,20 +184,42 @@ class MembershipsTab(Gtk.Box):
     def load(self, conn, role_name):
         self._conn = conn
         self._role_name = role_name
+        conn_key = id(conn)
+        if conn_key in self._cache:
+            # Serve from cache instantly — no round-trip needed
+            rows = self._cache[conn_key].get(role_name, [])
+            self._populate(rows, None)
+            return
         self._status_label.set_label('Loading…')
-        threading.Thread(target=self._fetch, daemon=True).start()
+        threading.Thread(target=self._fetch_all_memberships, args=(conn,), daemon=True).start()
 
-    def _fetch(self):
+    def _fetch_all_memberships(self, conn):
+        """Fetch all role memberships in one query and populate the cache."""
         try:
-            import psycopg
             from tunnel import open_db
-            with open_db(self._conn) as db:
+            with open_db(conn) as db:
                 with db.cursor() as cur:
-                    cur.execute(_MEMBERSHIPS_SQL, (self._role_name,))
+                    cur.execute(_ALL_MEMBERSHIPS_SQL)
                     rows = cur.fetchall()
-            GLib.idle_add(self._populate, rows, None)
+            cache = {}
+            for member, group_role, admin_opt in rows:
+                cache.setdefault(member, []).append((group_role, admin_opt))
+            GLib.idle_add(self._store_cache_and_populate, conn, cache)
         except Exception as e:
             GLib.idle_add(self._populate, None, str(e))
+
+    def _store_cache_and_populate(self, conn, cache):
+        self._cache[id(conn)] = cache
+        rows = cache.get(self._role_name, [])
+        self._populate(rows, None)
+
+    def _on_refresh_clicked(self, _btn):
+        if self._conn:
+            self._cache.pop(id(self._conn), None)
+            self._status_label.set_label('Loading…')
+            threading.Thread(
+                target=self._fetch_all_memberships, args=(self._conn,), daemon=True
+            ).start()
 
     def _populate(self, rows, error):
         self._store.remove_all()
@@ -203,8 +242,12 @@ class MembershipsTab(Gtk.Box):
             conn=self._conn,
             role_name=self._role_name,
         )
-        dialog.connect('membership-granted', lambda *_: self.load(self._conn, self._role_name))
+        dialog.connect('membership-granted', lambda *_: self._invalidate_and_reload())
         dialog.present()
+
+    def _invalidate_and_reload(self):
+        self._cache.pop(id(self._conn), None)
+        self.load(self._conn, self._role_name)
 
     def revoke_selected(self, group_role):
         if not self._conn:
@@ -239,7 +282,7 @@ class MembershipsTab(Gtk.Box):
                         sql.Identifier(self._role_name),
                     ))
                 db.commit()
-            GLib.idle_add(self.load, self._conn, self._role_name)
+            GLib.idle_add(self._invalidate_and_reload)
         except Exception as e:
             GLib.idle_add(self._show_error, str(e))
 

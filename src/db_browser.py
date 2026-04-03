@@ -98,6 +98,7 @@ class DbBrowser(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.set_vexpand(True)
         self._load_gen = 0
+        self._search_debounce_id = None
         self._build_ui()
 
     def _build_ui(self):
@@ -306,17 +307,26 @@ class DbBrowser(Gtk.Box):
         return False
 
     def _on_search_changed(self, _entry):
+        if hasattr(self, '_search_debounce_id') and self._search_debounce_id:
+            GLib.source_remove(self._search_debounce_id)
+        self._search_debounce_id = GLib.timeout_add(300, self._do_search)
+
+    def _do_search(self):
+        self._search_debounce_id = None
         query = self._search_entry.get_text().strip()
         if query:
-            if self._saved_expansion is None:
+            expanding = self._saved_expansion is None
+            if expanding:
                 self._saved_expansion = self._get_expanded_paths()
             self._filter.refilter()
-            self._tree.expand_all()
+            if expanding:
+                self._tree.expand_all()
         else:
             self._filter.refilter()
             if self._saved_expansion is not None:
                 self._restore_expanded_paths(self._saved_expansion)
                 self._saved_expansion = None
+        return False
 
     def _get_expanded_paths(self):
         expanded = []
