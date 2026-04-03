@@ -76,6 +76,10 @@ class DbBrowser(Gtk.Box):
             GObject.SignalFlags.RUN_FIRST, None,
             (GObject.TYPE_PYOBJECT, str),  # conn, role_name
         ),
+        'function-selected': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str, str, str),  # conn, schema, fn_name, fn_args
+        ),
         'create-role-requested': (
             GObject.SignalFlags.RUN_FIRST, None,
             (GObject.TYPE_PYOBJECT,),  # conn
@@ -1041,6 +1045,13 @@ class DbBrowser(Gtk.Box):
             schema = self._filter.get_value(it, COL_SCHEMA)
             table = self._filter.get_value(it, COL_TABLE)
             self.emit('table-selected', conn, schema, table, item_type)
+        elif item_type == 'function':
+            conn = self._filter.get_value(it, COL_CONN)
+            schema = self._filter.get_value(it, COL_SCHEMA)
+            fn_name = self._filter.get_value(it, COL_TABLE)
+            label = self._filter.get_value(it, COL_LABEL)
+            fn_args = label[len(fn_name) + 1:-1]  # strip "name(" prefix and ")" suffix
+            self.emit('function-selected', conn, schema, fn_name, fn_args)
         elif item_type == 'role':
             conn = self._filter.get_value(it, COL_CONN)
             role_name = self._filter.get_value(it, COL_TABLE)
@@ -1063,6 +1074,14 @@ class DbBrowser(Gtk.Box):
                 schema = self._filter.get_value(it, COL_SCHEMA)
                 table = self._filter.get_value(it, COL_TABLE)
                 self.emit('table-selected', conn, schema, table, item_type)
+                return True
+            if item_type == 'function':
+                conn = self._filter.get_value(it, COL_CONN)
+                schema = self._filter.get_value(it, COL_SCHEMA)
+                fn_name = self._filter.get_value(it, COL_TABLE)
+                label = self._filter.get_value(it, COL_LABEL)
+                fn_args = label[len(fn_name) + 1:-1]
+                self.emit('function-selected', conn, schema, fn_name, fn_args)
                 return True
             if item_type == 'role':
                 conn = self._filter.get_value(it, COL_CONN)
