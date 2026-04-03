@@ -1205,12 +1205,41 @@ class CreateTableDialog(Adw.Dialog):
         else:
             self._add_col_row()
 
+        # Guard against accidental dismissal via Escape when the form is dirty
+        self.set_can_close(False)
+        self.connect('close-attempt', self._on_close_attempt)
+
     def _toggle_preview(self, _):
         revealed = not self._preview_revealer.get_reveal_child()
         self._preview_revealer.set_reveal_child(revealed)
         self._preview_chevron.set_from_icon_name(
             'pan-down-symbolic' if revealed else 'pan-up-symbolic'
         )
+
+    def _is_dirty(self):
+        if self._name_row.get_text().strip():
+            return True
+        for i in range(self._store.get_n_items()):
+            item = self._store.get_item(i)
+            if item.name.strip():
+                return True
+        return False
+
+    def _on_close_attempt(self, _dialog):
+        if not self._is_dirty():
+            self.close()
+            return
+        dlg = Adw.AlertDialog(
+            heading='Discard changes?',
+            body='You have unsaved changes to this table. Close anyway?',
+        )
+        dlg.add_response('cancel', 'Cancel')
+        dlg.add_response('discard', 'Discard')
+        dlg.set_response_appearance('discard', Adw.ResponseAppearance.DESTRUCTIVE)
+        dlg.set_default_response('cancel')
+        dlg.set_close_response('cancel')
+        dlg.connect('response', lambda d, r: self.close() if r == 'discard' else None)
+        dlg.present(self)
 
     def _get_schema(self):
         if self._schema_combo is not None:
@@ -1331,10 +1360,13 @@ class CreateTableDialog(Adw.Dialog):
 
         def _name_unbind(_f, li):
             entry = li.get_child()
-            for attr in ('_binding', '_changed_handler', '_activate_handler'):
+            if hasattr(entry, '_binding'):
+                entry._binding.unbind()
+                del entry._binding
+            for attr in ('_changed_handler', '_activate_handler'):
                 val = getattr(entry, attr, None)
                 if val is not None:
-                    (val.unbind if attr == '_binding' else entry.disconnect)(val)
+                    entry.disconnect(val)
                     delattr(entry, attr)
 
         name_factory = Gtk.SignalListItemFactory()
