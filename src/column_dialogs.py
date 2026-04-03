@@ -1122,7 +1122,17 @@ class CreateTableDialog(Adw.Dialog):
         col_view = self._build_col_view()
         col_frame = Gtk.Frame()
         col_frame.set_child(col_view)
-        outer.append(col_frame)
+
+        self._drop_indicator = Gtk.DrawingArea()
+        self._drop_indicator.set_can_target(False)
+        self._drop_indicator.set_hexpand(True)
+        self._drop_indicator.set_vexpand(True)
+        self._drop_indicator.set_draw_func(self._draw_drop_indicator)
+
+        col_overlay = Gtk.Overlay()
+        col_overlay.set_child(col_frame)
+        col_overlay.add_overlay(self._drop_indicator)
+        outer.append(col_overlay)
 
         # ── DDL preview (collapsible) ───────────────────────────────────────
         self._preview_buf, preview_view = _make_sql_preview_view()
@@ -1216,6 +1226,20 @@ class CreateTableDialog(Adw.Dialog):
             'pan-down-symbolic' if revealed else 'pan-up-symbolic'
         )
 
+    def _draw_drop_indicator(self, _area, cr, width, _height):
+        if self._drop_indicator_y < 0:
+            return
+        style = self._drop_indicator.get_style_context()
+        found, color = style.lookup_color('accent_bg_color')
+        if found:
+            cr.set_source_rgba(color.red, color.green, color.blue, 0.9)
+        else:
+            cr.set_source_rgba(0.27, 0.52, 0.87, 0.9)
+        cr.set_line_width(2)
+        cr.move_to(4, self._drop_indicator_y)
+        cr.line_to(width - 4, self._drop_indicator_y)
+        cr.stroke()
+
     def _is_dirty(self):
         if self._name_row.get_text().strip():
             return True
@@ -1270,16 +1294,32 @@ class CreateTableDialog(Adw.Dialog):
         # Source position is stored on self at drag-start to avoid passing
         # GObject.Value through the pipeline (causes segfault via GC mid-drag).
         self._drag_src_pos = -1
+        self._drop_indicator_y = -1  # y-pixel for the drop-target line; -1 = hidden
+
+        _HEADER_HEIGHT = 37  # approximate ColumnView header row height in px
 
         drop_target = Gtk.DropTarget.new(str, Gdk.DragAction.MOVE)
 
+        def _on_motion(_target, _x, y):
+            n = self._store.get_n_items()
+            row_idx = max(0, min(round((y - _HEADER_HEIGHT) / _ROW_HEIGHT), n))
+            self._drop_indicator_y = _HEADER_HEIGHT + row_idx * _ROW_HEIGHT
+            self._drop_indicator.queue_draw()
+            return Gdk.DragAction.MOVE
+
+        def _on_leave(_target):
+            self._drop_indicator_y = -1
+            self._drop_indicator.queue_draw()
+
         def _on_drop(_target, value, _x, y):
+            self._drop_indicator_y = -1
+            self._drop_indicator.queue_draw()
             if value != _DRAG_SENTINEL or self._drag_src_pos < 0:
                 return False
             src_pos = self._drag_src_pos
             self._drag_src_pos = -1
             n = self._store.get_n_items()
-            dst_pos = max(0, min(int(y / _ROW_HEIGHT), n - 1))
+            dst_pos = max(0, min(int((y - _HEADER_HEIGHT) / _ROW_HEIGHT), n - 1))
             if src_pos == dst_pos:
                 return False
             # Defer store mutation: modifying the ListStore inside the drop
@@ -1293,6 +1333,8 @@ class CreateTableDialog(Adw.Dialog):
             GLib.idle_add(_reorder)
             return True
 
+        drop_target.connect('motion', _on_motion)
+        drop_target.connect('leave', _on_leave)
         drop_target.connect('drop', _on_drop)
         col_view.add_controller(drop_target)
 
