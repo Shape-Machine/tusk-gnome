@@ -5,53 +5,41 @@ gi.require_version('Adw', '1')
 
 from gi.repository import Gtk, Adw, Gdk
 
-_TIERS = {
-    'One-time': [
-        ('Coffee',    '€5',  'https://buy.stripe.com/14A28saQ95kI9q93qNes003'),
-        ('Supporter', '€15', 'https://buy.stripe.com/4gMeVebUddRefOx7H3es004'),
-        ('Sponsor',   '€49', 'https://buy.stripe.com/00w6oI2jD7sQeKt7H3es005'),
-    ],
-    'Monthly': [
-        ('Hero Coffee',    '€5/mo',  'https://buy.stripe.com/8x29AU7DXdReeKtaTfes000'),
-        ('Hero Supporter', '€15/mo', 'https://buy.stripe.com/9B6bJ2f6p5kI59T2mJes001'),
-        ('Hero Sponsor',   '€49/mo', 'https://buy.stripe.com/bJe5kEgat8wUfOx3qNes002'),
-    ],
-}
+_SPONSOR_URL = 'https://buy.stripe.com/14A28saQ95kI9q93qNes003'
 
 
 class SponsorDialog(Adw.Dialog):
     def __init__(self, win):
-        super().__init__(title='Sponsor Tusk', content_width=420)
+        super().__init__(title='Sponsor Tusk', content_width=380)
         self._win = win
 
         toolbar_view = Adw.ToolbarView()
         toolbar_view.add_top_bar(Adw.HeaderBar())
 
-        page = Adw.PreferencesPage()
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
+        box.set_margin_top(32)
+        box.set_margin_bottom(32)
+        box.set_margin_start(32)
+        box.set_margin_end(32)
+        box.set_valign(Gtk.Align.CENTER)
 
-        desc_group = Adw.PreferencesGroup()
         label = Gtk.Label(
             label='Tusk is free and open source.\nIf it\'s useful to you, consider sponsoring its development.',
             wrap=True,
             justify=Gtk.Justification.CENTER,
-            margin_top=8,
-            margin_bottom=8,
         )
         label.add_css_class('dim-label')
-        desc_group.add(label)
-        page.add(desc_group)
+        box.append(label)
 
-        for group_title, tiers in _TIERS.items():
-            group = Adw.PreferencesGroup(title=group_title)
-            for name, price, url in tiers:
-                row = Adw.ActionRow(title=name, subtitle=price, activatable=True)
-                row.add_suffix(Gtk.Image.new_from_icon_name('go-next-symbolic'))
-                row.connect('activated', self._on_tier_activated, url)
-                group.add(row)
-            page.add(group)
+        btn = Gtk.Button(label='Sponsor Tusk')
+        btn.add_css_class('suggested-action')
+        btn.add_css_class('pill')
+        btn.set_halign(Gtk.Align.CENTER)
+        btn.connect('clicked', self._on_sponsor_clicked)
+        box.append(btn)
 
-        toolbar_view.set_content(page)
+        toolbar_view.set_content(box)
         self.set_child(toolbar_view)
 
-    def _on_tier_activated(self, _row, url):
-        Gtk.show_uri(self._win, url, Gdk.CURRENT_TIME)
+    def _on_sponsor_clicked(self, _btn):
+        Gtk.show_uri(self._win, _SPONSOR_URL, Gdk.CURRENT_TIME)
