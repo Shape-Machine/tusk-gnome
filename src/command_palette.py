@@ -102,6 +102,7 @@ class CommandPalette(Adw.Dialog):
         self._entry.set_margin_bottom(8)
         self._entry.connect('search-changed', self._on_search_changed)
         self._entry.connect('stop-search', lambda _: self.close())
+        self._entry.connect('activate', lambda _: self._activate_selected())
         outer.append(self._entry)
 
         outer.append(Gtk.Separator())
@@ -170,6 +171,12 @@ class CommandPalette(Adw.Dialog):
     def _on_search_changed(self, entry):
         self._populate(entry.get_text())
 
+    def _activate_selected(self):
+        row = self._listbox.get_selected_row()
+        if isinstance(row, _ResultRow):
+            self.emit('item-activated', row.conn, row.schema, row.name, row.item_type)
+            self.close()
+
     def _on_row_activated(self, _listbox, row):
         if isinstance(row, _ResultRow):
             self.emit('item-activated', row.conn, row.schema, row.name, row.item_type)
@@ -181,9 +188,7 @@ class CommandPalette(Adw.Dialog):
             return True
 
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
-            row = self._listbox.get_selected_row()
-            if row:
-                self._on_row_activated(self._listbox, row)
+            self._activate_selected()
             return True
 
         if keyval == Gdk.KEY_Down:
