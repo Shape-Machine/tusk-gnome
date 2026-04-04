@@ -30,7 +30,6 @@ class ColStatsDialog(Adw.Dialog):
         self._schema = schema
         self._table = table
         self._col_name = col_name
-        # schema_info is a list of (col_name, pg_type, ...) tuples
         self._pg_type = next(
             (r[1] for r in (schema_info or []) if r[0] == col_name), None
         )
@@ -39,15 +38,16 @@ class ColStatsDialog(Adw.Dialog):
         self.connect('closed', lambda _: self._cancel.set())
 
     def _build_ui(self):
-        header = Adw.HeaderBar()
+        self._header = Adw.HeaderBar()
         self._cancel_btn = Gtk.Button(label='Cancel')
         self._cancel_btn.connect('clicked', lambda _: self._cancel.set())
-        header.pack_end(self._cancel_btn)
+        self._header.pack_end(self._cancel_btn)
 
-        self._stack = Gtk.Stack()
-        self._stack.set_vhomogeneous(False)
+        self._toolbar_view = Adw.ToolbarView()
+        self._toolbar_view.add_top_bar(self._header)
+        self.set_child(self._toolbar_view)
 
-        # Loading state
+        # Start with spinner; results widget is built and swapped in later
         spinner_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         spinner_box.set_valign(Gtk.Align.CENTER)
         spinner_box.set_halign(Gtk.Align.CENTER)
@@ -57,39 +57,23 @@ class ColStatsDialog(Adw.Dialog):
         spinner.set_size_request(32, 32)
         spinner_box.append(spinner)
         spinner_box.append(Gtk.Label(label='Fetching statistics…'))
-        self._stack.add_named(spinner_box, 'loading')
+        self._toolbar_view.set_content(spinner_box)
 
-        # Error state
-        self._error_page = Adw.StatusPage(icon_name='dialog-error-symbolic')
-        self._stack.add_named(self._error_page, 'error')
+        threading.Thread(target=self._fetch, daemon=True).start()
 
-        # Results state
-        self._results_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
-        self._results_box.set_margin_top(12)
-        self._results_box.set_margin_bottom(20)
-        self._results_box.set_margin_start(16)
-        self._results_box.set_margin_end(16)
+    def _make_results_widget(self, results_box):
+        """Wrap results_box in a scroll that caps at 75% of screen height."""
+        monitor = Gdk.Display.get_default().get_monitors().get_item(0)
+        max_h = int(monitor.get_geometry().height * 0.75) if monitor else 800
 
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroll.set_propagate_natural_height(True)
-        # Cap at ~75% of screen height so the dialog never overflows the viewport
-        monitor = Gdk.Display.get_default().get_monitors().get_item(0)
-        if monitor:
-            screen_h = monitor.get_geometry().height
-            scroll.set_max_content_height(int(screen_h * 0.75))
+        scroll.set_max_content_height(max_h)
         clamp = Adw.Clamp(maximum_size=380)
-        clamp.set_child(self._results_box)
+        clamp.set_child(results_box)
         scroll.set_child(clamp)
-        self._stack.add_named(scroll, 'results')
-
-        toolbar_view = Adw.ToolbarView()
-        toolbar_view.add_top_bar(header)
-        toolbar_view.set_content(self._stack)
-        self.set_child(toolbar_view)
-
-        self._stack.set_visible_child_name('loading')
-        threading.Thread(target=self._fetch, daemon=True).start()
+        return scroll
 
     def _fetch(self):
         try:
@@ -102,7 +86,6 @@ class ColStatsDialog(Adw.Dialog):
                 if self._cancel.is_set():
                     return
 
-                # Basic stats — works for all types
                 with db.cursor() as cur:
                     cur.execute(
                         pgsql.SQL('''
@@ -121,7 +104,6 @@ class ColStatsDialog(Adw.Dialog):
                 if self._cancel.is_set():
                     return
 
-                # Numeric stats — only for numeric types
                 numeric = None
                 if self._pg_type and _is_numeric(self._pg_type):
                     with db.cursor() as cur:
@@ -139,7 +121,6 @@ class ColStatsDialog(Adw.Dialog):
                 if self._cancel.is_set():
                     return
 
-                # Top-5 most frequent values
                 with db.cursor() as cur:
                     cur.execute(
                         pgsql.SQL('''
@@ -167,13 +148,18 @@ class ColStatsDialog(Adw.Dialog):
 
         null_pct = f'{null_count / total * 100:.1f}%' if total else '0%'
 
-        # Overview group
+        results_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        results_box.set_margin_top(12)
+        results_box.set_margin_bottom(20)
+        results_box.set_margin_start(16)
+        results_box.set_margin_end(16)
+
         overview = Adw.PreferencesGroup(title='Overview')
         for label, value in [
-            ('Total rows',     f'{total:,}'),
-            ('Not null',       f'{not_null:,}'),
-            ('Null',           f'{null_count:,}  ({null_pct})'),
-            ('Distinct',       f'{distinct_count:,}'),
+            ('Total rows', f'{total:,}'),
+            ('Not null',   f'{not_null:,}'),
+            ('Null',       f'{null_count:,}  ({null_pct})'),
+            ('Distinct',   f'{distinct_count:,}'),
         ]:
             row = Adw.ActionRow(title=label)
             row.add_suffix(Gtk.Label(label=value, css_classes=['dim-label']))
@@ -189,9 +175,8 @@ class ColStatsDialog(Adw.Dialog):
                 row.add_suffix(lbl)
                 overview.add(row)
 
-        self._results_box.append(overview)
+        results_box.append(overview)
 
-        # Numeric group
         if numeric and numeric[0] is not None:
             avg_val, sum_val = numeric
             num_group = Adw.PreferencesGroup(title='Numeric')
@@ -202,22 +187,22 @@ class ColStatsDialog(Adw.Dialog):
                 row = Adw.ActionRow(title=label)
                 row.add_suffix(Gtk.Label(label=value, css_classes=['dim-label']))
                 num_group.add(row)
-            self._results_box.append(num_group)
+            results_box.append(num_group)
 
-        # Top values group
         if top_values:
             top_group = Adw.PreferencesGroup(title='Top Values')
             for val, freq in top_values:
                 row = Adw.ActionRow(title=val or '(empty)')
                 row.add_suffix(Gtk.Label(label=f'{freq:,}', css_classes=['dim-label']))
                 top_group.add(row)
-            self._results_box.append(top_group)
+            results_box.append(top_group)
 
         self._cancel_btn.set_visible(False)
-        self._stack.set_visible_child_name('results')
+        self._toolbar_view.set_content(self._make_results_widget(results_box))
 
     def _on_error(self, msg):
-        self._error_page.set_title('Could not load statistics')
-        self._error_page.set_description(msg)
+        error_page = Adw.StatusPage(icon_name='dialog-error-symbolic')
+        error_page.set_title('Could not load statistics')
+        error_page.set_description(msg)
         self._cancel_btn.set_visible(False)
-        self._stack.set_visible_child_name('error')
+        self._toolbar_view.set_content(error_page)
