@@ -5,7 +5,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Gtk, Adw, GLib
+from gi.repository import Gtk, Adw, GLib, Gdk
 from psycopg import sql as pgsql
 
 
@@ -71,6 +71,11 @@ class ColStatsDialog(Adw.Dialog):
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroll.set_propagate_natural_height(True)
+        # Cap at ~75% of screen height so the dialog never overflows the viewport
+        monitor = Gdk.Display.get_default().get_monitors().get_item(0)
+        if monitor:
+            screen_h = monitor.get_geometry().height
+            scroll.set_max_content_height(int(screen_h * 0.75))
         clamp = Adw.Clamp(maximum_size=380)
         clamp.set_child(self._results_box)
         scroll.set_child(clamp)
