@@ -125,8 +125,11 @@ class FavouritesStore:
 
     def _load(self):
         if os.path.exists(FAVOURITES_FILE):
-            with open(FAVOURITES_FILE) as f:
-                return json.load(f)
+            try:
+                with open(FAVOURITES_FILE) as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, OSError):
+                return {}
         return {}
 
     def _save(self):

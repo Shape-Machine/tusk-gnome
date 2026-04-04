@@ -1,3 +1,4 @@
+import re
 import threading
 
 import gi
@@ -21,7 +22,6 @@ COL_TABLE = 5
 
 def _quote_identifier(name):
     """Return name quoted with double-quotes if it needs quoting (uppercase or special chars)."""
-    import re
     if re.fullmatch(r'[a-z_][a-z0-9_]*', name):
         return name
     return '"' + name.replace('"', '""') + '"'
@@ -445,6 +445,15 @@ class DbBrowser(Gtk.Box):
                     self._tree.expand_row(fpath, False)
                 return
             it = self._store.iter_next(it)
+
+    def _expand_favourites(self):
+        """Expand the Favourites group row in the tree."""
+        it = self._store.get_iter_first()
+        if it and self._store.get_value(it, COL_TYPE) == 'favourites':
+            path = self._store.get_path(it)
+            fpath = self._filter.convert_child_path_to_path(path)
+            if fpath:
+                self._tree.expand_row(fpath, False)
 
     def _on_db_selected(self, dropdown, _param):
         if self._db_switch_inhibit:
@@ -871,6 +880,9 @@ class DbBrowser(Gtk.Box):
         elif default_schema:
             self._expand_schema(default_schema)
 
+        if pinned:
+            self._expand_favourites()
+
     def _show_error(self, error_msg, gen):
         if gen != self._load_gen:
             return
@@ -1184,10 +1196,14 @@ class DbBrowser(Gtk.Box):
         self._popup_menu(menu, x, y)
 
     def _do_pin(self, conn, schema, table, item_type):
+        if not conn:
+            return
         self._favs.add(conn.get('id', ''), schema, table, item_type)
         self.load(conn)
 
     def _do_unpin(self, conn, schema, table):
+        if not conn:
+            return
         self._favs.remove(conn.get('id', ''), schema, table)
         self.load(conn)
 
