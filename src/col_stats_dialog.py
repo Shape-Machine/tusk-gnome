@@ -29,10 +29,9 @@ def show_col_stats(parent_widget, conn, schema, table, col_name, schema_info):
     cancel  = threading.Event()
 
     # Show a non-intrusive toast so the user knows something is happening
-    root = parent_widget.get_root()
     toast = Adw.Toast(title=f'Loading statistics for {col_name}…')
     toast.set_timeout(0)   # keep until dismissed
-    toast_overlay = _find_toast_overlay(root)
+    toast_overlay = _find_toast_overlay(parent_widget)
     if toast_overlay:
         toast_overlay.add_toast(toast)
 
@@ -131,6 +130,8 @@ def _make_scroll(child):
 
 def _present_results(parent_widget, col_name, basic, numeric, top_values, toast):
     toast.dismiss()
+    if not parent_widget.get_root():
+        return
 
     total, not_null, null_count, distinct_count, min_val, max_val = basic
     total = total or 0
@@ -201,6 +202,8 @@ def _present_results(parent_widget, col_name, basic, numeric, top_values, toast)
 
 def _present_error(parent_widget, col_name, msg, toast):
     toast.dismiss()
+    if not parent_widget.get_root():
+        return
 
     error_page = Adw.StatusPage(icon_name='dialog-error-symbolic')
     error_page.set_title('Could not load statistics')

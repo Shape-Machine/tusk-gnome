@@ -631,28 +631,36 @@ class TuskWindow(Adw.ApplicationWindow):
 
         # Deduplicate
         if new_line in existing_lines:
-            for w in warnings:
-                banner = Adw.Banner(title=w)
-                banner.set_revealed(True)
-            toast = Adw.Toast(title='Entry already exists in .pgpass — nothing written')
-            toast.set_timeout(3)
+            msg = 'Entry already exists in .pgpass — nothing written'
+            if warnings:
+                msg += f'. ⚠ {warnings[0]}'
+            toast = Adw.Toast(title=msg)
+            toast.set_timeout(4)
             self._toast_overlay.add_toast(toast)
             return
 
-        # Write
+        # Write atomically: write to a temp file then os.replace() so the
+        # original is never left truncated if the write is interrupted.
         try:
+            import tempfile
             lines = existing_lines + [new_line, '']
             content = '\n'.join(lines)
-            with open(pgpass_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-            os.chmod(pgpass_path, 0o600)
+            pgpass_dir = os.path.dirname(pgpass_path) or os.path.expanduser('~')
+            with tempfile.NamedTemporaryFile(
+                mode='w', encoding='utf-8',
+                dir=pgpass_dir, delete=False,
+            ) as tmp:
+                tmp.write(content)
+                tmp_path = tmp.name
+            os.chmod(tmp_path, 0o600)
+            os.replace(tmp_path, pgpass_path)
         except OSError as e:
             alert = Adw.AlertDialog(heading='Export Failed', body=str(e))
             alert.add_response('ok', 'OK')
             alert.present(self)
             return
 
-        msg = f'Exported to ~/.pgpass'
+        msg = 'Exported to ~/.pgpass'
         if warnings:
             msg += f' — ⚠ {warnings[0]}'
         toast = Adw.Toast(title=msg)

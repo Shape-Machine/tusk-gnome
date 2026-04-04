@@ -1947,7 +1947,9 @@ class TablePanel(Gtk.Box):
 
     def _on_col_stats_requested(self, _col_view, col_name):
         from col_stats_dialog import show_col_stats
-        show_col_stats(
+        if hasattr(self, '_stats_cancel'):
+            self._stats_cancel.set()
+        self._stats_cancel = show_col_stats(
             self, self._conn, self._current_schema, self._current_table,
             col_name, self._schema_info,
         )
