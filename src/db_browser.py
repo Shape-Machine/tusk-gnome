@@ -7,15 +7,28 @@ gi.require_version('Adw', '1')
 
 from gi.repository import Gtk, Adw, GLib, GObject, Gdk, Gio
 
+from connections import FavouritesStore
 from pg_errors import friendly_pg_error as _friendly_pg_error
 from style import MARGIN_XS, MARGIN_SM, MARGIN_MD
 
 COL_ICON = 0
 COL_LABEL = 1
-COL_TYPE = 2    # 'schema' | 'group' | 'table' | 'view' | 'sequence' | 'enum' | 'function' | 'users' | 'role' | 'loading' | 'error'
+COL_TYPE = 2    # 'schema' | 'group' | 'table' | 'view' | 'sequence' | 'enum' | 'function' | 'users' | 'role' | 'loading' | 'error' | 'favourites' | 'favourite'
 COL_CONN = 3
 COL_SCHEMA = 4
 COL_TABLE = 5
+
+
+def _quote_identifier(name):
+    """Return name quoted with double-quotes if it needs quoting (uppercase or special chars)."""
+    import re
+    if re.fullmatch(r'[a-z_][a-z0-9_]*', name):
+        return name
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _qualified_name(schema, name):
+    return f'{_quote_identifier(schema)}.{_quote_identifier(name)}'
 
 
 class DbBrowser(Gtk.Box):
@@ -96,6 +109,10 @@ class DbBrowser(Gtk.Box):
             GObject.SignalFlags.RUN_FIRST, None,
             (GObject.TYPE_PYOBJECT,),  # conn
         ),
+        'copy-to-clipboard': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (str,),  # text to copy
+        ),
     }
 
     def __init__(self):
@@ -103,6 +120,7 @@ class DbBrowser(Gtk.Box):
         self.set_vexpand(True)
         self._load_gen = 0
         self._search_debounce_id = None
+        self._favs = FavouritesStore()
         self._build_ui()
         self.connect('destroy', self._on_destroy)
 
@@ -289,9 +307,9 @@ class DbBrowser(Gtk.Box):
             return False
         if item_type == 'group':
             return self._group_has_match(model, it, query)
-        if item_type in ('table', 'view', 'sequence', 'enum', 'function'):
+        if item_type in ('table', 'view', 'sequence', 'enum', 'function', 'favourite'):
             return query in model.get_value(it, COL_LABEL).lower()
-        if item_type == 'users':
+        if item_type in ('users', 'favourites'):
             child = model.iter_children(it)
             while child:
                 if query in model.get_value(child, COL_LABEL).lower():
@@ -306,7 +324,7 @@ class DbBrowser(Gtk.Box):
         child = model.iter_children(group_it)
         while child:
             child_type = model.get_value(child, COL_TYPE)
-            if child_type in ('table', 'view', 'sequence', 'enum', 'function'):
+            if child_type in ('table', 'view', 'sequence', 'enum', 'function', 'favourite'):
                 if query in model.get_value(child, COL_LABEL).lower():
                     return True
             elif child_type == 'group':
@@ -710,6 +728,18 @@ class DbBrowser(Gtk.Box):
 
         default_schema = conn.get('default_schema', '').strip()
 
+        pinned = self._favs.get(conn.get('id', ''))
+        if pinned:
+            fav_it = self._store.append(None, [
+                'starred-symbolic', 'Favourites', 'favourites', conn, '', ''
+            ])
+            for fav in pinned:
+                label = f'{fav["table"]} ({fav["schema"]})'
+                self._store.append(fav_it, [
+                    'x-office-spreadsheet-symbolic', label, 'favourite',
+                    conn, fav['schema'], fav['table'],
+                ])
+
         for schema, items in sorted(schema_items.items()):
             schema_it = self._store.append(None, [
                 'folder-symbolic', schema, 'schema', conn, schema, ''
@@ -885,6 +915,10 @@ class DbBrowser(Gtk.Box):
 
         if item_type in ('table', 'view'):
             self._show_table_context_menu(x, y, item_type)
+        elif item_type == 'favourite':
+            self._show_favourite_context_menu(x, y)
+        elif item_type in ('sequence', 'enum', 'function'):
+            self._show_copy_only_context_menu(x, y)
         elif item_type == 'schema':
             self._show_schema_node_context_menu(x, y)
         elif item_type == 'group' and label == 'Tables':
@@ -1024,8 +1058,6 @@ class DbBrowser(Gtk.Box):
         popover.popup()
 
     def _show_table_context_menu(self, x, y, item_type):
-        if self._read_only:
-            return
         ag = Gio.SimpleActionGroup()
 
         def add_action(name, cb):
@@ -1033,40 +1065,131 @@ class DbBrowser(Gtk.Box):
             action.connect('activate', lambda *_: cb())
             ag.add_action(action)
 
-        add_action('create-table', lambda: self.emit(
-            'create-table-requested', self._ctx_conn, self._ctx_schema
+        conn_id = self._ctx_conn.get('id', '') if self._ctx_conn else ''
+        is_pinned = self._favs.is_pinned(conn_id, self._ctx_schema, self._ctx_table)
+
+        add_action('copy-name', lambda: self.emit(
+            'copy-to-clipboard', self._ctx_table
         ))
-        add_action('rename-table', lambda: self.emit(
-            'rename-table-requested', self._ctx_conn, self._ctx_schema, self._ctx_table
+        add_action('copy-qualified', lambda: self.emit(
+            'copy-to-clipboard', _qualified_name(self._ctx_schema, self._ctx_table)
         ))
-        add_action('clone-table', lambda: self.emit(
-            'clone-table-requested', self._ctx_conn, self._ctx_schema, self._ctx_table
-        ))
-        add_action('truncate-table', lambda: self.emit(
-            'truncate-table-requested', self._ctx_conn, self._ctx_schema, self._ctx_table
-        ))
-        add_action('drop-object', lambda: self.emit(
-            'drop-table-requested', self._ctx_conn, self._ctx_schema,
-            self._ctx_table, self._ctx_item_type
-        ))
+        if is_pinned:
+            add_action('unpin', lambda: self._do_unpin(
+                self._ctx_conn, self._ctx_schema, self._ctx_table
+            ))
+        else:
+            add_action('pin', lambda: self._do_pin(
+                self._ctx_conn, self._ctx_schema, self._ctx_table, self._ctx_item_type
+            ))
+
+        copy_section = Gio.Menu()
+        copy_section.append('Copy Name', 'tbl.copy-name')
+        copy_section.append('Copy Qualified Name', 'tbl.copy-qualified')
+
+        pin_section = Gio.Menu()
+        if is_pinned:
+            pin_section.append('Unpin from Favourites', 'tbl.unpin')
+        else:
+            pin_section.append('Pin to Favourites', 'tbl.pin')
+
+        menu = Gio.Menu()
+        menu.append_section(None, copy_section)
+        menu.append_section(None, pin_section)
+
+        if not self._read_only:
+            add_action('create-table', lambda: self.emit(
+                'create-table-requested', self._ctx_conn, self._ctx_schema
+            ))
+            add_action('rename-table', lambda: self.emit(
+                'rename-table-requested', self._ctx_conn, self._ctx_schema, self._ctx_table
+            ))
+            add_action('clone-table', lambda: self.emit(
+                'clone-table-requested', self._ctx_conn, self._ctx_schema, self._ctx_table
+            ))
+            add_action('truncate-table', lambda: self.emit(
+                'truncate-table-requested', self._ctx_conn, self._ctx_schema, self._ctx_table
+            ))
+            add_action('drop-object', lambda: self.emit(
+                'drop-table-requested', self._ctx_conn, self._ctx_schema,
+                self._ctx_table, self._ctx_item_type
+            ))
+
+            write_section1 = Gio.Menu()
+            write_section1.append('Create Table…', 'tbl.create-table')
+            if item_type == 'table':
+                write_section1.append('Rename Table…', 'tbl.rename-table')
+                write_section1.append('Clone Structure…', 'tbl.clone-table')
+            write_section2 = Gio.Menu()
+            if item_type == 'table':
+                write_section2.append('Truncate…', 'tbl.truncate-table')
+            drop_label = 'Drop Table…' if item_type == 'table' else 'Drop View…'
+            write_section2.append(drop_label, 'tbl.drop-object')
+            menu.append_section(None, write_section1)
+            menu.append_section(None, write_section2)
 
         self.insert_action_group('tbl', ag)
+        self._popup_menu(menu, x, y)
+
+    def _show_copy_only_context_menu(self, x, y):
+        """Context menu for sequence/enum/function nodes — copy actions only."""
+        ag = Gio.SimpleActionGroup()
+
+        def add_action(name, cb):
+            action = Gio.SimpleAction.new(name, None)
+            action.connect('activate', lambda *_: cb())
+            ag.add_action(action)
+
+        add_action('copy-name', lambda: self.emit(
+            'copy-to-clipboard', self._ctx_table
+        ))
+        add_action('copy-qualified', lambda: self.emit(
+            'copy-to-clipboard', _qualified_name(self._ctx_schema, self._ctx_table)
+        ))
+        self.insert_action_group('obj', ag)
+
+        menu = Gio.Menu()
+        menu.append('Copy Name', 'obj.copy-name')
+        menu.append('Copy Qualified Name', 'obj.copy-qualified')
+        self._popup_menu(menu, x, y)
+
+    def _show_favourite_context_menu(self, x, y):
+        """Context menu for pinned favourite nodes — unpin + copy."""
+        ag = Gio.SimpleActionGroup()
+
+        def add_action(name, cb):
+            action = Gio.SimpleAction.new(name, None)
+            action.connect('activate', lambda *_: cb())
+            ag.add_action(action)
+
+        add_action('unpin', lambda: self._do_unpin(
+            self._ctx_conn, self._ctx_schema, self._ctx_table
+        ))
+        add_action('copy-name', lambda: self.emit(
+            'copy-to-clipboard', self._ctx_table
+        ))
+        add_action('copy-qualified', lambda: self.emit(
+            'copy-to-clipboard', _qualified_name(self._ctx_schema, self._ctx_table)
+        ))
+        self.insert_action_group('fav', ag)
 
         section1 = Gio.Menu()
-        section1.append('Create Table…', 'tbl.create-table')
-        if item_type == 'table':
-            section1.append('Rename Table…', 'tbl.rename-table')
-            section1.append('Clone Structure…', 'tbl.clone-table')
+        section1.append('Unpin from Favourites', 'fav.unpin')
         section2 = Gio.Menu()
-        if item_type == 'table':
-            section2.append('Truncate…', 'tbl.truncate-table')
-        drop_label = 'Drop Table…' if item_type == 'table' else 'Drop View…'
-        section2.append(drop_label, 'tbl.drop-object')
-
+        section2.append('Copy Name', 'fav.copy-name')
+        section2.append('Copy Qualified Name', 'fav.copy-qualified')
         menu = Gio.Menu()
         menu.append_section(None, section1)
         menu.append_section(None, section2)
         self._popup_menu(menu, x, y)
+
+    def _do_pin(self, conn, schema, table, item_type):
+        self._favs.add(conn.get('id', ''), schema, table, item_type)
+        self.load(conn)
+
+    def _do_unpin(self, conn, schema, table):
+        self._favs.remove(conn.get('id', ''), schema, table)
+        self.load(conn)
 
     def _on_row_activated(self, tree, path, _col):
         it = self._filter.get_iter(path)
@@ -1076,6 +1199,16 @@ class DbBrowser(Gtk.Box):
             schema = self._filter.get_value(it, COL_SCHEMA)
             table = self._filter.get_value(it, COL_TABLE)
             self.emit('table-selected', conn, schema, table, item_type)
+        elif item_type == 'favourite':
+            conn = self._filter.get_value(it, COL_CONN)
+            schema = self._filter.get_value(it, COL_SCHEMA)
+            table = self._filter.get_value(it, COL_TABLE)
+            fav_type = next(
+                (f['item_type'] for f in self._favs.get(conn.get('id', ''))
+                 if f['schema'] == schema and f['table'] == table),
+                'table'
+            )
+            self.emit('table-selected', conn, schema, table, fav_type)
         elif item_type == 'function':
             conn = self._filter.get_value(it, COL_CONN)
             schema = self._filter.get_value(it, COL_SCHEMA)
@@ -1087,7 +1220,7 @@ class DbBrowser(Gtk.Box):
             conn = self._filter.get_value(it, COL_CONN)
             role_name = self._filter.get_value(it, COL_TABLE)
             self.emit('role-selected', conn, role_name)
-        elif item_type in ('schema', 'group', 'users'):
+        elif item_type in ('schema', 'group', 'users', 'favourites'):
             if tree.row_expanded(path):
                 tree.collapse_row(path)
             else:

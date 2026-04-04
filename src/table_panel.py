@@ -644,6 +644,14 @@ class TablePanel(Gtk.Box):
             action.connect('activate', handler)
             ag.add_action(action)
 
+        def _copy_column_name(row):
+            if row is None:
+                return
+            col_name = row.get(0)
+            Gdk.Display.get_default().get_clipboard().set(col_name)
+            self._show_toast(f'Copied: {col_name}')
+
+        make_action('copy-col-name', lambda *_: _copy_column_name(_right_clicked_row[0]))
         make_action('change-type',    lambda *_: self._on_change_type(_right_clicked_row[0]))
         make_action('set-default',    lambda *_: self._on_set_default(_right_clicked_row[0]))
         make_action('toggle-null',    lambda *_: self._on_toggle_nullable(_right_clicked_row[0]))
@@ -656,26 +664,30 @@ class TablePanel(Gtk.Box):
 
         col_view.insert_action_group('schema', ag)
 
-        section1 = Gio.Menu()
-        if is_table:
-            section1.append('Rename Column…', 'schema.rename-column')
-        section1.append('Change Type…',       'schema.change-type')
-        section1.append('Set Default…',       'schema.set-default')
-        section1.append('Toggle NOT NULL',    'schema.toggle-null')
-        section1.append('Set as Primary Key', 'schema.set-pk')
-        section2 = Gio.Menu()
-        section2.append('Drop Column…', 'schema.drop-column')
+        copy_section = Gio.Menu()
+        copy_section.append('Copy Column Name', 'schema.copy-col-name')
         menu = Gio.Menu()
-        menu.append_section(None, section1)
-        menu.append_section(None, section2)
+        menu.append_section(None, copy_section)
+
+        if not self._read_only:
+            section1 = Gio.Menu()
+            if is_table:
+                section1.append('Rename Column…', 'schema.rename-column')
+            section1.append('Change Type…',       'schema.change-type')
+            section1.append('Set Default…',       'schema.set-default')
+            section1.append('Toggle NOT NULL',    'schema.toggle-null')
+            section1.append('Set as Primary Key', 'schema.set-pk')
+            section2 = Gio.Menu()
+            section2.append('Drop Column…', 'schema.drop-column')
+            menu.append_section(None, section1)
+            menu.append_section(None, section2)
 
         popover = Gtk.PopoverMenu(menu_model=menu)
         popover.set_has_arrow(False)
         popover.set_parent(col_view)
 
         def on_right_click(_gesture, _n, x, y):
-            if self._read_only or not _cell_hit[0]:
-                _cell_hit[0] = False
+            if not _cell_hit[0]:
                 return
             _cell_hit[0] = False
             rect = Gdk.Rectangle()
