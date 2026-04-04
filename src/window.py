@@ -583,7 +583,11 @@ class TuskWindow(Adw.ApplicationWindow):
         import stat
         self._conn_popover.popdown()
         conn = row._conn
-        password = self._store.get_password(conn['id'])
+        try:
+            password = self._store.get_password(conn['id'])
+        except Exception as e:
+            self._show_keyring_error(str(e))
+            return
         if not password:
             alert = Adw.AlertDialog(
                 heading='No Password Stored',
@@ -594,6 +598,18 @@ class TuskWindow(Adw.ApplicationWindow):
             return
 
         pgpass_path = os.path.expanduser('~/.pgpass')
+
+        # pgpass is line-based — newlines in any field would corrupt the file
+        for field, value in [('host', conn['host']), ('username', conn['username']),
+                              ('password', password)]:
+            if '\n' in str(value) or '\r' in str(value):
+                alert = Adw.AlertDialog(
+                    heading='Cannot Export',
+                    body=f'The {field} contains a newline character, which cannot be represented in .pgpass.',
+                )
+                alert.add_response('ok', 'OK')
+                alert.present(self)
+                return
 
         def _escape(s):
             return str(s).replace('\\', '\\\\').replace(':', '\\:')
@@ -641,6 +657,7 @@ class TuskWindow(Adw.ApplicationWindow):
 
         # Write atomically: write to a temp file then os.replace() so the
         # original is never left truncated if the write is interrupted.
+        tmp_path = None
         try:
             import tempfile
             lines = existing_lines + [new_line, '']
@@ -654,13 +671,20 @@ class TuskWindow(Adw.ApplicationWindow):
                 tmp_path = tmp.name
             os.chmod(tmp_path, 0o600)
             os.replace(tmp_path, pgpass_path)
+            tmp_path = None  # replaced successfully — no cleanup needed
         except OSError as e:
             alert = Adw.AlertDialog(heading='Export Failed', body=str(e))
             alert.add_response('ok', 'OK')
             alert.present(self)
             return
+        finally:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
-        msg = 'Exported to ~/.pgpass'
+        msg = '1 entry written to ~/.pgpass'
         if warnings:
             msg += f' — ⚠ {warnings[0]}'
         toast = Adw.Toast(title=msg)

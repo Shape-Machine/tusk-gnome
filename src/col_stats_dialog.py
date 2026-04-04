@@ -54,8 +54,8 @@ def show_col_stats(parent_widget, conn, schema, table, col_name, schema_info):
                                 COUNT({col})            AS not_null,
                                 COUNT(*) - COUNT({col}) AS null_count,
                                 COUNT(DISTINCT {col})   AS distinct_count,
-                                MIN({col}::text)        AS min_val,
-                                MAX({col}::text)        AS max_val
+                                MIN({col})              AS min_val,
+                                MAX({col})              AS max_val
                             FROM {schema}.{table}
                         ''').format(schema=schema_id, table=table_id, col=col_id)
                     )
@@ -94,11 +94,15 @@ def show_col_stats(parent_widget, conn, schema, table, col_name, schema_info):
                     )
                     top_values = cur.fetchall()
 
-            if not cancel.is_set():
+            if cancel.is_set():
+                GLib.idle_add(toast.dismiss)
+            else:
                 GLib.idle_add(_present_results,
                               parent_widget, col_name, basic, numeric, top_values, toast)
         except Exception as e:
-            if not cancel.is_set():
+            if cancel.is_set():
+                GLib.idle_add(toast.dismiss)
+            else:
                 GLib.idle_add(_present_error, parent_widget, col_name, str(e), toast)
 
     threading.Thread(target=fetch, daemon=True).start()
