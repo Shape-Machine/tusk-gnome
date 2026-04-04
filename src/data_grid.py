@@ -459,7 +459,7 @@ class PinColumnView(Gtk.Box):
 
         def _cancel():
             cancelled[0] = True
-            committed[0] = True  # prevent focus-out from committing
+            committed[0] = True
             popover.popdown()
 
         # Enter via the Entry's own activate signal (most reliable in GTK 4)
@@ -476,14 +476,14 @@ class PinColumnView(Gtk.Box):
         esc_ctrl.connect('key-pressed', _on_key_pressed)
         entry.add_controller(esc_ctrl)
 
-        # Blur / focus-out → commit (clicking away saves the edit)
-        focus_ctrl = Gtk.EventControllerFocus()
-        focus_ctrl.connect('leave', lambda _: _commit())
-        entry.add_controller(focus_ctrl)
+        # Clicking away / losing focus: use popover 'closed' instead of
+        # EventControllerFocus.leave.  'closed' fires exactly once when the
+        # popover is dismissed regardless of intermediate focus transitions,
+        # so there's no race with the double-click event propagation.
+        popover.connect('closed', lambda _: _commit())
 
         popover.popup()
-        # Defer grab_focus until the popover is mapped
-        GLib.idle_add(entry.grab_focus)
+        GLib.idle_add(lambda: entry.grab_focus() and GLib.SOURCE_REMOVE)
 
     # ── Column management ─────────────────────────────────────────────────────
 
