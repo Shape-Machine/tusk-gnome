@@ -11,7 +11,7 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib, Gio, GObject, Pango, Gdk
 
 import prefs
-from data_grid import make_column_view, update_column_view, make_pinnable_column_view, PinColumnView
+from data_grid import make_column_view, update_column_view, make_pinnable_column_view, PinColumnView, _Row
 from pg_errors import friendly_pg_error as _friendly_pg_error
 from style import MARGIN_XS, MARGIN_SM, MARGIN_MD
 
@@ -1658,16 +1658,25 @@ class TablePanel(Gtk.Box):
                 update_column_view(existing, rows)
             else:
                 col_view = make_pinnable_column_view(self._all_data_cols, rows, table_name=table_name)
+                # Enable inline editing BEFORE set_child so _inline_edit is True
+                # when factory on_setup runs during widget realization.
+                inline_edit = (
+                    self._item_type == 'table'
+                    and not self._read_only
+                    and self._pk_cols
+                    and self._schema_info
+                )
+                if inline_edit:
+                    col_view.enable_inline_edit(self._schema_info)
+                    col_view.connect('cell-edited', self._on_cell_edited)
                 self._data_scroll.set_child(col_view)
                 self._column_view = col_view
                 if self._item_type == 'table':
                     self._edit_btn.set_sensitive(False)
                     self._delete_btn.set_sensitive(False)
-                    col_view.connect('activate', self._on_data_row_activate)
                     col_view.get_model().connect('selection-changed', self._on_data_selection_changed)
-                    if not self._read_only and self._pk_cols and self._schema_info:
-                        col_view.enable_inline_edit(self._schema_info)
-                        col_view.connect('cell-edited', self._on_cell_edited)
+                    if not inline_edit:
+                        col_view.connect('activate', self._on_data_row_activate)
         else:
             filter_text = self._filter_entry.get_text().strip()
             if filter_text:
@@ -1947,8 +1956,25 @@ class TablePanel(Gtk.Box):
         threading.Thread(
             target=self._exec_update,
             args=(conn, schema, table, new_values, original_values, pk_cols, page),
+            kwargs={'row_item': row_item, 'col_idx': col_idx, 'new_value_raw': new_value},
             daemon=True,
         ).start()
+
+    def _update_cell_in_place(self, row_item, col_idx, new_value):
+        """Update a single cell in the local store without reloading the page."""
+        col_view = self._column_view
+        if not isinstance(col_view, PinColumnView):
+            return
+        store = col_view._store
+        for i in range(store.get_n_items()):
+            if store.get_item(i) is row_item:
+                # Build updated raw values and splice in a new _Row object.
+                # Splicing the same GObject instance back in is a no-op for GTK
+                # (same pointer → no rebind); a new instance guarantees on_bind fires.
+                updated = list(row_item._raw)
+                updated[col_idx] = new_value
+                store.splice(i, 1, [_Row(updated)])
+                break
 
     def _show_edit_dialog(self, initial_values):
         from row_edit_dialog import RowEditDialog
@@ -2080,7 +2106,8 @@ class TablePanel(Gtk.Box):
         except Exception as e:
             GLib.idle_add(self._show_edit_error, str(e))
 
-    def _exec_update(self, conn, schema, table, new_values, original_values, pk_cols, page):
+    def _exec_update(self, conn, schema, table, new_values, original_values, pk_cols, page,
+                     row_item=None, col_idx=None, new_value_raw=None):
         try:
             import psycopg
             from psycopg import sql as pgsql
@@ -2112,7 +2139,10 @@ class TablePanel(Gtk.Box):
                     cur.execute(query, set_vals + where_vals)
                 db.commit()
             GLib.idle_add(self._show_toast, 'Row updated')
-            GLib.idle_add(self._reload_data_page, conn, schema, table, page)
+            if row_item is not None and col_idx is not None:
+                GLib.idle_add(self._update_cell_in_place, row_item, col_idx, new_value_raw)
+            else:
+                GLib.idle_add(self._reload_data_page, conn, schema, table, page)
         except Exception as e:
             GLib.idle_add(self._show_edit_error, str(e))
 
