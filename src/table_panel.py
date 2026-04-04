@@ -1951,8 +1951,9 @@ class TablePanel(Gtk.Box):
         schema, table = self._current_schema, self._current_table
         pk_cols, page = list(self._pk_cols), self._data_page
         original_values = {col: row_item.raw(i) for i, col in enumerate(self._all_data_cols)}
-        new_values = dict(original_values)
-        new_values[self._all_data_cols[col_idx]] = new_value
+        # Only SET the edited column — not all columns — to avoid overwriting
+        # concurrent changes and to prevent errors on generated/computed columns.
+        new_values = {self._all_data_cols[col_idx]: new_value}
         threading.Thread(
             target=self._exec_update,
             args=(conn, schema, table, new_values, original_values, pk_cols, page),

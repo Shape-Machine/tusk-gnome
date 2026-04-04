@@ -446,7 +446,6 @@ class PinColumnView(Gtk.Box):
         popover.set_child(entry)
 
         committed = [False]
-        cancelled = [False]
 
         def _commit():
             if committed[0]:
@@ -458,7 +457,6 @@ class PinColumnView(Gtk.Box):
             self.emit('cell-edited', row_item, col_idx, new_value)
 
         def _cancel():
-            cancelled[0] = True
             committed[0] = True
             popover.popdown()
 
