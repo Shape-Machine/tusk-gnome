@@ -45,12 +45,14 @@ class ColStatsDialog(Adw.Dialog):
         header.pack_end(self._cancel_btn)
 
         self._stack = Gtk.Stack()
+        self._stack.set_vhomogeneous(False)
 
         # Loading state
         spinner_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         spinner_box.set_valign(Gtk.Align.CENTER)
         spinner_box.set_halign(Gtk.Align.CENTER)
-        spinner_box.set_vexpand(True)
+        spinner_box.set_margin_top(32)
+        spinner_box.set_margin_bottom(32)
         spinner = Gtk.Spinner(spinning=True)
         spinner.set_size_request(32, 32)
         spinner_box.append(spinner)
