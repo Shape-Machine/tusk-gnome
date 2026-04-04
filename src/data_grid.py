@@ -406,7 +406,8 @@ class PinColumnView(Gtk.Box):
         """
         self._inline_edit = True
         self._boolean_cols = {r[0] for r in schema_info if r[1] == 'boolean'}
-        self._rebuild_columns()
+        # No rebuild needed — factories read _inline_edit lazily when cells
+        # are first created, which hasn't happened yet at this call site.
 
     # ── Inline edit ───────────────────────────────────────────────────────────
 
@@ -429,9 +430,19 @@ class PinColumnView(Gtk.Box):
         entry.set_text('' if raw is None else str(raw))
         entry.set_width_chars(max(24, len(str(raw)) if raw is not None else 0))
 
+        # Parent the popover to self (the PinColumnView box), not to the
+        # recycled cell label — parenting to a factory cell causes GTK CSS
+        # node assertion failures.  Translate coordinates to self's space.
         popover = Gtk.Popover()
         popover.set_has_arrow(True)
-        popover.set_parent(label)
+        popover.set_parent(self)
+        coords = label.translate_coordinates(self, 0, 0)
+        if coords:
+            tx, ty = coords
+            rect = Gdk.Rectangle()
+            rect.x, rect.y = tx, ty
+            rect.width, rect.height = label.get_width(), label.get_height()
+            popover.set_pointing_to(rect)
         popover.set_child(entry)
 
         committed = [False]
