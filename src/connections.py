@@ -6,6 +6,7 @@ import keyring
 
 CONFIG_DIR = os.path.join(os.path.expanduser('~'), '.config', 'tusk')
 CONNECTIONS_FILE = os.path.join(CONFIG_DIR, 'connections.json')
+FAVOURITES_FILE = os.path.join(CONFIG_DIR, 'favourites.json')
 KEYRING_SERVICE = 'xyz.shapemachine.tusk-gnome'
 
 
@@ -113,3 +114,46 @@ class ConnectionStore:
                 self._connections[i] = conn
                 break
         self._save()
+
+
+class FavouritesStore:
+    """Persists per-connection pinned table/view favourites."""
+
+    def __init__(self):
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        self._data = self._load()  # dict: conn_id -> [{schema, table, item_type}]
+
+    def _load(self):
+        if os.path.exists(FAVOURITES_FILE):
+            with open(FAVOURITES_FILE) as f:
+                return json.load(f)
+        return {}
+
+    def _save(self):
+        tmp = FAVOURITES_FILE + '.tmp'
+        with open(tmp, 'w') as f:
+            json.dump(self._data, f, indent=2)
+        os.replace(tmp, FAVOURITES_FILE)
+
+    def get(self, conn_id):
+        return list(self._data.get(conn_id, []))
+
+    def add(self, conn_id, schema, table, item_type):
+        favs = self._data.setdefault(conn_id, [])
+        if not any(f['schema'] == schema and f['table'] == table for f in favs):
+            favs.append({'schema': schema, 'table': table, 'item_type': item_type})
+            self._save()
+
+    def remove(self, conn_id, schema, table):
+        if conn_id in self._data:
+            self._data[conn_id] = [
+                f for f in self._data[conn_id]
+                if not (f['schema'] == schema and f['table'] == table)
+            ]
+            self._save()
+
+    def is_pinned(self, conn_id, schema, table):
+        return any(
+            f['schema'] == schema and f['table'] == table
+            for f in self._data.get(conn_id, [])
+        )

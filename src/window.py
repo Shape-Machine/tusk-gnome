@@ -260,6 +260,10 @@ class TuskWindow(Adw.ApplicationWindow):
         toast.set_timeout(timeout)
         self._toast_overlay.add_toast(toast)
 
+    def _on_copy_to_clipboard(self, _browser, text):
+        Gdk.Display.get_default().get_clipboard().set(text)
+        self.show_toast(f'Copied: {text}')
+
     def _build_ui(self):
         root = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
         root.set_position(300)
@@ -373,6 +377,7 @@ class TuskWindow(Adw.ApplicationWindow):
         self._browser.connect('drop-role-requested', self._on_drop_role_requested)
         self._browser.connect('change-password-requested', self._on_change_password_requested)
         self._browser.connect('edit-connection-requested', self._on_edit_connection_from_browser)
+        self._browser.connect('copy-to-clipboard', self._on_copy_to_clipboard)
         sidebar_paned.set_start_child(self._browser)
 
         self._file_explorer = FileExplorer()
