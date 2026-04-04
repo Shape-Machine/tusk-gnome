@@ -1946,12 +1946,11 @@ class TablePanel(Gtk.Box):
         self._show_edit_dialog(initial)
 
     def _on_col_stats_requested(self, _col_view, col_name):
-        from col_stats_dialog import ColStatsDialog
-        dlg = ColStatsDialog(
-            self._conn, self._current_schema, self._current_table,
+        from col_stats_dialog import show_col_stats
+        show_col_stats(
+            self, self._conn, self._current_schema, self._current_table,
             col_name, self._schema_info,
         )
-        dlg.present(self.get_root())
 
     def _on_cell_edited(self, _col_view, row_item, col_idx, new_value):
         if not self._pk_cols or col_idx >= len(self._all_data_cols):
