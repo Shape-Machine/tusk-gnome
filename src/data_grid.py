@@ -319,7 +319,8 @@ class PinColumnView(Gtk.Box):
         self._table_name = table_name
         self._pinned = []   # ordered list of original column indices that are pinned
         self._inline_edit = False
-        self._boolean_cols = set()  # col names with data_type == 'boolean'
+        self._boolean_cols = set()   # col names with data_type == 'boolean'
+        self._pk_col_names = set()   # col names that are not inline-editable
 
         # Underlying store shared by both views
         self._store = Gio.ListStore(item_type=_Row)
@@ -397,17 +398,32 @@ class PinColumnView(Gtk.Box):
         for row in rows:
             self._store.append(_Row(list(row)))
 
-    def enable_inline_edit(self, schema_info):
+    def replace_row(self, row_item, col_idx, new_value):
+        """Update a single cell in the store without a full reload.
+
+        Splices in a new _Row so GTK rebinds the affected cells (same GObject
+        pointer is a no-op for on_bind; a new instance guarantees a rebind).
+        Returns True if the row was found and replaced, False if not in store.
+        """
+        for i in range(self._store.get_n_items()):
+            if self._store.get_item(i) is row_item:
+                updated = list(row_item._raw)
+                updated[col_idx] = new_value
+                self._store.splice(i, 1, [_Row(updated)])
+                return True
+        return False
+
+    def enable_inline_edit(self, schema_info, pk_cols=()):
         """Enable double-click inline editing.
 
         schema_info is [(col_name, data_type, is_nullable, default_val)].
-        Call immediately after construction; rebuilds columns so cells pick up
-        the double-click gesture.
+        pk_cols is a collection of column names that should not be editable.
+        Call immediately after construction; factories read _inline_edit lazily
+        when cells are first created, which hasn't happened yet at this call site.
         """
         self._inline_edit = True
         self._boolean_cols = {r[0] for r in schema_info if r[1] == 'boolean'}
-        # No rebuild needed — factories read _inline_edit lazily when cells
-        # are first created, which hasn't happened yet at this call site.
+        self._pk_col_names = set(pk_cols)
 
     # ── Inline edit ───────────────────────────────────────────────────────────
 
@@ -418,6 +434,9 @@ class PinColumnView(Gtk.Box):
             return
         raw = getattr(label, '_raw_value', None)
         col_name = self._columns[col_idx]
+
+        if col_name in self._pk_col_names:
+            return  # PK columns are not editable inline
 
         if col_name in self._boolean_cols:
             # Toggle boolean immediately — no popover needed
@@ -451,7 +470,7 @@ class PinColumnView(Gtk.Box):
             if committed[0]:
                 return
             committed[0] = True
-            text = entry.get_text()
+            text = entry.get_text().strip()
             new_value = None if text == '' else text
             popover.popdown()
             self.emit('cell-edited', row_item, col_idx, new_value)

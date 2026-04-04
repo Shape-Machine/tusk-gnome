@@ -11,7 +11,7 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib, Gio, GObject, Pango, Gdk
 
 import prefs
-from data_grid import make_column_view, update_column_view, make_pinnable_column_view, PinColumnView, _Row
+from data_grid import make_column_view, update_column_view, make_pinnable_column_view, PinColumnView
 from pg_errors import friendly_pg_error as _friendly_pg_error
 from style import MARGIN_XS, MARGIN_SM, MARGIN_MD
 
@@ -1667,7 +1667,7 @@ class TablePanel(Gtk.Box):
                     and self._schema_info
                 )
                 if inline_edit:
-                    col_view.enable_inline_edit(self._schema_info)
+                    col_view.enable_inline_edit(self._schema_info, pk_cols=self._pk_cols)
                     col_view.connect('cell-edited', self._on_cell_edited)
                 self._data_scroll.set_child(col_view)
                 self._column_view = col_view
@@ -1947,6 +1947,8 @@ class TablePanel(Gtk.Box):
     def _on_cell_edited(self, _col_view, row_item, col_idx, new_value):
         if not self._pk_cols or col_idx >= len(self._all_data_cols):
             return
+        if self._all_data_cols[col_idx] in self._pk_cols:
+            return  # PK columns are not editable (belt-and-suspenders; gesture is also blocked)
         conn = self._conn
         schema, table = self._current_schema, self._current_table
         pk_cols, page = list(self._pk_cols), self._data_page
@@ -1961,21 +1963,13 @@ class TablePanel(Gtk.Box):
             daemon=True,
         ).start()
 
-    def _update_cell_in_place(self, row_item, col_idx, new_value):
-        """Update a single cell in the local store without reloading the page."""
+    def _apply_cell_update(self, conn, schema, table, page, row_item, col_idx, new_value):
+        """Update the cell in the store, falling back to a full reload if not found."""
         col_view = self._column_view
-        if not isinstance(col_view, PinColumnView):
+        if isinstance(col_view, PinColumnView) and col_view.replace_row(row_item, col_idx, new_value):
             return
-        store = col_view._store
-        for i in range(store.get_n_items()):
-            if store.get_item(i) is row_item:
-                # Build updated raw values and splice in a new _Row object.
-                # Splicing the same GObject instance back in is a no-op for GTK
-                # (same pointer → no rebind); a new instance guarantees on_bind fires.
-                updated = list(row_item._raw)
-                updated[col_idx] = new_value
-                store.splice(i, 1, [_Row(updated)])
-                break
+        # Row not in store (page changed, sort rebuilt, etc.) — reload to stay consistent.
+        self._reload_data_page(conn, schema, table, page)
 
     def _show_edit_dialog(self, initial_values):
         from row_edit_dialog import RowEditDialog
@@ -2138,10 +2132,16 @@ class TablePanel(Gtk.Box):
                         ),
                     )
                     cur.execute(query, set_vals + where_vals)
+                    rowcount = cur.rowcount
                 db.commit()
+            if rowcount == 0:
+                GLib.idle_add(self._show_toast, 'Row not found — may have been deleted')
+                GLib.idle_add(self._reload_data_page, conn, schema, table, page)
+                return
             GLib.idle_add(self._show_toast, 'Row updated')
             if row_item is not None and col_idx is not None:
-                GLib.idle_add(self._update_cell_in_place, row_item, col_idx, new_value_raw)
+                GLib.idle_add(self._apply_cell_update, conn, schema, table, page,
+                              row_item, col_idx, new_value_raw)
             else:
                 GLib.idle_add(self._reload_data_page, conn, schema, table, page)
         except Exception as e:
