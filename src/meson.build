@@ -44,6 +44,7 @@ tusk_sources = [
   'row_edit_dialog.py',
   'tunnel.py',
   'pgpass_dialog.py',
+  'col_stats_dialog.py',
 ]
 
 install_data(tusk_sources, install_dir: pkgdatadir)

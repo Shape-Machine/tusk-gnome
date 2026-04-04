@@ -1669,6 +1669,7 @@ class TablePanel(Gtk.Box):
                 if inline_edit:
                     col_view.enable_inline_edit(self._schema_info, pk_cols=self._pk_cols)
                     col_view.connect('cell-edited', self._on_cell_edited)
+                col_view.connect('column-stats-requested', self._on_col_stats_requested)
                 self._data_scroll.set_child(col_view)
                 self._column_view = col_view
                 if self._item_type == 'table':
@@ -1943,6 +1944,14 @@ class TablePanel(Gtk.Box):
             return
         initial = {col: row.raw(i) for i, col in enumerate(self._all_data_cols)}
         self._show_edit_dialog(initial)
+
+    def _on_col_stats_requested(self, _col_view, col_name):
+        from col_stats_dialog import ColStatsDialog
+        dlg = ColStatsDialog(
+            self._conn, self._current_schema, self._current_table,
+            col_name, self._schema_info,
+        )
+        dlg.present(self.get_root())
 
     def _on_cell_edited(self, _col_view, row_item, col_idx, new_value):
         if not self._pk_cols or col_idx >= len(self._all_data_cols):
