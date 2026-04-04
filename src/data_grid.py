@@ -307,10 +307,12 @@ class PinColumnView(Gtk.Box):
     __gtype_name__ = 'TuskPinColumnView'
 
     __gsignals__ = {
-        'activate':    (GObject.SignalFlags.RUN_FIRST, None, (int,)),
-        'cell-edited': (GObject.SignalFlags.RUN_FIRST, None,
-                        (GObject.TYPE_PYOBJECT, int, GObject.TYPE_PYOBJECT)),
+        'activate':              (GObject.SignalFlags.RUN_FIRST, None, (int,)),
+        'cell-edited':           (GObject.SignalFlags.RUN_FIRST, None,
+                                  (GObject.TYPE_PYOBJECT, int, GObject.TYPE_PYOBJECT)),
         # (row_item, col_idx, new_value)
+        'column-stats-requested': (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        # (col_name,)
     }
 
     def __init__(self, columns, rows, table_name=None):
@@ -373,6 +375,14 @@ class PinColumnView(Gtk.Box):
         ag.add_action(unpin_act)
         self._main_cv.insert_action_group('pincol', ag)
         self._pin_cv.insert_action_group('pincol', ag)
+
+        # Action group for column-header stats
+        stats_ag = Gio.SimpleActionGroup()
+        stats_act = Gio.SimpleAction.new('show', GLib.VariantType.new('s'))
+        stats_act.connect('activate', lambda _a, p: self.emit('column-stats-requested', p.unpack()))
+        stats_ag.add_action(stats_act)
+        self._main_cv.insert_action_group('colstats', stats_ag)
+        self._pin_cv.insert_action_group('colstats', stats_ag)
 
         self.append(self._pin_scroll)
         self.append(self._sep)
@@ -617,10 +627,13 @@ class PinColumnView(Gtk.Box):
 
         # Header menu
         header_menu = Gio.Menu()
-        item = Gio.MenuItem.new('Unpin Column' if pinned else 'Pin Column', None)
+        stats_item = Gio.MenuItem.new('Column Statistics…', None)
+        stats_item.set_action_and_target_value('colstats.show', GLib.Variant('s', name))
+        header_menu.append_item(stats_item)
+        pin_item = Gio.MenuItem.new('Unpin Column' if pinned else 'Pin Column', None)
         action = 'pincol.unpin' if pinned else 'pincol.pin'
-        item.set_action_and_target_value(action, GLib.Variant('i', col_idx))
-        header_menu.append_item(item)
+        pin_item.set_action_and_target_value(action, GLib.Variant('i', col_idx))
+        header_menu.append_item(pin_item)
         col.set_header_menu(header_menu)
 
         return col

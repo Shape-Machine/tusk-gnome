@@ -518,6 +518,7 @@ class TuskWindow(Adw.ApplicationWindow):
         menu.append('Edit', 'row.edit')
         menu.append('Duplicate', 'row.duplicate')
         menu.append('Copy as URI', 'row.copy-uri')
+        menu.append('Export to .pgpass…', 'row.export-pgpass')
         menu.append('Delete', 'row.delete')
 
         menu_btn = Gtk.MenuButton()
@@ -543,6 +544,9 @@ class TuskWindow(Adw.ApplicationWindow):
         copy_uri_action = Gio.SimpleAction.new('copy-uri', None)
         copy_uri_action.connect('activate', lambda a, p, r=row: self._on_copy_as_uri(r))
         ag.add_action(copy_uri_action)
+        export_pgpass_action = Gio.SimpleAction.new('export-pgpass', None)
+        export_pgpass_action.connect('activate', lambda a, p, r=row: self._on_export_pgpass(r))
+        ag.add_action(export_pgpass_action)
         delete_action = Gio.SimpleAction.new('delete', None)
         delete_action.connect('activate', lambda a, p, r=row: self._on_delete_connection(r))
         ag.add_action(delete_action)
@@ -572,6 +576,87 @@ class TuskWindow(Adw.ApplicationWindow):
         Gdk.Display.get_default().get_clipboard().set(uri)
         toast = Adw.Toast(title='URI copied to clipboard')
         toast.set_timeout(2)
+        self._toast_overlay.add_toast(toast)
+
+    def _on_export_pgpass(self, row):
+        import os
+        import stat
+        self._conn_popover.popdown()
+        conn = row._conn
+        password = self._store.get_password(conn['id'])
+        if not password:
+            alert = Adw.AlertDialog(
+                heading='No Password Stored',
+                body=f'"{conn["name"]}" has no stored password and cannot be exported to .pgpass.',
+            )
+            alert.add_response('ok', 'OK')
+            alert.present(self)
+            return
+
+        pgpass_path = os.path.expanduser('~/.pgpass')
+
+        def _escape(s):
+            return str(s).replace('\\', '\\\\').replace(':', '\\:')
+
+        new_line = ':'.join([
+            _escape(conn['host']),
+            _escape(conn['port']),
+            '*',
+            _escape(conn['username']),
+            _escape(password),
+        ])
+
+        # Read existing entries
+        existing_lines = []
+        warnings = []
+        if os.path.exists(pgpass_path):
+            try:
+                st = os.stat(pgpass_path)
+                if st.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
+                    mode_str = oct(stat.S_IMODE(st.st_mode))
+                    warnings.append(
+                        f'.pgpass permissions are {mode_str} — should be 0600. '
+                        'Credentials may be visible to other users on this system.'
+                    )
+                with open(pgpass_path, encoding='utf-8') as f:
+                    existing_lines = f.read().splitlines()
+            except OSError as e:
+                alert = Adw.AlertDialog(
+                    heading='Could Not Read .pgpass',
+                    body=str(e),
+                )
+                alert.add_response('ok', 'OK')
+                alert.present(self)
+                return
+
+        # Deduplicate
+        if new_line in existing_lines:
+            for w in warnings:
+                banner = Adw.Banner(title=w)
+                banner.set_revealed(True)
+            toast = Adw.Toast(title='Entry already exists in .pgpass — nothing written')
+            toast.set_timeout(3)
+            self._toast_overlay.add_toast(toast)
+            return
+
+        # Write
+        try:
+            lines = existing_lines + [new_line, '']
+            content = '\n'.join(lines)
+            with open(pgpass_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            os.chmod(pgpass_path, 0o600)
+        except OSError as e:
+            alert = Adw.AlertDialog(heading='Export Failed', body=str(e))
+            alert.add_response('ok', 'OK')
+            alert.present(self)
+            return
+
+        msg = f'Exported to ~/.pgpass'
+        if warnings:
+            msg += f' — ⚠ {warnings[0]}'
+        toast = Adw.Toast(title=msg)
+        toast.set_timeout(4)
         self._toast_overlay.add_toast(toast)
 
     def _on_import_pgpass(self):
