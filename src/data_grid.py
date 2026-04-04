@@ -307,7 +307,10 @@ class PinColumnView(Gtk.Box):
     __gtype_name__ = 'TuskPinColumnView'
 
     __gsignals__ = {
-        'activate': (GObject.SignalFlags.RUN_FIRST, None, (int,)),
+        'activate':    (GObject.SignalFlags.RUN_FIRST, None, (int,)),
+        'cell-edited': (GObject.SignalFlags.RUN_FIRST, None,
+                        (GObject.TYPE_PYOBJECT, int, GObject.TYPE_PYOBJECT)),
+        # (row_item, col_idx, new_value)
     }
 
     def __init__(self, columns, rows, table_name=None):
@@ -315,6 +318,8 @@ class PinColumnView(Gtk.Box):
         self._columns = list(columns)
         self._table_name = table_name
         self._pinned = []   # ordered list of original column indices that are pinned
+        self._inline_edit = False
+        self._boolean_cols = set()  # col names with data_type == 'boolean'
 
         # Underlying store shared by both views
         self._store = Gio.ListStore(item_type=_Row)
@@ -392,6 +397,70 @@ class PinColumnView(Gtk.Box):
         for row in rows:
             self._store.append(_Row(list(row)))
 
+    def enable_inline_edit(self, schema_info):
+        """Enable double-click inline editing.
+
+        schema_info is [(col_name, data_type, is_nullable, default_val)].
+        Call immediately after construction; rebuilds columns so cells pick up
+        the double-click gesture.
+        """
+        self._inline_edit = True
+        self._boolean_cols = {r[0] for r in schema_info if r[1] == 'boolean'}
+        self._rebuild_columns()
+
+    # ── Inline edit ───────────────────────────────────────────────────────────
+
+    def _activate_inline_edit(self, label, col_idx):
+        """Called on double-click of a data cell when inline editing is enabled."""
+        row_item = getattr(label, '_row_item', None)
+        if row_item is None:
+            return
+        raw = getattr(label, '_raw_value', None)
+        col_name = self._columns[col_idx]
+
+        if col_name in self._boolean_cols:
+            # Toggle boolean immediately — no popover needed
+            new_value = not bool(raw)
+            self.emit('cell-edited', row_item, col_idx, new_value)
+            return
+
+        # Text entry popover for all other types
+        entry = Gtk.Entry()
+        entry.set_text('' if raw is None else str(raw))
+        entry.set_width_chars(max(24, len(str(raw)) if raw is not None else 0))
+
+        popover = Gtk.Popover()
+        popover.set_has_arrow(True)
+        popover.set_parent(label)
+        popover.set_child(entry)
+
+        committed = [False]
+
+        def _commit():
+            if committed[0]:
+                return
+            committed[0] = True
+            text = entry.get_text()
+            new_value = None if text == '' else text
+            popover.popdown()
+            self.emit('cell-edited', row_item, col_idx, new_value)
+
+        def _on_key_pressed(_ctrl, keyval, _code, _state):
+            if keyval == Gdk.KEY_Return or keyval == Gdk.KEY_KP_Enter:
+                _commit()
+                return True
+            if keyval == Gdk.KEY_Escape:
+                popover.popdown()
+                return True
+            return False
+
+        key_ctrl = Gtk.EventControllerKey()
+        key_ctrl.connect('key-pressed', _on_key_pressed)
+        entry.add_controller(key_ctrl)
+
+        popover.popup()
+        entry.grab_focus()
+
     # ── Column management ─────────────────────────────────────────────────────
 
     def _pin_column(self, col_idx):
@@ -458,18 +527,27 @@ class PinColumnView(Gtk.Box):
                 self._cell_clicked[0] = True
             cell_gesture.connect('pressed', _on_cell_rclick)
             label.add_controller(cell_gesture)
+            if self._inline_edit:
+                dbl_click = Gtk.GestureClick(button=1)
+                def _on_dbl_click(_g, n_press, _x, _y, lbl=label, cidx=col_idx):
+                    if n_press == 2:
+                        self._activate_inline_edit(lbl, cidx)
+                dbl_click.connect('pressed', _on_dbl_click)
+                label.add_controller(dbl_click)
             item.set_child(label)
 
         def on_bind(_f, item, idx=col_idx):
             label = item.get_child()
-            raw = item.get_item().raw(idx)
+            row = item.get_item()
+            raw = row.raw(idx)
             label._raw_value = raw
+            label._row_item = row
             if raw is None:
                 label.set_markup('<i>null</i>')
                 label.add_css_class('dim-label')
                 label.set_tooltip_text('NULL')
             else:
-                text = item.get_item().get(idx)
+                text = row.get(idx)
                 label.set_text(text)
                 label.remove_css_class('dim-label')
                 label.set_tooltip_text(text if len(text) > 40 else None)

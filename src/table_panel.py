@@ -1665,6 +1665,9 @@ class TablePanel(Gtk.Box):
                     self._delete_btn.set_sensitive(False)
                     col_view.connect('activate', self._on_data_row_activate)
                     col_view.get_model().connect('selection-changed', self._on_data_selection_changed)
+                    if not self._read_only and self._pk_cols and self._schema_info:
+                        col_view.enable_inline_edit(self._schema_info)
+                        col_view.connect('cell-edited', self._on_cell_edited)
         else:
             filter_text = self._filter_entry.get_text().strip()
             if filter_text:
@@ -1931,6 +1934,21 @@ class TablePanel(Gtk.Box):
             return
         initial = {col: row.raw(i) for i, col in enumerate(self._all_data_cols)}
         self._show_edit_dialog(initial)
+
+    def _on_cell_edited(self, _col_view, row_item, col_idx, new_value):
+        if not self._pk_cols or col_idx >= len(self._all_data_cols):
+            return
+        conn = self._conn
+        schema, table = self._current_schema, self._current_table
+        pk_cols, page = list(self._pk_cols), self._data_page
+        original_values = {col: row_item.raw(i) for i, col in enumerate(self._all_data_cols)}
+        new_values = dict(original_values)
+        new_values[self._all_data_cols[col_idx]] = new_value
+        threading.Thread(
+            target=self._exec_update,
+            args=(conn, schema, table, new_values, original_values, pk_cols, page),
+            daemon=True,
+        ).start()
 
     def _show_edit_dialog(self, initial_values):
         from row_edit_dialog import RowEditDialog
