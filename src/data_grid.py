@@ -435,6 +435,7 @@ class PinColumnView(Gtk.Box):
         popover.set_child(entry)
 
         committed = [False]
+        cancelled = [False]
 
         def _commit():
             if committed[0]:
@@ -445,21 +446,33 @@ class PinColumnView(Gtk.Box):
             popover.popdown()
             self.emit('cell-edited', row_item, col_idx, new_value)
 
+        def _cancel():
+            cancelled[0] = True
+            committed[0] = True  # prevent focus-out from committing
+            popover.popdown()
+
+        # Enter via the Entry's own activate signal (most reliable in GTK 4)
+        entry.connect('activate', lambda _e: _commit())
+
+        # Escape — use CAPTURE phase so the popover doesn't consume it first
+        esc_ctrl = Gtk.EventControllerKey()
+        esc_ctrl.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         def _on_key_pressed(_ctrl, keyval, _code, _state):
-            if keyval == Gdk.KEY_Return or keyval == Gdk.KEY_KP_Enter:
-                _commit()
-                return True
             if keyval == Gdk.KEY_Escape:
-                popover.popdown()
+                _cancel()
                 return True
             return False
+        esc_ctrl.connect('key-pressed', _on_key_pressed)
+        entry.add_controller(esc_ctrl)
 
-        key_ctrl = Gtk.EventControllerKey()
-        key_ctrl.connect('key-pressed', _on_key_pressed)
-        entry.add_controller(key_ctrl)
+        # Blur / focus-out → commit (clicking away saves the edit)
+        focus_ctrl = Gtk.EventControllerFocus()
+        focus_ctrl.connect('leave', lambda _: _commit())
+        entry.add_controller(focus_ctrl)
 
         popover.popup()
-        entry.grab_focus()
+        # Defer grab_focus until the popover is mapped
+        GLib.idle_add(entry.grab_focus)
 
     # ── Column management ─────────────────────────────────────────────────────
 
