@@ -127,16 +127,24 @@ class FavouritesStore:
         if os.path.exists(FAVOURITES_FILE):
             try:
                 with open(FAVOURITES_FILE) as f:
-                    return json.load(f)
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    return data
             except (json.JSONDecodeError, OSError):
-                return {}
+                pass
         return {}
 
     def _save(self):
         tmp = FAVOURITES_FILE + '.tmp'
-        with open(tmp, 'w') as f:
-            json.dump(self._data, f, indent=2)
-        os.replace(tmp, FAVOURITES_FILE)
+        try:
+            with open(tmp, 'w') as f:
+                json.dump(self._data, f, indent=2)
+            os.replace(tmp, FAVOURITES_FILE)
+        except OSError:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
 
     def get(self, conn_id):
         return list(self._data.get(conn_id, []))
