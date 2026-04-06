@@ -636,16 +636,6 @@ class PinColumnView(Gtk.Box):
         header_menu.append_item(pin_item)
         col.set_header_menu(header_menu)
 
-        # Header factory — adds tooltip so users discover the right-click menu
-        hdr_factory = Gtk.SignalListItemFactory()
-        def _hdr_setup(_f, item, _n=name):
-            lbl = Gtk.Label(label=_n)
-            lbl.set_xalign(0)
-            lbl.set_tooltip_text('Right-click to pin, sort, or copy this column')
-            item.set_child(lbl)
-        hdr_factory.connect('setup', _hdr_setup)
-        col.set_header_factory(hdr_factory)
-
         return col
 
     # ── Context menu (on main_cv) ─────────────────────────────────────────────
