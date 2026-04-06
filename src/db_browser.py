@@ -15,7 +15,7 @@ from style import MARGIN_XS, MARGIN_SM, MARGIN_MD
 
 COL_ICON = 0
 COL_LABEL = 1
-COL_TYPE = 2    # 'schema' | 'group' | 'table' | 'view' | 'sequence' | 'enum' | 'function' | 'users' | 'role' | 'loading' | 'error' | 'favourites' | 'favourite'
+COL_TYPE = 2    # 'schema' | 'group' | 'table' | 'view' | 'sequence' | 'enum' | 'function' | 'users' | 'role' | 'loading' | 'error' | 'favourites' | 'favourite' | 'activity'
 COL_CONN = 3
 COL_SCHEMA = 4
 COL_TABLE = 5
@@ -113,6 +113,10 @@ class DbBrowser(Gtk.Box):
         'copy-to-clipboard': (
             GObject.SignalFlags.RUN_FIRST, None,
             (str,),  # text to copy
+        ),
+        'server-activity-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT,),  # conn
         ),
     }
 
@@ -316,6 +320,8 @@ class DbBrowser(Gtk.Box):
             schema = model.get_value(it, COL_SCHEMA)
             label = model.get_value(it, COL_LABEL)
             return f'group:{schema}:{label}' in matched
+        if item_type == 'activity':
+            return True  # always visible regardless of search query
         if item_type in ('table', 'view', 'sequence', 'enum', 'function', 'favourite'):
             return query in model.get_value(it, COL_LABEL).lower()
         if item_type in ('users', 'favourites'):
@@ -923,6 +929,11 @@ class DbBrowser(Gtk.Box):
                     'key-symbolic', _role_label(role), 'role', conn, '', role['name']
                 ])
 
+        # Server Activity — always-visible leaf node at the bottom
+        self._store.append(None, [
+            'utilities-system-monitor-symbolic', 'Server Activity', 'activity', conn, '', ''
+        ])
+
         self._saved_expansion = None
         self._search_bar.set_visible(True)
         snapshot = getattr(self, '_expansion_snapshot', None)
@@ -1288,6 +1299,9 @@ class DbBrowser(Gtk.Box):
             conn = self._filter.get_value(it, COL_CONN)
             role_name = self._filter.get_value(it, COL_TABLE)
             self.emit('role-selected', conn, role_name)
+        elif item_type == 'activity':
+            conn = self._filter.get_value(it, COL_CONN)
+            self.emit('server-activity-requested', conn)
         elif item_type in ('schema', 'group', 'users', 'favourites'):
             if tree.row_expanded(path):
                 tree.collapse_row(path)
