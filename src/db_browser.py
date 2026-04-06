@@ -788,6 +788,11 @@ class DbBrowser(Gtk.Box):
 
         self._schemas_hidden_banner.set_revealed(bool(schemas_hidden))
 
+        # Server Activity — first item, always visible
+        self._store.append(None, [
+            'utilities-system-monitor-symbolic', 'Server Activity', 'activity', conn, '', ''
+        ])
+
         if not schema_items:
             self._store.append(None, [
                 'dialog-information-symbolic', 'No tables found', 'info', conn, '', ''
@@ -928,11 +933,6 @@ class DbBrowser(Gtk.Box):
                 self._store.append(roles_sub, [
                     'key-symbolic', _role_label(role), 'role', conn, '', role['name']
                 ])
-
-        # Server Activity — always-visible leaf node at the bottom
-        self._store.append(None, [
-            'utilities-system-monitor-symbolic', 'Server Activity', 'activity', conn, '', ''
-        ])
 
         self._saved_expansion = None
         self._search_bar.set_visible(True)
