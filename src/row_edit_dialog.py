@@ -127,6 +127,9 @@ class RowEditDialog(Adw.Dialog):
 
         page.add(group)
 
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        content.append(page)
+
         if mode == 'insert' and self._required:
             legend = Gtk.Label(label='* Required')
             legend.add_css_class('caption')
@@ -135,9 +138,9 @@ class RowEditDialog(Adw.Dialog):
             legend.set_margin_start(16)
             legend.set_margin_top(4)
             legend.set_margin_bottom(8)
-            page.add(legend)
+            content.append(legend)
 
-        toolbar_view.set_content(page)
+        toolbar_view.set_content(content)
         self.set_child(toolbar_view)
         self._update_save()
 
