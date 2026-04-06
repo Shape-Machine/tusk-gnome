@@ -67,7 +67,6 @@ class TuskWindow(Adw.ApplicationWindow):
             self.add_action(a)
 
         add('quick-open',     lambda *_: self._on_quick_open())
-        add('server-activity', lambda *_: self._on_server_activity())
         add('close-tab',      lambda *_: self._close_current_tab())
         add('next-tab',       lambda *_: self._tab_view.select_next_page())
         add('prev-tab',       lambda *_: self._tab_view.select_previous_page())
