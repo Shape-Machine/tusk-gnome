@@ -686,13 +686,14 @@ class PinColumnView(Gtk.Box):
                     return
                 def _write():
                     try:
+                        rows = get_all_rows()
                         if fmt == 'csv':
-                            text = _to_csv(columns, get_all_rows())
+                            text = _to_csv(columns, rows)
                         elif fmt == 'json':
-                            text = _to_json(columns, get_all_rows())
+                            text = _to_json(columns, rows)
                         else:
-                            text = _to_insert_sql(columns, get_all_rows(), table_name)
-                        row_count = len(get_all_rows())
+                            text = _to_insert_sql(columns, rows, table_name)
+                        row_count = len(rows)
                         gfile.replace_contents(
                             text.encode(), None, False,
                             Gio.FileCreateFlags.REPLACE_DESTINATION, None,
