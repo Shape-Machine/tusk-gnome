@@ -636,6 +636,16 @@ class PinColumnView(Gtk.Box):
         header_menu.append_item(pin_item)
         col.set_header_menu(header_menu)
 
+        # Header factory — adds tooltip so users discover the right-click menu
+        hdr_factory = Gtk.SignalListItemFactory()
+        def _hdr_setup(_f, item, _n=name):
+            lbl = Gtk.Label(label=_n)
+            lbl.set_xalign(0)
+            lbl.set_tooltip_text('Right-click to pin, sort, or copy this column')
+            item.set_child(lbl)
+        hdr_factory.connect('setup', _hdr_setup)
+        col.set_header_factory(hdr_factory)
+
         return col
 
     # ── Context menu (on main_cv) ─────────────────────────────────────────────
@@ -692,10 +702,16 @@ class PinColumnView(Gtk.Box):
                             text = _to_json(columns, get_all_rows())
                         else:
                             text = _to_insert_sql(columns, get_all_rows(), table_name)
+                        row_count = len(get_all_rows())
                         gfile.replace_contents(
                             text.encode(), None, False,
                             Gio.FileCreateFlags.REPLACE_DESTINATION, None,
                         )
+                        filename = gfile.get_basename()
+                        msg = f'Exported {row_count} {"row" if row_count == 1 else "rows"} to {filename}'
+                        root = self.get_root()
+                        if hasattr(root, 'show_toast'):
+                            GLib.idle_add(root.show_toast, msg)
                     except Exception as e:
                         GLib.idle_add(_show_export_error, str(e))
                 threading.Thread(target=_write, daemon=True).start()

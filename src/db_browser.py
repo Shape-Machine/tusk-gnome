@@ -195,6 +195,11 @@ class DbBrowser(Gtk.Box):
         ))
         self.append(self._schema_warning_banner)
 
+        self._schemas_hidden_banner = Adw.Banner(
+            title='Some schemas are hidden — insufficient privileges'
+        )
+        self.append(self._schemas_hidden_banner)
+
         # Connection error bar (shown when load fails)
         self._conn_error_bar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self._conn_error_bar.set_margin_start(8)
@@ -482,6 +487,7 @@ class DbBrowser(Gtk.Box):
         self._loading_bar.set_visible(False)
         self._db_switcher_bar.set_visible(False)
         self._schema_warning_banner.set_revealed(False)
+        self._schemas_hidden_banner.set_revealed(False)
         self._conn_error_bar.set_visible(False)
         self._search_entry.set_text('')
         self._search_bar.set_visible(False)
@@ -592,6 +598,17 @@ class DbBrowser(Gtk.Box):
                     all_schemas = [r[0] for r in cur.fetchall()]
 
                     cur.execute("""
+                        SELECT schema_name FROM information_schema.schemata
+                        WHERE schema_name NOT IN (
+                            'pg_catalog', 'information_schema',
+                            'pg_toast', 'pg_temp_1', 'pg_toast_temp_1'
+                        )
+                          AND schema_name NOT LIKE 'pg_%'
+                    """)
+                    visible_schemas = {r[0] for r in cur.fetchall()}
+                    schemas_hidden = len(all_schemas) > len(visible_schemas)
+
+                    cur.execute("""
                         SELECT datname FROM pg_database
                         WHERE datistemplate = false
                           AND datname NOT IN ('template0', 'template1')
@@ -691,13 +708,13 @@ class DbBrowser(Gtk.Box):
                 )
 
             GLib.idle_add(self._populate, conn, schema_items, all_databases,
-                          schema_warning, current_role_attrs, roles_list, gen)
+                          schema_warning, schemas_hidden, current_role_attrs, roles_list, gen)
 
         except Exception as e:
             GLib.idle_add(self._show_error, _friendly_pg_error(e), gen)
 
     def _populate(self, conn, schema_items, all_databases,
-                  schema_warning, current_role_attrs, roles_list, gen):
+                  schema_warning, schemas_hidden, current_role_attrs, roles_list, gen):
         if gen != self._load_gen:
             return
         self._loading_spinner.stop()
@@ -761,6 +778,8 @@ class DbBrowser(Gtk.Box):
             self._schema_warning_banner.set_revealed(True)
         else:
             self._schema_warning_banner.set_revealed(False)
+
+        self._schemas_hidden_banner.set_revealed(bool(schemas_hidden))
 
         if not schema_items:
             self._store.append(None, [

@@ -123,11 +123,15 @@ class ConnectionDialog(Adw.Dialog):
         self._ssh_row.set_subtitle('Use if your PostgreSQL server is behind an SSH bastion host.')
 
         self._ssh_host_row = Adw.EntryRow(title='SSH Host')
+        self._ssh_host_row.set_tooltip_text('The hostname or IP of the SSH jump/bastion server used to reach the database')
         self._ssh_port_row = Adw.EntryRow(title='SSH Port')
+        self._ssh_port_row.set_tooltip_text('SSH port on the bastion server (default: 22)')
         self._ssh_user_row = Adw.EntryRow(title='SSH User')
+        self._ssh_user_row.set_tooltip_text('Your username on the SSH server')
 
         # Key path row with browse button
         self._ssh_key_row = Adw.EntryRow(title='Private Key Path')
+        self._ssh_key_row.set_tooltip_text('Path to your SSH private key file (e.g. ~/.ssh/id_rsa). Leave blank to use the SSH agent.')
         browse_btn = Gtk.Button(icon_name='document-open-symbolic')
         browse_btn.add_css_class('flat')
         browse_btn.set_valign(Gtk.Align.CENTER)
@@ -136,6 +140,7 @@ class ConnectionDialog(Adw.Dialog):
         self._ssh_key_row.add_suffix(browse_btn)
 
         self._ssh_passphrase_row = Adw.PasswordEntryRow(title='Key Passphrase')
+        self._ssh_passphrase_row.set_tooltip_text('Passphrase for your private key. Leave blank if the key is not encrypted.')
 
         self._ssh_row.add_row(self._ssh_host_row)
         self._ssh_row.add_row(self._ssh_port_row)
@@ -183,7 +188,7 @@ class ConnectionDialog(Adw.Dialog):
         self._default_schema_row.set_text(conn.get('default_schema', '') if conn else '')
 
         self._keyring_banner = Adw.Banner(
-            title="Passwords can't be saved. GNOME Keyring isn't running — you'll need to re-enter your password each time you open Tusk."
+            title="Passwords can't be saved — the system password manager isn't available. Try logging out and back in."
         )
         self._keyring_banner.set_revealed(keyring_failed)
 

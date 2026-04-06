@@ -121,11 +121,11 @@ class CommandPalette(Adw.Dialog):
         scroll.set_child(self._listbox)
         outer.append(scroll)
 
-        # Empty state label
-        self._empty_label = Gtk.Label(label='No results')
+        self._empty_label = Gtk.Label()
         self._empty_label.add_css_class('dim-label')
         self._empty_label.set_vexpand(True)
         self._empty_label.set_valign(Gtk.Align.CENTER)
+        self._empty_label.set_justify(Gtk.Justification.CENTER)
         self._empty_label.set_visible(False)
         outer.append(self._empty_label)
 
@@ -164,6 +164,12 @@ class CommandPalette(Adw.Dialog):
         has_results = count > 0
         self._listbox.set_visible(has_results)
         self._empty_label.set_visible(not has_results)
+        if not has_results:
+            if not self._items:
+                self._empty_label.set_label('No tables, views, or functions found.')
+            else:
+                q = query or ''
+                self._empty_label.set_label(f'No results for "{q}"' if q else 'No results')
 
         if has_results:
             first = self._listbox.get_row_at_index(0)
