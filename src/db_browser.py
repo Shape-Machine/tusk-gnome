@@ -1,5 +1,6 @@
 import re
 import threading
+from itertools import groupby
 
 import gi
 
@@ -324,7 +325,7 @@ class DbBrowser(Gtk.Box):
         return True  # info, error
 
     def _on_search_changed(self, _entry):
-        if hasattr(self, '_search_debounce_id') and self._search_debounce_id:
+        if self._search_debounce_id is not None:
             GLib.source_remove(self._search_debounce_id)
         self._search_debounce_id = GLib.timeout_add(300, self._do_search)
 
@@ -706,7 +707,6 @@ class DbBrowser(Gtk.Box):
         self._search_matched_keys = None
 
         # Build search leaf index from schema data for fast filter lookups
-        from itertools import groupby as _groupby
         index = {}
         for _schema, _items in (schema_items or {}).items():
             leaf_names = (
@@ -726,13 +726,19 @@ class DbBrowser(Gtk.Box):
                 index[f'group:{_schema}:Enums'] = frozenset(e.lower() for e in _items['enums'])
             if _items['functions']:
                 index[f'group:{_schema}:Functions'] = frozenset(func_labels)
-                for _fname, _overloads in _groupby(_items['functions'], key=lambda x: x[0]):
+                for _fname, _overloads in groupby(_items['functions'], key=lambda x: x[0]):
                     _overloads = list(_overloads)
                     if len(_overloads) > 1:
                         index[f'group:{_schema}:{_fname}'] = frozenset(
                             f'{_fname}({_args})'.lower() for _, _args in _overloads
                         )
         self._search_leaf_index = index
+        q = self._search_entry.get_text().strip().lower()
+        if q:
+            self._search_matched_keys = frozenset(
+                key for key, names in index.items()
+                if any(q in n for n in names)
+            )
 
         # Emit badge signal so window.py can update the connection row indicator
         self.emit('role-attrs-loaded', conn, current_role_attrs)
@@ -826,7 +832,6 @@ class DbBrowser(Gtk.Box):
                     ])
 
             if items['functions']:
-                from itertools import groupby
                 func_it = self._store.append(schema_it, [
                     'system-run-symbolic', 'Functions', 'group', conn, schema, ''
                 ])
