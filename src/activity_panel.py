@@ -7,6 +7,8 @@ gi.require_version('Adw', '1')
 
 from gi.repository import Gtk, Adw, GLib, Gio, GObject, Gdk, Pango
 
+from pg_errors import friendly_pg_error as _friendly_pg_error
+
 _REFRESH_INTERVAL_MS = 5000
 _css_loaded = False
 
@@ -248,7 +250,7 @@ class ActivityPanel(Gtk.Box):
                 GLib.idle_add(self._populate, rows)
         except Exception as e:
             if self._alive:
-                GLib.idle_add(self._on_fetch_error, str(e))
+                GLib.idle_add(self._on_fetch_error, _friendly_pg_error(e))
         finally:
             self._fetching = False
 
@@ -332,7 +334,7 @@ class ActivityPanel(Gtk.Box):
                 GLib.idle_add(self._on_terminated, pid, success)
         except Exception as e:
             if self._alive:
-                GLib.idle_add(self._on_terminate_error, str(e))
+                GLib.idle_add(self._on_terminate_error, _friendly_pg_error(e))
 
     def _on_terminated(self, pid, success):
         if not self._alive:

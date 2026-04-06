@@ -91,11 +91,12 @@ class RowEditDialog(Adw.Dialog):
                 if init_val is not None:
                     widget.set_text(str(init_val))
 
-                # (auto) hint for insert-mode columns that have a DB default
+                # (database default) hint for insert-mode columns that have a DB default
                 if mode == 'insert' and default_val and col not in self._required:
-                    auto_label = Gtk.Label(label='(auto)')
+                    auto_label = Gtk.Label(label='(database default)')
                     auto_label.add_css_class('dim-label')
                     auto_label.add_css_class('caption')
+                    auto_label.set_tooltip_text('This field will be filled in automatically by the database')
                     widget.add_suffix(auto_label)
 
                 type_label = Gtk.Label(label=data_type)
@@ -125,6 +126,17 @@ class RowEditDialog(Adw.Dialog):
             group.add(widget)
 
         page.add(group)
+
+        if mode == 'insert' and self._required:
+            legend = Gtk.Label(label='* Required')
+            legend.add_css_class('caption')
+            legend.add_css_class('dim-label')
+            legend.set_halign(Gtk.Align.START)
+            legend.set_margin_start(16)
+            legend.set_margin_top(4)
+            legend.set_margin_bottom(8)
+            page.add(legend)
+
         toolbar_view.set_content(page)
         self.set_child(toolbar_view)
         self._update_save()
@@ -146,8 +158,10 @@ class RowEditDialog(Adw.Dialog):
             w = self._widgets.get(col)
             if isinstance(w, Adw.EntryRow) and not w.get_text().strip():
                 self._save_btn.set_sensitive(False)
+                self._save_btn.set_tooltip_text('Fill in all required fields to save')
                 return
         self._save_btn.set_sensitive(True)
+        self._save_btn.set_tooltip_text(None)
 
     def _on_save_clicked(self, _btn):
         values = {}

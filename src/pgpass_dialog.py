@@ -90,10 +90,11 @@ class PgpassImportDialog(Adw.Dialog):
         'entries-selected': (GObject.SignalFlags.RUN_FIRST, None, (GObject.TYPE_PYOBJECT,))
     }
 
-    def __init__(self, parent, entries, warnings):
+    def __init__(self, parent, entries, warnings, existing_names=None):
         super().__init__(title='Import from .pgpass', content_width=460)
         self._entries = entries
         self._switches = []
+        self._existing_names = existing_names or set()
         self._build_ui(warnings)
 
     def _build_ui(self, warnings):
@@ -110,12 +111,37 @@ class PgpassImportDialog(Adw.Dialog):
             banner.set_revealed(True)
             content.append(banner)
 
+        # Compute overlap with existing connections
+        overlap_count = 0
+        entry_names = []
+        for entry in self._entries:
+            name = f'{entry["username"]}@{entry["hostname"]}/{entry["database"]}'
+            entry_names.append(name)
+            if name in self._existing_names:
+                overlap_count += 1
+
+        n = len(self._entries)
+        summary_parts = [f'Importing {n} {"connection" if n == 1 else "connections"}.']
+        if overlap_count > 0:
+            summary_parts.append(
+                f'{overlap_count} existing {"connection" if overlap_count == 1 else "connections"} '
+                'with matching names will be replaced.'
+            )
+        summary_label = Gtk.Label(label=' '.join(summary_parts))
+        summary_label.add_css_class('dim-label')
+        summary_label.set_wrap(True)
+        summary_label.set_xalign(0)
+        content.append(summary_label)
+
         entries_group = Adw.PreferencesGroup(title='Entries')
 
-        for entry in self._entries:
+        for entry, entry_name in zip(self._entries, entry_names):
             port_str = f':{entry["port"]}' if entry['port'] != 5432 else ''
             title = f'{entry["hostname"]}{port_str}/{entry["database"]}'
-            subtitle = f'User: {entry["username"]}'
+            if entry_name in self._existing_names:
+                subtitle = f'User: {entry["username"]} — will replace existing connection'
+            else:
+                subtitle = f'User: {entry["username"]}'
 
             switch_row = Adw.SwitchRow(title=title, subtitle=subtitle)
             switch_row.set_active(True)

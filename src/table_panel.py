@@ -254,6 +254,17 @@ class TablePanel(Gtk.Box):
         if hasattr(root, 'show_toast'):
             root.show_toast(msg)
 
+    def _show_undo_toast(self, msg, conn, schema, table, undo_new_values, undo_original_values, pk_cols, page):
+        root = self.get_root()
+        if hasattr(root, 'show_toast'):
+            def _do_undo():
+                threading.Thread(
+                    target=self._exec_update,
+                    args=(conn, schema, table, undo_new_values, undo_original_values, pk_cols, page),
+                    daemon=True,
+                ).start()
+            root.show_toast(msg, timeout=5, button_label='Undo', on_button=_do_undo)
+
     def _build_ui(self):
         # ViewSwitcher lives inside the panel (tabs visible once content loads)
         self._view_stack = Adw.ViewStack()
@@ -754,7 +765,7 @@ class TablePanel(Gtk.Box):
                     GLib.idle_add(self._reload_schema_tab)
                     GLib.idle_add(self._show_toast, 'Column added')
                 except Exception as e:
-                    GLib.idle_add(self._show_edit_error, str(e))
+                    GLib.idle_add(self._show_edit_error, _friendly_pg_error(e))
 
             threading.Thread(target=run, daemon=True).start()
 
@@ -897,7 +908,7 @@ class TablePanel(Gtk.Box):
                             null_estimate = cur.fetchone()[0]
                     GLib.idle_add(_show_confirm, null_estimate)
                 except Exception as e:
-                    GLib.idle_add(self._show_edit_error, str(e))
+                    GLib.idle_add(self._show_edit_error, _friendly_pg_error(e))
 
             def _show_confirm(null_estimate):
                 body = f'Set column "{col_name}" to NOT NULL?'
@@ -1071,7 +1082,7 @@ class TablePanel(Gtk.Box):
                     GLib.idle_add(self._reload_schema_tab)
                     GLib.idle_add(self._show_toast, 'Primary key updated')
                 except Exception as e:
-                    GLib.idle_add(self._show_edit_error, str(e))
+                    GLib.idle_add(self._show_edit_error, _friendly_pg_error(e))
 
             threading.Thread(target=run, daemon=True).start()
 
@@ -1097,7 +1108,7 @@ class TablePanel(Gtk.Box):
                 if toast_msg:
                     GLib.idle_add(self._show_toast, toast_msg)
             except Exception as e:
-                GLib.idle_add(self._show_edit_error, str(e))
+                GLib.idle_add(self._show_edit_error, _friendly_pg_error(e))
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -1118,7 +1129,7 @@ class TablePanel(Gtk.Box):
                         keys_rows = cur.fetchall()
                 GLib.idle_add(self._update_schema_view, schema_rows, keys_rows)
             except Exception as e:
-                GLib.idle_add(self._show_edit_error, str(e))
+                GLib.idle_add(self._show_edit_error, _friendly_pg_error(e))
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -1143,7 +1154,7 @@ class TablePanel(Gtk.Box):
                         count = cur.fetchone()[0]
                 GLib.idle_add(self._on_exact_count_done, count, gen)
             except Exception as e:
-                GLib.idle_add(self._on_exact_count_error, str(e), gen)
+                GLib.idle_add(self._on_exact_count_error, _friendly_pg_error(e), gen)
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -1264,7 +1275,7 @@ class TablePanel(Gtk.Box):
                 if toast_msg:
                     GLib.idle_add(self._show_toast, toast_msg)
             except Exception as e:
-                GLib.idle_add(self._show_edit_error, str(e))
+                GLib.idle_add(self._show_edit_error, _friendly_pg_error(e))
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -1282,7 +1293,7 @@ class TablePanel(Gtk.Box):
                         rows = cur.fetchall()
                 GLib.idle_add(self._fill_indexes_scroll, rows)
             except Exception as e:
-                GLib.idle_add(self._show_edit_error, str(e))
+                GLib.idle_add(self._show_edit_error, _friendly_pg_error(e))
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -1382,7 +1393,7 @@ class TablePanel(Gtk.Box):
                 if toast_msg:
                     GLib.idle_add(self._show_toast, toast_msg)
             except Exception as e:
-                GLib.idle_add(self._show_edit_error, str(e))
+                GLib.idle_add(self._show_edit_error, _friendly_pg_error(e))
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -1400,7 +1411,7 @@ class TablePanel(Gtk.Box):
                         keys_rows = cur.fetchall()
                 GLib.idle_add(self._fill_keys_scroll, keys_rows)
             except Exception as e:
-                GLib.idle_add(self._show_edit_error, str(e))
+                GLib.idle_add(self._show_edit_error, _friendly_pg_error(e))
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -1621,7 +1632,7 @@ class TablePanel(Gtk.Box):
                     os.unlink(tmp_path)
 
         except Exception as e:
-            GLib.idle_add(self._show_export_error, str(e))
+            GLib.idle_add(self._show_export_error, _friendly_pg_error(e))
 
     def _show_export_error(self, msg):
         self._data_page_label.set_label(f'Export failed: {msg}')
@@ -1918,7 +1929,7 @@ class TablePanel(Gtk.Box):
 
             GLib.idle_add(self._populate_data, cols, rows, page)
         except Exception as e:
-            GLib.idle_add(self._show_data_page_error, str(e))
+            GLib.idle_add(self._show_data_page_error, _friendly_pg_error(e))
 
     def _show_data_page_error(self, error_msg):
         self._data_page_label.set_label(f'Error: {error_msg}')
@@ -2109,7 +2120,7 @@ class TablePanel(Gtk.Box):
             GLib.idle_add(self._show_toast, 'Row inserted')
             GLib.idle_add(self._reload_data_page, conn, schema, table, page)
         except Exception as e:
-            GLib.idle_add(self._show_edit_error, str(e))
+            GLib.idle_add(self._show_edit_error, _friendly_pg_error(e))
 
     def _exec_update(self, conn, schema, table, new_values, original_values, pk_cols, page,
                      row_item=None, col_idx=None, new_value_raw=None):
@@ -2148,14 +2159,21 @@ class TablePanel(Gtk.Box):
                 GLib.idle_add(self._show_toast, 'Row not found — may have been deleted')
                 GLib.idle_add(self._reload_data_page, conn, schema, table, page)
                 return
-            GLib.idle_add(self._show_toast, 'Row updated')
+            if isinstance(new_value_raw, bool) and set_cols:
+                col_name = set_cols[0]
+                undo_new_values = {col_name: original_values[col_name]}
+                undo_original_values = {**original_values, col_name: new_value_raw}
+                GLib.idle_add(self._show_undo_toast, 'Cell updated',
+                              conn, schema, table, undo_new_values, undo_original_values, pk_cols, page)
+            else:
+                GLib.idle_add(self._show_toast, 'Row updated')
             if row_item is not None and col_idx is not None:
                 GLib.idle_add(self._apply_cell_update, conn, schema, table, page,
                               row_item, col_idx, new_value_raw)
             else:
                 GLib.idle_add(self._reload_data_page, conn, schema, table, page)
         except Exception as e:
-            GLib.idle_add(self._show_edit_error, str(e))
+            GLib.idle_add(self._show_edit_error, _friendly_pg_error(e))
 
     def _exec_delete(self, conn, schema, table, rows_to_delete, pk_cols, page, page_size):
         try:
@@ -2196,7 +2214,7 @@ class TablePanel(Gtk.Box):
             GLib.idle_add(self._show_toast, msg)
             GLib.idle_add(self._reload_data_page, conn, schema, table, reload_page)
         except Exception as e:
-            GLib.idle_add(self._show_edit_error, str(e))
+            GLib.idle_add(self._show_edit_error, _friendly_pg_error(e))
 
     def _reload_data_page(self, conn, schema, table, page):
         threading.Thread(

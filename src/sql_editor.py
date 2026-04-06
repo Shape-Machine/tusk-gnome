@@ -1095,12 +1095,6 @@ class SqlEditor(Gtk.Box):
         self._results_meta.set_label(f'{n} row{"s" if n != 1 else ""}')
         self._append_history(self._last_sql, self._elapsed_ms(), rows=n)
 
-        if not rows:
-            self._results_message.set_label('Query returned 0 rows')
-            self._results_message.remove_css_class('error')
-            self._results_stack.set_visible_child_name('message')
-            return
-
         self._results_scroll.set_child(make_column_view(columns, rows))
         self._results_stack.set_visible_child_name('grid')
 

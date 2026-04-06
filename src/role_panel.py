@@ -7,6 +7,7 @@ gi.require_version('Adw', '1')
 
 from gi.repository import Gtk, Adw, GLib, Gio, GObject, Pango
 
+from pg_errors import friendly_pg_error as _friendly_pg_error
 from style import MARGIN_XS, MARGIN_SM, MARGIN_MD
 
 
@@ -214,7 +215,7 @@ class MembershipsTab(Gtk.Box):
                 cache.setdefault(member, []).append((group_role, admin_opt))
             GLib.idle_add(self._store_cache_and_populate, conn, cache, role_name)
         except Exception as e:
-            GLib.idle_add(self._on_fetch_error, conn, str(e))
+            GLib.idle_add(self._on_fetch_error, conn, _friendly_pg_error(e))
 
     def _on_fetch_error(self, conn, msg):
         self._loading.discard(id(conn))
@@ -300,7 +301,7 @@ class MembershipsTab(Gtk.Box):
                 db.commit()
             GLib.idle_add(self._invalidate_and_reload)
         except Exception as e:
-            GLib.idle_add(self._show_error, str(e))
+            GLib.idle_add(self._show_error, _friendly_pg_error(e))
 
     def _show_error(self, msg):
         self._status_label.set_label(f'Error: {msg}')
@@ -365,7 +366,7 @@ class _GrantMembershipDialog(Adw.Dialog):
                     groups = [r[0] for r in cur.fetchall()]
             GLib.idle_add(self._populate_groups, groups)
         except Exception as e:
-            GLib.idle_add(self._show_load_error, str(e))
+            GLib.idle_add(self._show_load_error, _friendly_pg_error(e))
 
     def _show_load_error(self, msg):
         self._error_status.set_description(msg)
@@ -403,7 +404,7 @@ class _GrantMembershipDialog(Adw.Dialog):
                 db.commit()
             GLib.idle_add(self._on_done)
         except Exception as e:
-            GLib.idle_add(self._on_error, str(e))
+            GLib.idle_add(self._on_error, _friendly_pg_error(e))
 
     def _on_done(self):
         self.emit('membership-granted')
@@ -468,7 +469,7 @@ class EffectivePermissionsTab(Gtk.Box):
                     rows = cur.fetchall()
             GLib.idle_add(self._populate, rows, None)
         except Exception as e:
-            GLib.idle_add(self._populate, None, str(e))
+            GLib.idle_add(self._populate, None, _friendly_pg_error(e))
 
     def _populate(self, rows, error):
         self._store.remove_all()
@@ -701,7 +702,7 @@ class ObjectPrivilegesTab(Gtk.Box):
                 db.commit()
             GLib.idle_add(self._load_privs)
         except Exception as e:
-            GLib.idle_add(self._on_grant_error, str(e))
+            GLib.idle_add(self._on_grant_error, _friendly_pg_error(e))
 
     def _on_grant_error(self, msg):
         self._status_label.set_label(f'Error: {msg}')
@@ -887,7 +888,7 @@ class _NewRoleDialog(Adw.Dialog):
                 db.commit()
             GLib.idle_add(self._on_done, name)
         except Exception as e:
-            GLib.idle_add(self._on_error, str(e))
+            GLib.idle_add(self._on_error, _friendly_pg_error(e))
 
     def _on_done(self, name):
         self.emit('role-created', name)
@@ -1004,7 +1005,7 @@ class _ChangePasswordDialog(Adw.Dialog):
                 db.commit()
             GLib.idle_add(self._on_done)
         except Exception as e:
-            GLib.idle_add(self._on_error, str(e))
+            GLib.idle_add(self._on_error, _friendly_pg_error(e))
 
     def _on_done(self):
         self.emit('password-changed')

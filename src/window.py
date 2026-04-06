@@ -254,10 +254,14 @@ class TuskWindow(Adw.ApplicationWindow):
 
     # ── UI construction ───────────────────────────────────────────────────────
 
-    def show_toast(self, title, timeout=2):
+    def show_toast(self, title, timeout=2, button_label=None, on_button=None):
         """Show a brief toast notification in the main window overlay."""
         toast = Adw.Toast(title=title)
         toast.set_timeout(timeout)
+        if button_label:
+            toast.set_button_label(button_label)
+        if on_button:
+            toast.connect('button-clicked', lambda _t: on_button())
         self._toast_overlay.add_toast(toast)
 
     def _on_copy_to_clipboard(self, _browser, text):
@@ -447,11 +451,11 @@ class TuskWindow(Adw.ApplicationWindow):
 
         # Welcome state: shown when no connections exist yet
         welcome = Adw.StatusPage()
-        welcome.set_title('Welcome to Tusk')
-        welcome.set_description('Tusk is a native PostgreSQL client for GNOME.')
+        welcome.set_title('No connections yet')
+        welcome.set_description('Connect to a PostgreSQL database to get started.')
         welcome.set_icon_name('xyz.shapemachine.tusk-gnome')
 
-        welcome_btn = Gtk.Button(label='Add your first connection')
+        welcome_btn = Gtk.Button(label='Add Connection')
         welcome_btn.add_css_class('suggested-action')
         welcome_btn.add_css_class('pill')
         welcome_btn.set_halign(Gtk.Align.CENTER)
@@ -731,7 +735,9 @@ class TuskWindow(Adw.ApplicationWindow):
             dialog.present()
             return
 
-        dlg = PgpassImportDialog(parent=self, entries=entries, warnings=warnings)
+        existing_names = {c['name'] for c in self._store.list()}
+        dlg = PgpassImportDialog(parent=self, entries=entries, warnings=warnings,
+                                 existing_names=existing_names)
         dlg.connect('entries-selected', self._on_pgpass_entries_selected)
         dlg.present(self)
 
@@ -1308,7 +1314,7 @@ class TuskWindow(Adw.ApplicationWindow):
         sql_label.set_wrap(True)
         sql_label.set_margin_top(4)
 
-        cascade_check = Gtk.CheckButton(label='Drop with CASCADE — also drops all dependent views and constraints')
+        cascade_check = Gtk.CheckButton(label='Also drop dependent objects — views, foreign keys and more (CASCADE)')
         cascade_check.set_margin_top(8)
         cascade_check.set_margin_start(4)
         cascade_check.connect('toggled', lambda cb: sql_label.set_label(_drop_table_ddl(cb.get_active())))
@@ -1563,10 +1569,10 @@ class TuskWindow(Adw.ApplicationWindow):
         if is_dependency and not is_view:
             dialog = Adw.AlertDialog(
                 heading='Drop Failed — Dependent Objects Exist',
-                body=f'{err_str}\n\nUse "Drop with CASCADE" to also drop all dependent views and constraints.',
+                body=f'{err_str}\n\nChoose "Also Delete Dependent Objects" to also drop all dependent views and constraints.',
             )
             dialog.add_response('cancel', 'Cancel')
-            dialog.add_response('cascade', 'Drop with CASCADE')
+            dialog.add_response('cascade', 'Also Delete Dependent Objects')
             dialog.set_response_appearance('cascade', Adw.ResponseAppearance.DESTRUCTIVE)
             dialog.set_default_response('cancel')
             dialog.set_close_response('cancel')
@@ -1680,7 +1686,7 @@ class TuskWindow(Adw.ApplicationWindow):
         sql_label.set_wrap(True)
         sql_label.set_margin_top(4)
 
-        cascade_check = Gtk.CheckButton(label='Drop with CASCADE — also drops all tables, views and other objects in this schema')
+        cascade_check = Gtk.CheckButton(label='Also drop all tables, views and other objects in this schema (CASCADE)')
         cascade_check.set_margin_top(8)
         cascade_check.set_margin_start(4)
         cascade_check.connect('toggled', lambda cb: sql_label.set_label(_drop_schema_ddl(cb.get_active())))
@@ -1736,10 +1742,10 @@ class TuskWindow(Adw.ApplicationWindow):
     def _show_drop_schema_cascade_error(self, err_str, conn, schema):
         dialog = Adw.AlertDialog(
             heading='Drop Schema Failed — Objects Exist',
-            body=f'{err_str}\n\nUse "Drop with CASCADE" to also drop all tables, views and other objects in this schema.',
+            body=f'{err_str}\n\nChoose "Also Delete All Objects" to also drop all tables, views and other objects in this schema.',
         )
         dialog.add_response('cancel', 'Cancel')
-        dialog.add_response('cascade', 'Drop with CASCADE')
+        dialog.add_response('cascade', 'Also Delete All Objects')
         dialog.set_response_appearance('cascade', Adw.ResponseAppearance.DESTRUCTIVE)
         dialog.set_default_response('cancel')
         dialog.set_close_response('cancel')
