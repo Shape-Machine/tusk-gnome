@@ -120,6 +120,8 @@ class DbBrowser(Gtk.Box):
         self.set_vexpand(True)
         self._load_gen = 0
         self._search_debounce_id = None
+        self._search_leaf_index = {}
+        self._search_matched_keys = None
         self._favs = FavouritesStore()
         self._build_ui()
         self.connect('destroy', self._on_destroy)
@@ -299,14 +301,15 @@ class DbBrowser(Gtk.Box):
             return True
         item_type = model.get_value(it, COL_TYPE)
         if item_type == 'schema':
-            child = model.iter_children(it)
-            while child:
-                if self._group_has_match(model, child, query):
-                    return True
-                child = model.iter_next(child)
-            return False
+            matched = self._search_matched_keys
+            return matched is not None and f'schema:{model.get_value(it, COL_SCHEMA)}' in matched
         if item_type == 'group':
-            return self._group_has_match(model, it, query)
+            matched = self._search_matched_keys
+            if matched is None:
+                return False
+            schema = model.get_value(it, COL_SCHEMA)
+            label = model.get_value(it, COL_LABEL)
+            return f'group:{schema}:{label}' in matched
         if item_type in ('table', 'view', 'sequence', 'enum', 'function', 'favourite'):
             return query in model.get_value(it, COL_LABEL).lower()
         if item_type in ('users', 'favourites'):
@@ -320,20 +323,6 @@ class DbBrowser(Gtk.Box):
             return query in model.get_value(it, COL_LABEL).lower()
         return True  # info, error
 
-    def _group_has_match(self, model, group_it, query):
-        child = model.iter_children(group_it)
-        while child:
-            child_type = model.get_value(child, COL_TYPE)
-            if child_type in ('table', 'view', 'sequence', 'enum', 'function', 'favourite'):
-                if query in model.get_value(child, COL_LABEL).lower():
-                    return True
-            elif child_type == 'group':
-                # overloaded function parent node — check its children
-                if self._group_has_match(model, child, query):
-                    return True
-            child = model.iter_next(child)
-        return False
-
     def _on_search_changed(self, _entry):
         if hasattr(self, '_search_debounce_id') and self._search_debounce_id:
             GLib.source_remove(self._search_debounce_id)
@@ -343,6 +332,11 @@ class DbBrowser(Gtk.Box):
         self._search_debounce_id = None
         query = self._search_entry.get_text().strip()
         if query:
+            q = query.lower()
+            self._search_matched_keys = frozenset(
+                key for key, names in self._search_leaf_index.items()
+                if any(q in n for n in names)
+            )
             expanding = self._saved_expansion is None
             if expanding:
                 self._saved_expansion = self._get_expanded_paths()
@@ -350,6 +344,7 @@ class DbBrowser(Gtk.Box):
             if expanding:
                 self._tree.expand_all()
         else:
+            self._search_matched_keys = None
             self._filter.refilter()
             if self._saved_expansion is not None:
                 self._restore_expanded_paths(self._saved_expansion)
@@ -490,6 +485,8 @@ class DbBrowser(Gtk.Box):
         self._search_entry.set_text('')
         self._search_bar.set_visible(False)
         self._store.clear()
+        self._search_leaf_index = {}
+        self._search_matched_keys = None
         self._ctx_conn = None
         self._ctx_schema = None
         self._ctx_table = None
@@ -706,6 +703,36 @@ class DbBrowser(Gtk.Box):
         self._loading_bar.set_visible(False)
         self._conn_error_bar.set_visible(False)
         self._store.clear()
+        self._search_matched_keys = None
+
+        # Build search leaf index from schema data for fast filter lookups
+        from itertools import groupby as _groupby
+        index = {}
+        for _schema, _items in (schema_items or {}).items():
+            leaf_names = (
+                [t.lower() for t in _items['tables']] +
+                [v.lower() for v in _items['views']] +
+                [s.lower() for s in _items['sequences']] +
+                [e.lower() for e in _items['enums']]
+            )
+            func_labels = [f'{n}({a})'.lower() for n, a in _items['functions']]
+            leaf_names += func_labels
+            index[f'schema:{_schema}'] = frozenset(leaf_names)
+            index[f'group:{_schema}:Tables'] = frozenset(t.lower() for t in _items['tables'])
+            index[f'group:{_schema}:Views'] = frozenset(v.lower() for v in _items['views'])
+            if _items['sequences']:
+                index[f'group:{_schema}:Sequences'] = frozenset(s.lower() for s in _items['sequences'])
+            if _items['enums']:
+                index[f'group:{_schema}:Enums'] = frozenset(e.lower() for e in _items['enums'])
+            if _items['functions']:
+                index[f'group:{_schema}:Functions'] = frozenset(func_labels)
+                for _fname, _overloads in _groupby(_items['functions'], key=lambda x: x[0]):
+                    _overloads = list(_overloads)
+                    if len(_overloads) > 1:
+                        index[f'group:{_schema}:{_fname}'] = frozenset(
+                            f'{_fname}({_args})'.lower() for _, _args in _overloads
+                        )
+        self._search_leaf_index = index
 
         # Emit badge signal so window.py can update the connection row indicator
         self.emit('role-attrs-loaded', conn, current_role_attrs)

@@ -3,7 +3,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Gtk, Adw, GObject, Gdk, Pango
+from gi.repository import Gtk, Adw, GLib, GObject, Gdk, Pango
 
 _ICONS = {
     'table':    'x-office-spreadsheet-symbolic',
@@ -83,6 +83,7 @@ class CommandPalette(Adw.Dialog):
         """
         super().__init__()
         self._items = items
+        self._search_debounce_id = None
         self._build_ui()
 
     def _build_ui(self):
@@ -169,7 +170,15 @@ class CommandPalette(Adw.Dialog):
                 self._listbox.select_row(first)
 
     def _on_search_changed(self, entry):
-        self._populate(entry.get_text())
+        if self._search_debounce_id is not None:
+            GLib.source_remove(self._search_debounce_id)
+        text = entry.get_text()
+        self._search_debounce_id = GLib.timeout_add(200, self._do_search, text)
+
+    def _do_search(self, text):
+        self._search_debounce_id = None
+        self._populate(text)
+        return False
 
     def _activate_selected(self):
         row = self._listbox.get_selected_row()
