@@ -263,11 +263,10 @@ class ActivityPanel(Gtk.Box):
             r[0]: r for r in rows  # r[0] is pid
         }
 
-        # Build an index of existing store items by pid
-        existing = {}
-        for i in range(self._store.get_n_items()):
-            item = self._store.get_item(i)
-            existing[item.pid] = (i, item)
+        # Collect existing PIDs for the append-new step
+        existing_pids = {
+            self._store.get_item(i).pid for i in range(self._store.get_n_items())
+        }
 
         # Update changed rows and remove gone ones (iterate in reverse to keep indices stable)
         for i in range(self._store.get_n_items() - 1, -1, -1):
@@ -282,9 +281,25 @@ class ActivityPanel(Gtk.Box):
                     self._store.splice(i, 1, [_ActivityRow(pid, user, db, state, duration_s, wait, query)])
 
         # Append new PIDs (not in existing store)
+        new_added = False
         for pid, r in incoming.items():
-            if pid not in existing:
+            if pid not in existing_pids:
                 self._store.append(_ActivityRow(*r))
+                new_added = True
+
+        # Re-sort to match SQL ORDER BY COALESCE(query_start, backend_start) DESC
+        # (duration_s ascending = most recent first; -1 means no query_start → sort last)
+        if new_added:
+            def _cmp(a, b):
+                da, db_d = a.duration_s, b.duration_s
+                if da == -1 and db_d == -1:
+                    return 0
+                if da == -1:
+                    return 1
+                if db_d == -1:
+                    return -1
+                return da - db_d
+            self._store.sort(_cmp)
 
         n = len(rows)
         self._status_label.set_label(f'{n} session{"s" if n != 1 else ""}')
