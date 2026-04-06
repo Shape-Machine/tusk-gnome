@@ -38,61 +38,55 @@ def show_col_stats(parent_widget, conn, schema, table, col_name, schema_info):
     def fetch():
         try:
             from tunnel import open_db
+            is_numeric_col = bool(pg_type and _is_numeric(pg_type))
+
             with open_db(conn) as db:
+                if cancel.is_set():
+                    GLib.idle_add(toast.dismiss)
+                    return
+
                 schema_id = pgsql.Identifier(schema)
                 table_id  = pgsql.Identifier(table)
                 col_id    = pgsql.Identifier(col_name)
 
-                if cancel.is_set():
-                    return
+                basic_sql = pgsql.SQL('''
+                    SELECT
+                        COUNT(*)                AS total,
+                        COUNT({col})            AS not_null,
+                        COUNT(*) - COUNT({col}) AS null_count,
+                        COUNT(DISTINCT {col})   AS distinct_count,
+                        MIN({col})              AS min_val,
+                        MAX({col})              AS max_val
+                    FROM {schema}.{table}
+                ''').format(schema=schema_id, table=table_id, col=col_id)
 
-                with db.cursor() as cur:
-                    cur.execute(
-                        pgsql.SQL('''
-                            SELECT
-                                COUNT(*)                AS total,
-                                COUNT({col})            AS not_null,
-                                COUNT(*) - COUNT({col}) AS null_count,
-                                COUNT(DISTINCT {col})   AS distinct_count,
-                                MIN({col})              AS min_val,
-                                MAX({col})              AS max_val
-                            FROM {schema}.{table}
-                        ''').format(schema=schema_id, table=table_id, col=col_id)
-                    )
-                    basic = cur.fetchone()
+                numeric_sql = pgsql.SQL('''
+                    SELECT AVG({col}), SUM({col})
+                    FROM {schema}.{table}
+                ''').format(schema=schema_id, table=table_id, col=col_id)
 
-                if cancel.is_set():
-                    return
+                top_sql = pgsql.SQL('''
+                    SELECT {col}::text, COUNT(*) AS freq
+                    FROM {schema}.{table}
+                    WHERE {col} IS NOT NULL
+                    GROUP BY {col}
+                    ORDER BY freq DESC
+                    LIMIT 5
+                ''').format(schema=schema_id, table=table_id, col=col_id)
 
-                numeric = None
-                if pg_type and _is_numeric(pg_type):
-                    with db.cursor() as cur:
-                        try:
-                            cur.execute(
-                                pgsql.SQL('''
-                                    SELECT AVG({col}), SUM({col})
-                                    FROM {schema}.{table}
-                                ''').format(schema=schema_id, table=table_id, col=col_id)
-                            )
-                            numeric = cur.fetchone()
-                        except Exception:
-                            db.rollback()
+                cur_basic   = db.cursor()
+                cur_numeric = db.cursor() if is_numeric_col else None
+                cur_top     = db.cursor()
 
-                if cancel.is_set():
-                    return
+                with db.pipeline():
+                    cur_basic.execute(basic_sql)
+                    if cur_numeric:
+                        cur_numeric.execute(numeric_sql)
+                    cur_top.execute(top_sql)
 
-                with db.cursor() as cur:
-                    cur.execute(
-                        pgsql.SQL('''
-                            SELECT {col}::text, COUNT(*) AS freq
-                            FROM {schema}.{table}
-                            WHERE {col} IS NOT NULL
-                            GROUP BY {col}
-                            ORDER BY freq DESC
-                            LIMIT 5
-                        ''').format(schema=schema_id, table=table_id, col=col_id)
-                    )
-                    top_values = cur.fetchall()
+                basic      = cur_basic.fetchone()
+                numeric    = cur_numeric.fetchone() if cur_numeric else None
+                top_values = cur_top.fetchall()
 
             if cancel.is_set():
                 GLib.idle_add(toast.dismiss)

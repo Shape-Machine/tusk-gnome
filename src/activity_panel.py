@@ -257,9 +257,35 @@ class ActivityPanel(Gtk.Box):
     def _populate(self, rows):
         if not self._alive:
             return
-        self._store.remove_all()
-        for pid, user, db, state, duration_s, wait, query in rows:
-            self._store.append(_ActivityRow(pid, user, db, state, duration_s, wait, query))
+
+        # Build a {pid: row_tuple} map for the incoming data
+        incoming = {
+            r[0]: r for r in rows  # r[0] is pid
+        }
+
+        # Build an index of existing store items by pid
+        existing = {}
+        for i in range(self._store.get_n_items()):
+            item = self._store.get_item(i)
+            existing[item.pid] = (i, item)
+
+        # Update changed rows and remove gone ones (iterate in reverse to keep indices stable)
+        for i in range(self._store.get_n_items() - 1, -1, -1):
+            item = self._store.get_item(i)
+            if item.pid not in incoming:
+                self._store.remove(i)
+            else:
+                pid, user, db, state, duration_s, wait, query = incoming[item.pid]
+                if (item.user != user or item.db != db or item.state != state
+                        or item.duration_s != duration_s or item.wait != wait
+                        or item.query != query):
+                    self._store.splice(i, 1, [_ActivityRow(pid, user, db, state, duration_s, wait, query)])
+
+        # Append new PIDs (not in existing store)
+        for pid, r in incoming.items():
+            if pid not in existing:
+                self._store.append(_ActivityRow(*r))
+
         n = len(rows)
         self._status_label.set_label(f'{n} session{"s" if n != 1 else ""}')
         self._error_banner.set_revealed(False)
