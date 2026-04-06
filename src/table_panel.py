@@ -1868,7 +1868,7 @@ class TablePanel(Gtk.Box):
 
         self._all_data_cols = cols
         self._all_data_rows = rows
-        self._row_filter_cache = [' '.join(str(v).lower() for v in r) for r in rows]
+        self._row_filter_cache = [' '.join(str(v).lower()[:200] for v in r) for r in rows]
         self._filter_entry.set_text('')
         self._data_scroll.set_child(None)  # force fresh ColumnView; reuse is unsafe across tables
         self._render_data_rows(rows)

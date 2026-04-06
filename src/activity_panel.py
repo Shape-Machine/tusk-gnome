@@ -110,6 +110,7 @@ class ActivityPanel(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._conn = conn
         self._refresh_id = 0
+        self._filter_debounce_id = None
         self._alive = True
         self._fetching = False
         self._apply_css()
@@ -214,7 +215,14 @@ class ActivityPanel(Gtk.Box):
                 query in row.state.lower())
 
     def _on_filter_changed(self, _entry):
+        if self._filter_debounce_id is not None:
+            GLib.source_remove(self._filter_debounce_id)
+        self._filter_debounce_id = GLib.timeout_add(300, self._do_filter)
+
+    def _do_filter(self):
+        self._filter_debounce_id = None
         self._custom_filter.changed(Gtk.FilterChange.DIFFERENT)
+        return False
 
     # ── Data fetch ───────────────────────────────────────────────────────────
 
@@ -344,3 +352,6 @@ class ActivityPanel(Gtk.Box):
         if self._refresh_id:
             GLib.source_remove(self._refresh_id)
             self._refresh_id = 0
+        if self._filter_debounce_id is not None:
+            GLib.source_remove(self._filter_debounce_id)
+            self._filter_debounce_id = None
