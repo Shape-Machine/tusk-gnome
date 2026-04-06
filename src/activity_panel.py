@@ -269,37 +269,33 @@ class ActivityPanel(Gtk.Box):
         }
 
         # Update changed rows and remove gone ones (iterate in reverse to keep indices stable)
+        any_changed = False
         for i in range(self._store.get_n_items() - 1, -1, -1):
             item = self._store.get_item(i)
             if item.pid not in incoming:
                 self._store.remove(i)
+                any_changed = True
             else:
                 pid, user, db, state, duration_s, wait, query = incoming[item.pid]
                 if (item.user != user or item.db != db or item.state != state
                         or item.duration_s != duration_s or item.wait != wait
                         or item.query != query):
                     self._store.splice(i, 1, [_ActivityRow(pid, user, db, state, duration_s, wait, query)])
+                    any_changed = True
 
         # Append new PIDs (not in existing store)
-        new_added = False
         for pid, r in incoming.items():
             if pid not in existing_pids:
                 self._store.append(_ActivityRow(*r))
-                new_added = True
+                any_changed = True
 
-        # Re-sort to match SQL ORDER BY COALESCE(query_start, backend_start) DESC
-        # (duration_s ascending = most recent first; -1 means no query_start → sort last)
-        if new_added:
-            def _cmp(a, b):
-                da, db_d = a.duration_s, b.duration_s
-                if da == -1 and db_d == -1:
-                    return 0
-                if da == -1:
-                    return 1
-                if db_d == -1:
-                    return -1
-                return da - db_d
-            self._store.sort(_cmp)
+        # Reorder store to exactly match the SQL result order.
+        # This is simpler and more correct than a client-side comparator: it handles
+        # all order changes (new sessions, state transitions, backend_start ordering
+        # for idle sessions) without needing extra columns.
+        if any_changed:
+            row_order = {r[0]: i for i, r in enumerate(rows)}
+            self._store.sort(lambda a, b: row_order.get(a.pid, len(rows)) - row_order.get(b.pid, len(rows)))
 
         n = len(rows)
         self._status_label.set_label(f'{n} session{"s" if n != 1 else ""}')
