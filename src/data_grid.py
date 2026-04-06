@@ -684,6 +684,7 @@ class PinColumnView(Gtk.Box):
                     gfile = d.save_finish(result)
                 except Exception:
                     return
+                root = self.get_root()
                 def _write():
                     try:
                         rows = get_all_rows()
@@ -700,7 +701,6 @@ class PinColumnView(Gtk.Box):
                         )
                         filename = gfile.get_basename()
                         msg = f'Exported {row_count} {"row" if row_count == 1 else "rows"} to {filename}'
-                        root = self.get_root()
                         if hasattr(root, 'show_toast'):
                             GLib.idle_add(root.show_toast, msg)
                     except Exception as e:
