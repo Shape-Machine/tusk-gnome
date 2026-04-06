@@ -382,6 +382,7 @@ class TuskWindow(Adw.ApplicationWindow):
         self._browser.connect('change-password-requested', self._on_change_password_requested)
         self._browser.connect('edit-connection-requested', self._on_edit_connection_from_browser)
         self._browser.connect('copy-to-clipboard', self._on_copy_to_clipboard)
+        self._browser.connect('server-activity-requested', lambda _b, conn: self._on_server_activity(conn))
         sidebar_paned.set_start_child(self._browser)
 
         self._file_explorer = FileExplorer()
@@ -406,7 +407,6 @@ class TuskWindow(Adw.ApplicationWindow):
         util_section = Gio.Menu()
         util_section.append('Preferences', 'app.preferences')
         util_section.append('Keyboard Shortcuts', 'win.show-help-overlay')
-        util_section.append('Server Activity', 'win.server-activity')
         menu.append_section(None, util_section)
 
         app_section = Gio.Menu()
@@ -1204,11 +1204,11 @@ class TuskWindow(Adw.ApplicationWindow):
         if page:
             self._tab_view.set_selected_page(page)
 
-    def _on_server_activity(self):
-        if not self._active_conn:
+    def _on_server_activity(self, conn=None):
+        conn = conn or self._active_conn
+        if not conn:
             self.show_toast('Connect to a database first')
             return
-        conn = self._active_conn
         tab_id = f'activity:{conn["id"]}'
         existing = self._find_tab(tab_id)
         if existing:
