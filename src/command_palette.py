@@ -85,6 +85,7 @@ class CommandPalette(Adw.Dialog):
         self._items = items
         self._search_debounce_id = None
         self._build_ui()
+        self.connect('closed', self._on_closed)
 
     def _build_ui(self):
         self.set_title('')
@@ -179,6 +180,11 @@ class CommandPalette(Adw.Dialog):
         self._search_debounce_id = None
         self._populate(text)
         return False
+
+    def _on_closed(self, _dialog):
+        if self._search_debounce_id is not None:
+            GLib.source_remove(self._search_debounce_id)
+            self._search_debounce_id = None
 
     def _activate_selected(self):
         row = self._listbox.get_selected_row()
