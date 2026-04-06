@@ -408,10 +408,9 @@ class SqlEditor(Gtk.Box):
         explain_box.append(self._explain_btn)
         explain_box.append(self._explain_menu_btn)
 
-        self._cancel_btn = Gtk.Button(label='Cancel')
-        self._cancel_btn.set_icon_name('media-playback-stop-symbolic')
+        self._cancel_btn = Gtk.Button(icon_name='media-playback-stop-symbolic')
         self._cancel_btn.add_css_class('flat')
-        self._cancel_btn.set_tooltip_text('Cancel running query')
+        self._cancel_btn.set_tooltip_text('Cancel query')
         self._cancel_btn.connect('clicked', self._on_cancel)
 
         run_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
