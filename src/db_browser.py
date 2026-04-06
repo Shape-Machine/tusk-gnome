@@ -680,8 +680,9 @@ class DbBrowser(Gtk.Box):
                     'tables': [], 'views': [], 'sequences': [], 'enums': [], 'functions': []
                 })
 
-            # Ensure all schemas appear even if empty
-            for s in all_schemas:
+            # Seed from visible schemas so inaccessible schemas don't appear in tree
+            # (schemas in all_schemas but not visible_schemas are truly hidden → banner)
+            for s in visible_schemas:
                 _schema(s)
 
             for schema, table, ttype in table_rows:
