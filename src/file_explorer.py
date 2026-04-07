@@ -8,6 +8,7 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GObject, Gio, Gdk
 
 import prefs
+from style import MARGIN_XS, MARGIN_SM, MARGIN_MD
 
 COL_ICON = 0
 COL_NAME = 1
@@ -30,13 +31,17 @@ class FileExplorer(Gtk.Box):
         self._build_ui()
         self._refresh()
 
+    @property
+    def current_dir(self):
+        return self._current_dir
+
     def _build_ui(self):
         # ── Nav bar ───────────────────────────────────────────────────────────
         nav = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
-        nav.set_margin_start(4)
-        nav.set_margin_end(4)
-        nav.set_margin_top(4)
-        nav.set_margin_bottom(4)
+        nav.set_margin_start(MARGIN_XS)
+        nav.set_margin_end(MARGIN_XS)
+        nav.set_margin_top(MARGIN_XS)
+        nav.set_margin_bottom(MARGIN_XS)
 
         self._up_btn = Gtk.Button(icon_name='go-up-symbolic')
         self._up_btn.add_css_class('flat')
@@ -101,15 +106,21 @@ class FileExplorer(Gtk.Box):
         scroll.set_vexpand(True)
         scroll.set_child(self._tree)
 
-        self._error_label = Gtk.Label()
-        self._error_label.add_css_class('error')
-        self._error_label.set_halign(Gtk.Align.CENTER)
-        self._error_label.set_valign(Gtk.Align.CENTER)
+        self._error_status = Adw.StatusPage(
+            icon_name='dialog-error-symbolic',
+            title='Could Not Open Folder',
+        )
+        home_recovery_btn = Gtk.Button(label='Go to Home Folder')
+        home_recovery_btn.add_css_class('suggested-action')
+        home_recovery_btn.add_css_class('pill')
+        home_recovery_btn.set_halign(Gtk.Align.CENTER)
+        home_recovery_btn.connect('clicked', lambda _: self._navigate_to(os.path.expanduser('~')))
+        self._error_status.set_child(home_recovery_btn)
 
         self._list_stack = Gtk.Stack()
         self._list_stack.set_vexpand(True)
         self._list_stack.add_named(scroll, 'list')
-        self._list_stack.add_named(self._error_label, 'error')
+        self._list_stack.add_named(self._error_status, 'error')
         self.append(self._list_stack)
 
         # ── Context menu ──────────────────────────────────────────────────────
@@ -133,6 +144,10 @@ class FileExplorer(Gtk.Box):
         self._context_popover.set_has_arrow(False)
         self._context_popover.set_parent(self._tree)
 
+        key_ctrl = Gtk.EventControllerKey()
+        key_ctrl.connect('key-pressed', self._on_key_pressed)
+        self._tree.add_controller(key_ctrl)
+
         right_click = Gtk.GestureClick(button=3)
         right_click.connect('pressed', self._on_right_click)
         self._tree.add_controller(right_click)
@@ -146,6 +161,10 @@ class FileExplorer(Gtk.Box):
         self._list_stack.set_visible_child_name('list')
         self._path_label.set_label(self._current_dir)
         self._up_btn.set_sensitive(os.path.dirname(self._current_dir) != self._current_dir)
+
+        parent = os.path.dirname(self._current_dir)
+        if parent != self._current_dir:
+            self._store.append(['go-up-symbolic', '..', parent, True, True])
 
         try:
             entries = sorted(
@@ -162,7 +181,7 @@ class FileExplorer(Gtk.Box):
                 else:
                     self._store.append(['text-x-generic-symbolic', entry.name, entry.path, False, False])
         except OSError as e:
-            self._error_label.set_label('Permission denied' if isinstance(e, PermissionError) else str(e))
+            self._error_status.set_description('Permission denied' if isinstance(e, PermissionError) else str(e))
             self._list_stack.set_visible_child_name('error')
 
     def _navigate_to(self, path):
@@ -174,6 +193,18 @@ class FileExplorer(Gtk.Box):
         parent = os.path.dirname(self._current_dir)
         if parent != self._current_dir:
             self._navigate_to(parent)
+
+    def _on_key_pressed(self, _ctrl, keyval, _code, _state):
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            _model, it = self._tree.get_selection().get_selected()
+            if it:
+                path = self._store.get_path(it)
+                self._on_row_activated(self._tree, path, None)
+                return True
+        if keyval == Gdk.KEY_BackSpace:
+            self._on_go_up(None)
+            return True
+        return False
 
     def _on_row_activated(self, _tree, path, _col):
         it = self._store.get_iter(path)
@@ -263,6 +294,8 @@ class FileExplorer(Gtk.Box):
             return
         it = self._store.get_iter(result[0])
         if not self._store.get_value(it, COL_SENSITIVE):
+            return
+        if self._store.get_value(it, COL_NAME) == '..':
             return
         tree_path, _col, _cx, _cy = result
         self._tree.get_selection().select_path(tree_path)

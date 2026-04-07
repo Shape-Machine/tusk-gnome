@@ -1,60 +1,262 @@
+import re
 import threading
+from itertools import groupby
 
 import gi
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Gtk, GLib, GObject, Gdk
+from gi.repository import Gtk, Adw, GLib, GObject, Gdk, Gio
+
+from connections import FavouritesStore
+from pg_errors import friendly_pg_error as _friendly_pg_error
+from style import MARGIN_XS, MARGIN_SM, MARGIN_MD
 
 COL_ICON = 0
 COL_LABEL = 1
-COL_TYPE = 2    # 'schema' | 'group' | 'table' | 'view' | 'sequence' | 'enum' | 'function' | 'loading' | 'error'
+COL_TYPE = 2    # 'schema' | 'group' | 'table' | 'view' | 'sequence' | 'enum' | 'function' | 'users' | 'role' | 'loading' | 'error' | 'favourites' | 'favourite' | 'activity'
 COL_CONN = 3
 COL_SCHEMA = 4
 COL_TABLE = 5
 
 
+def _quote_identifier(name):
+    """Return name quoted with double-quotes if it needs quoting (uppercase or special chars)."""
+    if re.fullmatch(r'[a-z_][a-z0-9_]*', name):
+        return name
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _qualified_name(schema, name):
+    return f'{_quote_identifier(schema)}.{_quote_identifier(name)}'
+
+
 class DbBrowser(Gtk.Box):
     __gsignals__ = {
+        'database-switched': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str),  # conn, new_dbname
+        ),
+        'drop-database-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str),  # conn, dbname
+        ),
         'table-selected': (
             GObject.SignalFlags.RUN_FIRST, None,
             (GObject.TYPE_PYOBJECT, str, str, str),  # conn, schema, table, item_type
-        )
+        ),
+        'create-table-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str),  # conn, schema
+        ),
+        'drop-table-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str, str, str),  # conn, schema, table, item_type
+        ),
+        'truncate-table-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str, str),  # conn, schema, table
+        ),
+        'rename-table-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str, str),  # conn, schema, table
+        ),
+        'clone-table-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str, str),  # conn, schema, table
+        ),
+        'create-schema-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT,),  # conn
+        ),
+        'rename-schema-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str),  # conn, schema
+        ),
+        'drop-schema-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str),  # conn, schema
+        ),
+        'create-view-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str),  # conn, schema
+        ),
+        'role-attrs-loaded': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, GObject.TYPE_PYOBJECT),  # conn, attrs dict
+        ),
+        'role-selected': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str),  # conn, role_name
+        ),
+        'function-selected': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str, str, str),  # conn, schema, fn_name, fn_args
+        ),
+        'create-role-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT,),  # conn
+        ),
+        'drop-role-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str),  # conn, role_name
+        ),
+        'change-password-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT, str),  # conn, role_name
+        ),
+        'edit-connection-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT,),  # conn
+        ),
+        'copy-to-clipboard': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (str,),  # text to copy
+        ),
+        'server-activity-requested': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (GObject.TYPE_PYOBJECT,),  # conn
+        ),
     }
 
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.set_vexpand(True)
         self._load_gen = 0
+        self._search_debounce_id = None
+        self._search_leaf_index = {}
+        self._search_matched_keys = None
+        self._favs = FavouritesStore()
         self._build_ui()
+        self.connect('destroy', self._on_destroy)
+
+    def _on_destroy(self, _widget):
+        if self._search_debounce_id is not None:
+            GLib.source_remove(self._search_debounce_id)
+            self._search_debounce_id = None
 
     def _build_ui(self):
         # Loading bar
         self._loading_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        self._loading_bar.set_margin_start(8)
-        self._loading_bar.set_margin_top(4)
-        self._loading_bar.set_margin_bottom(4)
+        self._loading_bar.set_margin_start(MARGIN_SM)
+        self._loading_bar.set_margin_top(MARGIN_XS)
+        self._loading_bar.set_margin_bottom(MARGIN_XS)
         self._loading_spinner = Gtk.Spinner()
         self._loading_spinner.set_size_request(16, 16)
-        loading_label = Gtk.Label(label='Connecting…')
-        loading_label.add_css_class('caption')
-        loading_label.add_css_class('dim-label')
+        self._loading_label = Gtk.Label(label='Connecting…')
+        self._loading_label.add_css_class('caption')
+        self._loading_label.add_css_class('dim-label')
         self._loading_bar.append(self._loading_spinner)
-        self._loading_bar.append(loading_label)
+        self._loading_bar.append(self._loading_label)
         self._loading_bar.set_visible(False)
         self.append(self._loading_bar)
 
-        # Search entry
+        # Database switcher bar
+        db_switcher_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        db_switcher_bar.set_margin_start(MARGIN_SM)
+        db_switcher_bar.set_margin_end(MARGIN_SM)
+        db_switcher_bar.set_margin_top(MARGIN_XS)
+        db_switcher_bar.set_margin_bottom(MARGIN_XS)
+        db_switcher_bar.set_visible(False)
+        self._db_switcher_bar = db_switcher_bar
+
+        db_label = Gtk.Label(label='Database:')
+        db_label.add_css_class('caption')
+        db_label.add_css_class('dim-label')
+        db_switcher_bar.append(db_label)
+
+        self._db_string_list = Gtk.StringList.new([])
+        self._db_dropdown = Gtk.DropDown.new(self._db_string_list, None)
+        self._db_dropdown.set_hexpand(True)
+        self._db_dropdown.add_css_class('flat')
+        self._db_dropdown_handler = self._db_dropdown.connect(
+            'notify::selected', self._on_db_selected
+        )
+        db_switcher_bar.append(self._db_dropdown)
+
+        db_menu = Gio.Menu()
+        db_menu.append('Drop Database…', 'dbmenu.drop-database')
+        self._db_menu_btn = Gtk.MenuButton()
+        self._db_menu_btn.set_icon_name('view-more-symbolic')
+        self._db_menu_btn.set_menu_model(db_menu)
+        self._db_menu_btn.add_css_class('flat')
+        self._db_menu_btn.set_valign(Gtk.Align.CENTER)
+        self._db_menu_btn.set_tooltip_text('Database options')
+        db_switcher_bar.append(self._db_menu_btn)
+
+        # Insert the action group once at build time so the MenuButton
+        # can always resolve 'dbmenu.drop-database'.
+        self._setup_db_menu_actions()
+
+        self.append(db_switcher_bar)
+
+        # Schema warning banner
+        self._schema_warning_banner = Adw.Banner(title='')
+        self._schema_warning_banner.set_button_label('Edit Connection')
+        self._schema_warning_banner.connect('button-clicked', lambda _: self.emit(
+            'edit-connection-requested', self._last_conn
+        ))
+        self.append(self._schema_warning_banner)
+
+        self._schemas_hidden_banner = Adw.Banner(
+            title='Some schemas are hidden — insufficient privileges'
+        )
+        self.append(self._schemas_hidden_banner)
+
+        # Connection error bar (shown when load fails)
+        self._conn_error_bar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self._conn_error_bar.set_margin_start(8)
+        self._conn_error_bar.set_margin_end(6)
+        self._conn_error_bar.set_margin_top(6)
+        self._conn_error_bar.set_margin_bottom(4)
+        self._conn_error_bar.set_visible(False)
+        self._conn_error_label = Gtk.Label()
+        self._conn_error_label.add_css_class('caption')
+        self._conn_error_label.add_css_class('error')
+        self._conn_error_label.set_xalign(0)
+        self._conn_error_label.set_wrap(True)
+        self._conn_error_label.set_hexpand(True)
+        self._conn_error_bar.append(self._conn_error_label)
+        error_btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        error_btn_box.set_margin_top(2)
+        edit_btn = Gtk.Button(label='Edit Connection')
+        edit_btn.add_css_class('flat')
+        edit_btn.add_css_class('caption')
+        edit_btn.connect('clicked', lambda _: self.emit(
+            'edit-connection-requested', self._last_conn
+        ))
+        retry_btn = Gtk.Button(label='Retry')
+        retry_btn.add_css_class('flat')
+        retry_btn.add_css_class('caption')
+        retry_btn.connect('clicked', lambda _: self.load(self._last_conn) if self._last_conn else None)
+        error_btn_box.append(edit_btn)
+        error_btn_box.append(retry_btn)
+        self._conn_error_bar.append(error_btn_box)
+        self.append(self._conn_error_bar)
+
+        # Search + New Schema toolbar
+        search_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        search_bar.set_margin_start(MARGIN_SM)
+        search_bar.set_margin_end(MARGIN_SM)
+        search_bar.set_margin_top(MARGIN_XS)
+        search_bar.set_margin_bottom(MARGIN_XS)
+        search_bar.set_visible(False)
+        self._search_bar = search_bar
+
         self._search_entry = Gtk.SearchEntry()
         self._search_entry.set_placeholder_text('Filter…')
-        self._search_entry.set_margin_start(6)
-        self._search_entry.set_margin_end(6)
-        self._search_entry.set_margin_top(4)
-        self._search_entry.set_margin_bottom(4)
-        self._search_entry.set_visible(False)
+        self._search_entry.set_hexpand(True)
         self._search_entry.connect('search-changed', self._on_search_changed)
-        self.append(self._search_entry)
+        search_bar.append(self._search_entry)
+
+        self._new_schema_btn = Gtk.Button(icon_name='folder-new-symbolic')
+        self._new_schema_btn.add_css_class('flat')
+        self._new_schema_btn.set_tooltip_text('New Schema…')
+        self._new_schema_btn.connect('clicked', self._on_new_schema_clicked)
+        search_bar.append(self._new_schema_btn)
+
+        self.append(search_bar)
 
         self._store = Gtk.TreeStore(str, str, str, GObject.TYPE_PYOBJECT, str, str)
 
@@ -70,6 +272,20 @@ class DbBrowser(Gtk.Box):
         key_ctrl = Gtk.EventControllerKey()
         key_ctrl.connect('key-pressed', self._on_key_pressed)
         self._tree.add_controller(key_ctrl)
+
+        right_click = Gtk.GestureClick(button=3)
+        right_click.connect('pressed', self._on_right_click)
+        self._tree.add_controller(right_click)
+
+        self._ctx_popover = None
+        self._ctx_conn = None
+        self._ctx_schema = None
+        self._ctx_table = None
+        self._ctx_item_type = None
+        self._expansion_snapshot = None
+        self._last_conn = None
+        self._read_only = False
+        self._db_switch_inhibit = False
 
         icon_renderer = Gtk.CellRendererPixbuf()
         text_renderer = Gtk.CellRendererText()
@@ -95,44 +311,57 @@ class DbBrowser(Gtk.Box):
             return True
         item_type = model.get_value(it, COL_TYPE)
         if item_type == 'schema':
+            matched = self._search_matched_keys
+            return matched is not None and f'schema:{model.get_value(it, COL_SCHEMA)}' in matched
+        if item_type == 'group':
+            matched = self._search_matched_keys
+            if matched is None:
+                return False
+            schema = model.get_value(it, COL_SCHEMA)
+            label = model.get_value(it, COL_LABEL)
+            return f'group:{schema}:{label}' in matched
+        if item_type == 'activity':
+            return True  # always visible regardless of search query
+        if item_type in ('table', 'view', 'sequence', 'enum', 'function', 'favourite'):
+            return query in model.get_value(it, COL_LABEL).lower()
+        if item_type in ('users', 'favourites'):
             child = model.iter_children(it)
             while child:
-                if self._group_has_match(model, child, query):
+                if query in model.get_value(child, COL_LABEL).lower():
                     return True
                 child = model.iter_next(child)
             return False
-        if item_type == 'group':
-            return self._group_has_match(model, it, query)
-        if item_type in ('table', 'view', 'sequence', 'enum', 'function'):
+        if item_type == 'role':
             return query in model.get_value(it, COL_LABEL).lower()
         return True  # info, error
 
-    def _group_has_match(self, model, group_it, query):
-        child = model.iter_children(group_it)
-        while child:
-            child_type = model.get_value(child, COL_TYPE)
-            if child_type in ('table', 'view', 'sequence', 'enum', 'function'):
-                if query in model.get_value(child, COL_LABEL).lower():
-                    return True
-            elif child_type == 'group':
-                # overloaded function parent node — check its children
-                if self._group_has_match(model, child, query):
-                    return True
-            child = model.iter_next(child)
-        return False
-
     def _on_search_changed(self, _entry):
+        if self._search_debounce_id is not None:
+            GLib.source_remove(self._search_debounce_id)
+        self._search_debounce_id = GLib.timeout_add(300, self._do_search)
+
+    def _do_search(self):
+        self._search_debounce_id = None
         query = self._search_entry.get_text().strip()
         if query:
-            if self._saved_expansion is None:
+            q = query.lower()
+            self._search_matched_keys = frozenset(
+                key for key, names in self._search_leaf_index.items()
+                if any(q in n for n in names)
+            )
+            expanding = self._saved_expansion is None
+            if expanding:
                 self._saved_expansion = self._get_expanded_paths()
             self._filter.refilter()
-            self._tree.expand_all()
+            if expanding:
+                self._tree.expand_all()
         else:
+            self._search_matched_keys = None
             self._filter.refilter()
             if self._saved_expansion is not None:
                 self._restore_expanded_paths(self._saved_expansion)
                 self._saved_expansion = None
+        return False
 
     def _get_expanded_paths(self):
         expanded = []
@@ -144,37 +373,178 @@ class DbBrowser(Gtk.Box):
         for path in paths:
             self._tree.expand_row(path, False)
 
+    def _snapshot_expansion(self):
+        """Return a set of (schema, label) keys for currently expanded nodes."""
+        keys = set()
+        def visit(_tree, path):
+            it = self._filter.get_iter(path)
+            if it is None:
+                return
+            schema = self._filter.get_value(it, COL_SCHEMA)
+            label  = self._filter.get_value(it, COL_LABEL)
+            keys.add((schema, label))
+        self._tree.map_expanded_rows(visit)
+        return keys
+
+    def _restore_expansion(self, keys):
+        """Re-expand nodes whose (schema, label) key is in *keys*."""
+        if not keys:
+            return
+        it = self._store.get_iter_first()
+        while it:
+            self._restore_expansion_node(it, keys)
+            it = self._store.iter_next(it)
+
+    def _restore_expansion_node(self, it, keys):
+        schema = self._store.get_value(it, COL_SCHEMA)
+        label  = self._store.get_value(it, COL_LABEL)
+        if (schema, label) in keys:
+            path = self._store.get_path(it)
+            # Convert store path to filter path before expanding
+            fpath = self._filter.convert_child_path_to_path(path)
+            if fpath:
+                self._tree.expand_row(fpath, False)
+        child = self._store.iter_children(it)
+        while child:
+            self._restore_expansion_node(child, keys)
+            child = self._store.iter_next(child)
+
+    def get_palette_items(self):
+        """Return a list of (conn, schema, name, item_type, display) for all
+        table, view and function nodes currently in the tree store.
+
+        For functions, *name* is the full label 'proname(args)' so the caller
+        can recover fn_name and fn_args by parsing it.
+        """
+        results = []
+        _NAVIGABLE = {'table', 'view', 'function'}
+
+        def _walk(it):
+            while it:
+                item_type = self._store.get_value(it, COL_TYPE)
+                if item_type in _NAVIGABLE:
+                    conn   = self._store.get_value(it, COL_CONN)
+                    schema = self._store.get_value(it, COL_SCHEMA)
+                    label  = self._store.get_value(it, COL_LABEL)
+                    # For functions, label is 'name(args)'; for tables/views it
+                    # equals COL_TABLE.  Use label as the canonical name so the
+                    # receiver can always parse fn_name/fn_args from it.
+                    name   = label
+                    display = f'{schema}.{label}' if schema else label
+                    results.append((conn, schema, name, item_type, display))
+                child = self._store.iter_children(it)
+                if child:
+                    _walk(child)
+                it = self._store.iter_next(it)
+
+        _walk(self._store.get_iter_first())
+        return results
+
+    def _expand_schema(self, schema_name):
+        """Expand the row for *schema_name* in the tree."""
+        it = self._store.get_iter_first()
+        while it:
+            if (self._store.get_value(it, COL_TYPE) == 'schema' and
+                    self._store.get_value(it, COL_SCHEMA) == schema_name):
+                path = self._store.get_path(it)
+                fpath = self._filter.convert_child_path_to_path(path)
+                if fpath:
+                    self._tree.expand_row(fpath, False)
+                return
+            it = self._store.iter_next(it)
+
+    def _expand_favourites(self):
+        """Expand the Favourites group row in the tree."""
+        it = self._store.get_iter_first()
+        if it and self._store.get_value(it, COL_TYPE) == 'favourites':
+            path = self._store.get_path(it)
+            fpath = self._filter.convert_child_path_to_path(path)
+            if fpath:
+                self._tree.expand_row(fpath, False)
+
+    def _on_db_selected(self, dropdown, _param):
+        if self._db_switch_inhibit:
+            return
+        idx = dropdown.get_selected()
+        if idx == Gtk.INVALID_LIST_POSITION:
+            return
+        new_db = self._db_string_list.get_string(idx)
+        if self._last_conn and new_db != self._last_conn.get('database', ''):
+            self.emit('database-switched', self._last_conn, new_db)
+
+    def _setup_db_menu_actions(self):
+        """Insert the database menu action group once at build time."""
+        ag = Gio.SimpleActionGroup()
+        action = Gio.SimpleAction.new('drop-database', None)
+        action.connect('activate', self._on_drop_database_activated)
+        ag.add_action(action)
+        self.insert_action_group('dbmenu', ag)
+
+    def _on_drop_database_activated(self, _action, _param):
+        if self._last_conn is None:
+            return
+        dbname = self._last_conn.get('database', '')
+        if dbname:
+            self.emit('drop-database-requested', self._last_conn, dbname)
+
     def clear(self):
         self._load_gen += 1
         self._loading_spinner.stop()
         self._loading_bar.set_visible(False)
+        self._db_switcher_bar.set_visible(False)
+        self._schema_warning_banner.set_revealed(False)
+        self._schemas_hidden_banner.set_revealed(False)
+        self._conn_error_bar.set_visible(False)
         self._search_entry.set_text('')
-        self._search_entry.set_visible(False)
+        self._search_bar.set_visible(False)
         self._store.clear()
+        self._search_leaf_index = {}
+        self._search_matched_keys = None
+        self._ctx_conn = None
+        self._ctx_schema = None
+        self._ctx_table = None
+        self._ctx_item_type = None
+
+    def set_rename_hint(self, old_schema, new_schema):
+        """Call before load() after a schema rename so expansion state is preserved."""
+        self._rename_hint = (old_schema, new_schema)
 
     def load(self, conn):
         self._load_gen += 1
         gen = self._load_gen
+        self._last_conn = conn
+        self._read_only = conn.get('read_only', False)
+        self._new_schema_btn.set_visible(not self._read_only)
+        self._db_menu_btn.set_visible(not self._read_only)
         self._saved_expansion = None
+        self._expansion_snapshot = self._snapshot_expansion()
+        hint = getattr(self, '_rename_hint', None)
+        if hint:
+            old, new = hint
+            self._expansion_snapshot = {
+                (new if s == old else s, lbl)
+                for s, lbl in self._expansion_snapshot
+            }
+            self._rename_hint = None
         self._store.clear()
+        self._conn_error_bar.set_visible(False)
         self._search_entry.set_text('')
+        self._loading_label.set_label('Connecting…')
         self._loading_bar.set_visible(True)
         self._loading_spinner.start()
+        # Placeholder row so the tree area shows loading feedback immediately
+        self._store.append(None, [
+            'content-loading-symbolic', 'Loading…', 'loading', conn, '', ''
+        ])
         threading.Thread(target=self._fetch_schema, args=(conn, gen), daemon=True).start()
 
     def _fetch_schema(self, conn, gen):
         try:
             import psycopg
-            from tunnel import open_tunnel
+            from tunnel import open_db
 
-            with open_tunnel(conn) as (host, port), psycopg.connect(
-                host=host,
-                port=port,
-                dbname=conn['database'],
-                user=conn['username'],
-                password=conn['password'],
-                connect_timeout=10,
-            ) as db:
+            with open_db(conn) as db:
+                GLib.idle_add(self._loading_label.set_label, 'Fetching schemas…')
                 with db.cursor() as cur:
                     cur.execute("""
                         SELECT table_schema, table_name, table_type
@@ -222,12 +592,104 @@ class DbBrowser(Gtk.Box):
                     """)
                     function_rows = cur.fetchall()
 
+                    cur.execute("""
+                        SELECT nspname FROM pg_namespace
+                        WHERE nspname NOT IN (
+                            'pg_catalog', 'information_schema',
+                            'pg_toast', 'pg_temp_1', 'pg_toast_temp_1'
+                        )
+                          AND nspname NOT LIKE 'pg_%'
+                        ORDER BY nspname
+                    """)
+                    all_schemas = [r[0] for r in cur.fetchall()]
+
+                    cur.execute("""
+                        SELECT schema_name FROM information_schema.schemata
+                        WHERE schema_name NOT IN (
+                            'pg_catalog', 'information_schema',
+                            'pg_toast', 'pg_temp_1', 'pg_toast_temp_1'
+                        )
+                          AND schema_name NOT LIKE 'pg_%'
+                    """)
+                    visible_schemas = {r[0] for r in cur.fetchall()}
+                    schemas_hidden = len(all_schemas) > len(visible_schemas)
+
+                    cur.execute("""
+                        SELECT datname FROM pg_database
+                        WHERE datistemplate = false
+                          AND datname NOT IN ('template0', 'template1')
+                          AND has_database_privilege(current_user, datname, 'CONNECT')
+                        ORDER BY datname
+                    """)
+                    all_databases = [r[0] for r in cur.fetchall()]
+
+                    # Current user's own role attributes (for connection badge)
+                    current_role_attrs = {}
+                    try:
+                        cur.execute("""
+                            SELECT rolsuper, rolcreatedb, rolcreaterole, rolcanlogin, rolreplication
+                            FROM pg_roles WHERE rolname = current_user
+                        """)
+                        row = cur.fetchone()
+                        if row:
+                            current_role_attrs = {
+                                'superuser': bool(row[0]),
+                                'createdb': bool(row[1]),
+                                'createrole': bool(row[2]),
+                                'login': bool(row[3]),
+                                'replication': bool(row[4]),
+                            }
+                    except psycopg.errors.InsufficientPrivilege:
+                        pass  # degrade gracefully — badge stays hidden
+
+                    # All roles + membership (for Users & Roles tree section)
+                    roles_list = None
+                    try:
+                        cur.execute("""
+                            SELECT r.rolname,
+                                   r.rolsuper,
+                                   r.rolcanlogin,
+                                   r.rolcreatedb,
+                                   r.rolcreaterole,
+                                   r.rolinherit,
+                                   r.rolreplication,
+                                   array_agg(g.rolname ORDER BY g.rolname)
+                                       FILTER (WHERE g.rolname IS NOT NULL) AS member_of
+                            FROM pg_roles r
+                            LEFT JOIN pg_auth_members m ON m.member = r.oid
+                            LEFT JOIN pg_roles g ON g.oid = m.roleid
+                            GROUP BY r.rolname, r.rolsuper, r.rolcanlogin,
+                                     r.rolcreatedb, r.rolcreaterole,
+                                     r.rolinherit, r.rolreplication
+                            ORDER BY r.rolname
+                        """)
+                        roles_list = [
+                            {
+                                'name': rr[0],
+                                'superuser': bool(rr[1]),
+                                'login': bool(rr[2]),
+                                'createdb': bool(rr[3]),
+                                'createrole': bool(rr[4]),
+                                'inherit': bool(rr[5]),
+                                'replication': bool(rr[6]),
+                                'member_of': rr[7] or [],
+                            }
+                            for rr in cur.fetchall()
+                        ]
+                    except psycopg.errors.InsufficientPrivilege:
+                        pass  # insufficient privileges — roles_list stays None
+
             schema_items = {}
 
             def _schema(s):
                 return schema_items.setdefault(s, {
                     'tables': [], 'views': [], 'sequences': [], 'enums': [], 'functions': []
                 })
+
+            # Seed from visible schemas so inaccessible schemas don't appear in tree
+            # (schemas in all_schemas but not visible_schemas are truly hidden → banner)
+            for s in visible_schemas:
+                _schema(s)
 
             for schema, table, ttype in table_rows:
                 bucket = _schema(schema)
@@ -245,17 +707,91 @@ class DbBrowser(Gtk.Box):
             for schema, name, args in function_rows:
                 _schema(schema)['functions'].append((name, args))
 
-            GLib.idle_add(self._populate, conn, schema_items, gen)
+            default_schema = conn.get('default_schema', '').strip()
+            schema_warning = None
+            if default_schema and default_schema not in all_schemas:
+                schema_warning = (
+                    f'Default schema "{default_schema}" not found on this server.'
+                )
+
+            GLib.idle_add(self._populate, conn, schema_items, all_databases,
+                          schema_warning, schemas_hidden, current_role_attrs, roles_list, gen)
 
         except Exception as e:
-            GLib.idle_add(self._show_error, str(e), gen)
+            GLib.idle_add(self._show_error, _friendly_pg_error(e), gen)
 
-    def _populate(self, conn, schema_items, gen):
+    def _populate(self, conn, schema_items, all_databases,
+                  schema_warning, schemas_hidden, current_role_attrs, roles_list, gen):
         if gen != self._load_gen:
             return
         self._loading_spinner.stop()
         self._loading_bar.set_visible(False)
+        self._conn_error_bar.set_visible(False)
         self._store.clear()
+        self._search_matched_keys = None
+
+        # Build search leaf index from schema data for fast filter lookups
+        index = {}
+        for _schema, _items in (schema_items or {}).items():
+            leaf_names = (
+                [t.lower() for t in _items['tables']] +
+                [v.lower() for v in _items['views']] +
+                [s.lower() for s in _items['sequences']] +
+                [e.lower() for e in _items['enums']]
+            )
+            func_labels = [f'{n}({a})'.lower() for n, a in _items['functions']]
+            leaf_names += func_labels
+            index[f'schema:{_schema}'] = frozenset(leaf_names)
+            index[f'group:{_schema}:Tables'] = frozenset(t.lower() for t in _items['tables'])
+            index[f'group:{_schema}:Views'] = frozenset(v.lower() for v in _items['views'])
+            if _items['sequences']:
+                index[f'group:{_schema}:Sequences'] = frozenset(s.lower() for s in _items['sequences'])
+            if _items['enums']:
+                index[f'group:{_schema}:Enums'] = frozenset(e.lower() for e in _items['enums'])
+            if _items['functions']:
+                index[f'group:{_schema}:Functions'] = frozenset(func_labels)
+                for _fname, _overloads in groupby(_items['functions'], key=lambda x: x[0]):
+                    _overloads = list(_overloads)
+                    if len(_overloads) > 1:
+                        index[f'group:{_schema}:{_fname}'] = frozenset(
+                            f'{_fname}({_args})'.lower() for _, _args in _overloads
+                        )
+        self._search_leaf_index = index
+        q = self._search_entry.get_text().strip().lower()
+        if q:
+            self._search_matched_keys = frozenset(
+                key for key, names in index.items()
+                if any(q in n for n in names)
+            )
+
+        # Emit badge signal so window.py can update the connection row indicator
+        self.emit('role-attrs-loaded', conn, current_role_attrs)
+
+        # Update database switcher
+        self._db_switch_inhibit = True
+        current_db = conn.get('database', '')
+        self._db_string_list.splice(0, self._db_string_list.get_n_items(), all_databases)
+        try:
+            selected_idx = all_databases.index(current_db)
+        except ValueError:
+            selected_idx = 0
+        self._db_dropdown.set_selected(selected_idx)
+        self._db_switch_inhibit = False
+        self._db_switcher_bar.set_visible(bool(all_databases))
+
+        # Show schema warning if default schema not found
+        if schema_warning:
+            self._schema_warning_banner.set_title(schema_warning)
+            self._schema_warning_banner.set_revealed(True)
+        else:
+            self._schema_warning_banner.set_revealed(False)
+
+        self._schemas_hidden_banner.set_revealed(bool(schemas_hidden))
+
+        # Server Activity — first item, always visible
+        self._store.append(None, [
+            'utilities-system-monitor-symbolic', 'Server Activity', 'activity', conn, '', ''
+        ])
 
         if not schema_items:
             self._store.append(None, [
@@ -263,19 +799,37 @@ class DbBrowser(Gtk.Box):
             ])
             return
 
+        default_schema = conn.get('default_schema', '').strip()
+
+        pinned = self._favs.get(conn.get('id', ''))
+        if pinned:
+            fav_it = self._store.append(None, [
+                'starred-symbolic', 'Favourites', 'favourites', conn, '', ''
+            ])
+            for fav in pinned:
+                label = f'{fav["table"]} ({fav["schema"]})'
+                self._store.append(fav_it, [
+                    'x-office-spreadsheet-symbolic', label, 'favourite',
+                    conn, fav['schema'], fav['table'],
+                ])
+
         for schema, items in sorted(schema_items.items()):
             schema_it = self._store.append(None, [
                 'folder-symbolic', schema, 'schema', conn, schema, ''
             ])
 
+            tables_it = self._store.append(schema_it, [
+                'x-office-spreadsheet-symbolic', 'Tables', 'group', conn, schema, ''
+            ])
             if items['tables']:
-                tables_it = self._store.append(schema_it, [
-                    'x-office-spreadsheet-symbolic', 'Tables', 'group', conn, schema, ''
-                ])
                 for table in items['tables']:
                     self._store.append(tables_it, [
                         'x-office-spreadsheet-symbolic', table, 'table', conn, schema, table
                     ])
+            else:
+                self._store.append(tables_it, [
+                    'dialog-information-symbolic', 'No tables in this schema', 'info', conn, schema, ''
+                ])
 
             views_it = self._store.append(schema_it, [
                 'view-grid-symbolic', 'Views', 'group', conn, schema, ''
@@ -309,7 +863,6 @@ class DbBrowser(Gtk.Box):
                     ])
 
             if items['functions']:
-                from itertools import groupby
                 func_it = self._store.append(schema_it, [
                     'system-run-symbolic', 'Functions', 'group', conn, schema, ''
                 ])
@@ -330,8 +883,68 @@ class DbBrowser(Gtk.Box):
                                 'system-run-symbolic', label, 'function', conn, schema, name
                             ])
 
+        # Users & Roles section
+        users_it = self._store.append(None, [
+            'system-users-symbolic', 'Users & Roles', 'users', conn, '', ''
+        ])
+        if roles_list is None:
+            self._store.append(users_it, [
+                'dialog-error-symbolic', 'Insufficient privileges', 'info', conn, '', ''
+            ])
+        elif not roles_list:
+            self._store.append(users_it, [
+                'dialog-information-symbolic', 'No roles found', 'info', conn, '', ''
+            ])
+        else:
+            def _role_label(role):
+                attrs = []
+                if role['superuser']:
+                    attrs.append('superuser')
+                if role['createdb']:
+                    attrs.append('createdb')
+                if role['createrole']:
+                    attrs.append('createrole')
+                if role['inherit']:
+                    attrs.append('inherit')
+                if role['replication']:
+                    attrs.append('replication')
+                attr_str = f' ({", ".join(attrs)})' if attrs else ''
+                member_str = (
+                    f' — member of: {", ".join(role["member_of"])}'
+                    if role['member_of'] else ''
+                )
+                return f'{role["name"]}{attr_str}{member_str}'
+
+            login_roles = [r for r in roles_list if r['login']]
+            group_roles  = [r for r in roles_list if not r['login']]
+
+            users_sub = self._store.append(users_it, [
+                'system-users-symbolic', 'Users', 'users', conn, '', ''
+            ])
+            for role in login_roles:
+                self._store.append(users_sub, [
+                    'person-symbolic', _role_label(role), 'role', conn, '', role['name']
+                ])
+
+            roles_sub = self._store.append(users_it, [
+                'key-symbolic', 'Roles', 'users', conn, '', ''
+            ])
+            for role in group_roles:
+                self._store.append(roles_sub, [
+                    'key-symbolic', _role_label(role), 'role', conn, '', role['name']
+                ])
+
         self._saved_expansion = None
-        self._search_entry.set_visible(True)
+        self._search_bar.set_visible(True)
+        snapshot = getattr(self, '_expansion_snapshot', None)
+        if snapshot:
+            self._restore_expansion(snapshot)
+            self._expansion_snapshot = None
+        elif default_schema:
+            self._expand_schema(default_schema)
+
+        if pinned:
+            self._expand_favourites()
 
     def _show_error(self, error_msg, gen):
         if gen != self._load_gen:
@@ -339,9 +952,323 @@ class DbBrowser(Gtk.Box):
         self._loading_spinner.stop()
         self._loading_bar.set_visible(False)
         self._store.clear()
-        self._store.append(None, [
-            'dialog-error-symbolic', f'Error: {error_msg}', 'error', None, '', ''
-        ])
+        self._db_switcher_bar.set_visible(False)
+        self._search_bar.set_visible(False)
+        self._conn_error_label.set_label(error_msg)
+        self._conn_error_bar.set_visible(True)
+
+    def get_loaded_schemas(self):
+        """Return list of schema names currently loaded in the tree."""
+        schemas = []
+        it = self._store.get_iter_first()
+        while it:
+            if self._store.get_value(it, COL_TYPE) == 'schema':
+                schemas.append(self._store.get_value(it, COL_SCHEMA))
+            it = self._store.iter_next(it)
+        return schemas
+
+    def _on_right_click(self, _gesture, _n_press, x, y):
+        result = self._tree.get_path_at_pos(int(x), int(y))
+        if result is None:
+            return
+        path, _col, _cx, _cy = result
+        if path is None:
+            return
+        it = self._filter.get_iter(path)
+        if it is None:
+            return
+        item_type = self._filter.get_value(it, COL_TYPE)
+        label = self._filter.get_value(it, COL_LABEL)
+        conn = self._filter.get_value(it, COL_CONN)
+        schema = self._filter.get_value(it, COL_SCHEMA)
+        table = self._filter.get_value(it, COL_TABLE)
+
+        self._ctx_conn = conn
+        self._ctx_schema = schema
+        self._ctx_table = table
+        self._ctx_item_type = item_type
+
+        if item_type in ('table', 'view'):
+            self._show_table_context_menu(x, y, item_type)
+        elif item_type == 'favourite':
+            self._show_favourite_context_menu(x, y)
+        elif item_type in ('sequence', 'enum', 'function'):
+            self._show_copy_only_context_menu(x, y)
+        elif item_type == 'schema':
+            self._show_schema_node_context_menu(x, y)
+        elif item_type == 'group' and label == 'Tables':
+            self._show_schema_context_menu(x, y)
+        elif item_type == 'group' and label == 'Views':
+            self._show_views_group_context_menu(x, y)
+        elif item_type == 'users':
+            self._show_users_group_context_menu(x, y)
+        elif item_type == 'role':
+            self._show_role_context_menu(x, y, table)  # table col stores role_name
+
+    def _on_new_schema_clicked(self, _btn):
+        if self._last_conn is None:
+            return
+        self.emit('create-schema-requested', self._last_conn)
+
+    def _show_schema_context_menu(self, x, y):
+        """Context menu for the Tables group node — just Create Table."""
+        if self._read_only:
+            return
+        ag = Gio.SimpleActionGroup()
+        action = Gio.SimpleAction.new('create-table', None)
+        action.connect('activate', lambda *_: self.emit(
+            'create-table-requested', self._ctx_conn, self._ctx_schema
+        ))
+        ag.add_action(action)
+        self.insert_action_group('browser', ag)
+
+        menu = Gio.Menu()
+        menu.append('Create Table…', 'browser.create-table')
+        self._popup_menu(menu, x, y)
+
+    def _show_schema_node_context_menu(self, x, y):
+        """Context menu for a schema node — Create Table, Rename Schema, Drop Schema."""
+        if self._read_only:
+            return
+        ag = Gio.SimpleActionGroup()
+
+        def add_action(name, cb):
+            action = Gio.SimpleAction.new(name, None)
+            action.connect('activate', lambda *_: cb())
+            ag.add_action(action)
+
+        add_action('create-table', lambda: self.emit(
+            'create-table-requested', self._ctx_conn, self._ctx_schema
+        ))
+        add_action('rename-schema', lambda: self.emit(
+            'rename-schema-requested', self._ctx_conn, self._ctx_schema
+        ))
+        add_action('drop-schema', lambda: self.emit(
+            'drop-schema-requested', self._ctx_conn, self._ctx_schema
+        ))
+        self.insert_action_group('schm', ag)
+
+        section1 = Gio.Menu()
+        section1.append('Create Table…', 'schm.create-table')
+        section2 = Gio.Menu()
+        section2.append('Rename Schema…', 'schm.rename-schema')
+        section2.append('Drop Schema…', 'schm.drop-schema')
+        menu = Gio.Menu()
+        menu.append_section(None, section1)
+        menu.append_section(None, section2)
+        self._popup_menu(menu, x, y)
+
+    def _show_views_group_context_menu(self, x, y):
+        """Context menu for the Views group node — New View."""
+        if self._read_only:
+            return
+        ag = Gio.SimpleActionGroup()
+        action = Gio.SimpleAction.new('create-view', None)
+        action.connect('activate', lambda *_: self.emit(
+            'create-view-requested', self._ctx_conn, self._ctx_schema
+        ))
+        ag.add_action(action)
+        self.insert_action_group('views', ag)
+
+        menu = Gio.Menu()
+        menu.append('New View…', 'views.create-view')
+        self._popup_menu(menu, x, y)
+
+    def _show_users_group_context_menu(self, x, y):
+        """Context menu for the Users & Roles group nodes — New Role."""
+        if self._read_only:
+            return
+        ag = Gio.SimpleActionGroup()
+        action = Gio.SimpleAction.new('create-role', None)
+        action.connect('activate', lambda *_: self.emit(
+            'create-role-requested', self._ctx_conn
+        ))
+        ag.add_action(action)
+        self.insert_action_group('roles', ag)
+
+        menu = Gio.Menu()
+        menu.append('New Role…', 'roles.create-role')
+        self._popup_menu(menu, x, y)
+
+    def _show_role_context_menu(self, x, y, role_name):
+        """Context menu for an individual role node — Drop Role, Change Password."""
+        if self._read_only:
+            return
+        ag = Gio.SimpleActionGroup()
+
+        def add_action(name, cb):
+            action = Gio.SimpleAction.new(name, None)
+            action.connect('activate', lambda *_: cb())
+            ag.add_action(action)
+
+        add_action('drop-role', lambda: self.emit(
+            'drop-role-requested', self._ctx_conn, role_name
+        ))
+        add_action('change-password', lambda: self.emit(
+            'change-password-requested', self._ctx_conn, role_name
+        ))
+        self.insert_action_group('rolemenu', ag)
+
+        section1 = Gio.Menu()
+        section1.append('Change Password…', 'rolemenu.change-password')
+        section2 = Gio.Menu()
+        section2.append('Drop Role…', 'rolemenu.drop-role')
+        menu = Gio.Menu()
+        menu.append_section(None, section1)
+        menu.append_section(None, section2)
+        self._popup_menu(menu, x, y)
+
+    def _popup_menu(self, menu, x, y):
+        popover = Gtk.PopoverMenu(menu_model=menu)
+        popover.set_has_arrow(False)
+        # Parent to the DbBrowser box (outside the ScrolledWindow) so GTK
+        # does not constrain the popover height to the tree's scroll area.
+        popover.set_parent(self)
+        # Translate click coordinates from tree-widget space to self space.
+        coords = self._tree.translate_coordinates(self, int(x), int(y))
+        tx, ty = coords if coords else (int(x), int(y))
+        rect = Gdk.Rectangle()
+        rect.x, rect.y, rect.width, rect.height = tx, ty, 1, 1
+        popover.set_pointing_to(rect)
+        popover.popup()
+
+    def _show_table_context_menu(self, x, y, item_type):
+        ag = Gio.SimpleActionGroup()
+
+        def add_action(name, cb):
+            action = Gio.SimpleAction.new(name, None)
+            action.connect('activate', lambda *_: cb())
+            ag.add_action(action)
+
+        conn_id = self._ctx_conn.get('id', '') if self._ctx_conn else ''
+        is_pinned = self._favs.is_pinned(conn_id, self._ctx_schema, self._ctx_table)
+
+        add_action('copy-name', lambda: self.emit(
+            'copy-to-clipboard', self._ctx_table
+        ))
+        add_action('copy-qualified', lambda: self.emit(
+            'copy-to-clipboard', _qualified_name(self._ctx_schema, self._ctx_table)
+        ))
+        if is_pinned:
+            add_action('unpin', lambda: self._do_unpin(
+                self._ctx_conn, self._ctx_schema, self._ctx_table
+            ))
+        else:
+            add_action('pin', lambda: self._do_pin(
+                self._ctx_conn, self._ctx_schema, self._ctx_table, self._ctx_item_type
+            ))
+
+        copy_section = Gio.Menu()
+        copy_section.append('Copy Name', 'tbl.copy-name')
+        copy_section.append('Copy Qualified Name', 'tbl.copy-qualified')
+
+        pin_section = Gio.Menu()
+        if is_pinned:
+            pin_section.append('Unpin from Favourites', 'tbl.unpin')
+        else:
+            pin_section.append('Pin to Favourites', 'tbl.pin')
+
+        menu = Gio.Menu()
+        menu.append_section(None, copy_section)
+        menu.append_section(None, pin_section)
+
+        if not self._read_only:
+            add_action('create-table', lambda: self.emit(
+                'create-table-requested', self._ctx_conn, self._ctx_schema
+            ))
+            add_action('rename-table', lambda: self.emit(
+                'rename-table-requested', self._ctx_conn, self._ctx_schema, self._ctx_table
+            ))
+            add_action('clone-table', lambda: self.emit(
+                'clone-table-requested', self._ctx_conn, self._ctx_schema, self._ctx_table
+            ))
+            add_action('truncate-table', lambda: self.emit(
+                'truncate-table-requested', self._ctx_conn, self._ctx_schema, self._ctx_table
+            ))
+            add_action('drop-object', lambda: self.emit(
+                'drop-table-requested', self._ctx_conn, self._ctx_schema,
+                self._ctx_table, self._ctx_item_type
+            ))
+
+            write_section1 = Gio.Menu()
+            write_section1.append('Create Table…', 'tbl.create-table')
+            if item_type == 'table':
+                write_section1.append('Rename Table…', 'tbl.rename-table')
+                write_section1.append('Clone Structure…', 'tbl.clone-table')
+            write_section2 = Gio.Menu()
+            if item_type == 'table':
+                write_section2.append('Truncate…', 'tbl.truncate-table')
+            drop_label = 'Drop Table…' if item_type == 'table' else 'Drop View…'
+            write_section2.append(drop_label, 'tbl.drop-object')
+            menu.append_section(None, write_section1)
+            menu.append_section(None, write_section2)
+
+        self.insert_action_group('tbl', ag)
+        self._popup_menu(menu, x, y)
+
+    def _show_copy_only_context_menu(self, x, y):
+        """Context menu for sequence/enum/function nodes — copy actions only."""
+        ag = Gio.SimpleActionGroup()
+
+        def add_action(name, cb):
+            action = Gio.SimpleAction.new(name, None)
+            action.connect('activate', lambda *_: cb())
+            ag.add_action(action)
+
+        add_action('copy-name', lambda: self.emit(
+            'copy-to-clipboard', self._ctx_table
+        ))
+        add_action('copy-qualified', lambda: self.emit(
+            'copy-to-clipboard', _qualified_name(self._ctx_schema, self._ctx_table)
+        ))
+        self.insert_action_group('obj', ag)
+
+        menu = Gio.Menu()
+        menu.append('Copy Name', 'obj.copy-name')
+        menu.append('Copy Qualified Name', 'obj.copy-qualified')
+        self._popup_menu(menu, x, y)
+
+    def _show_favourite_context_menu(self, x, y):
+        """Context menu for pinned favourite nodes — unpin + copy."""
+        ag = Gio.SimpleActionGroup()
+
+        def add_action(name, cb):
+            action = Gio.SimpleAction.new(name, None)
+            action.connect('activate', lambda *_: cb())
+            ag.add_action(action)
+
+        add_action('unpin', lambda: self._do_unpin(
+            self._ctx_conn, self._ctx_schema, self._ctx_table
+        ))
+        add_action('copy-name', lambda: self.emit(
+            'copy-to-clipboard', self._ctx_table
+        ))
+        add_action('copy-qualified', lambda: self.emit(
+            'copy-to-clipboard', _qualified_name(self._ctx_schema, self._ctx_table)
+        ))
+        self.insert_action_group('fav', ag)
+
+        section1 = Gio.Menu()
+        section1.append('Unpin from Favourites', 'fav.unpin')
+        section2 = Gio.Menu()
+        section2.append('Copy Name', 'fav.copy-name')
+        section2.append('Copy Qualified Name', 'fav.copy-qualified')
+        menu = Gio.Menu()
+        menu.append_section(None, section1)
+        menu.append_section(None, section2)
+        self._popup_menu(menu, x, y)
+
+    def _do_pin(self, conn, schema, table, item_type):
+        if not conn:
+            return
+        self._favs.add(conn.get('id', ''), schema, table, item_type)
+        self.load(conn)
+
+    def _do_unpin(self, conn, schema, table):
+        if not conn:
+            return
+        self._favs.remove(conn.get('id', ''), schema, table)
+        self.load(conn)
 
     def _on_row_activated(self, tree, path, _col):
         it = self._filter.get_iter(path)
@@ -351,29 +1278,84 @@ class DbBrowser(Gtk.Box):
             schema = self._filter.get_value(it, COL_SCHEMA)
             table = self._filter.get_value(it, COL_TABLE)
             self.emit('table-selected', conn, schema, table, item_type)
-        elif item_type in ('schema', 'group'):
+        elif item_type == 'favourite':
+            conn = self._filter.get_value(it, COL_CONN)
+            schema = self._filter.get_value(it, COL_SCHEMA)
+            table = self._filter.get_value(it, COL_TABLE)
+            fav_type = next(
+                (f['item_type'] for f in self._favs.get(conn.get('id', ''))
+                 if f['schema'] == schema and f['table'] == table),
+                'table'
+            )
+            self.emit('table-selected', conn, schema, table, fav_type)
+        elif item_type == 'function':
+            conn = self._filter.get_value(it, COL_CONN)
+            schema = self._filter.get_value(it, COL_SCHEMA)
+            fn_name = self._filter.get_value(it, COL_TABLE)
+            label = self._filter.get_value(it, COL_LABEL)
+            fn_args = label[len(fn_name) + 1:-1]  # strip "name(" prefix and ")" suffix
+            self.emit('function-selected', conn, schema, fn_name, fn_args)
+        elif item_type == 'role':
+            conn = self._filter.get_value(it, COL_CONN)
+            role_name = self._filter.get_value(it, COL_TABLE)
+            self.emit('role-selected', conn, role_name)
+        elif item_type == 'activity':
+            conn = self._filter.get_value(it, COL_CONN)
+            self.emit('server-activity-requested', conn)
+        elif item_type in ('schema', 'group', 'users', 'favourites'):
             if tree.row_expanded(path):
                 tree.collapse_row(path)
             else:
                 tree.expand_row(path, False)
 
     def _on_key_pressed(self, _ctrl, keyval, _code, _state):
+        _model, it = self._tree.get_selection().get_selected()
+        if not it:
+            return False
+        item_type = self._filter.get_value(it, COL_TYPE)
+
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
-            _model, it = self._tree.get_selection().get_selected()
-            if it:
-                item_type = self._filter.get_value(it, COL_TYPE)
-                if item_type in ('table', 'view'):
-                    conn = self._filter.get_value(it, COL_CONN)
-                    schema = self._filter.get_value(it, COL_SCHEMA)
-                    table = self._filter.get_value(it, COL_TABLE)
-                    self.emit('table-selected', conn, schema, table, item_type)
-                    return True
-                if item_type in ('schema', 'group'):
-                    path, _ = self._tree.get_cursor()
-                    if path:
-                        if self._tree.row_expanded(path):
-                            self._tree.collapse_row(path)
-                        else:
-                            self._tree.expand_row(path, False)
-                    return True
+            if item_type in ('table', 'view'):
+                conn = self._filter.get_value(it, COL_CONN)
+                schema = self._filter.get_value(it, COL_SCHEMA)
+                table = self._filter.get_value(it, COL_TABLE)
+                self.emit('table-selected', conn, schema, table, item_type)
+                return True
+            if item_type == 'function':
+                conn = self._filter.get_value(it, COL_CONN)
+                schema = self._filter.get_value(it, COL_SCHEMA)
+                fn_name = self._filter.get_value(it, COL_TABLE)
+                label = self._filter.get_value(it, COL_LABEL)
+                fn_args = label[len(fn_name) + 1:-1]
+                self.emit('function-selected', conn, schema, fn_name, fn_args)
+                return True
+            if item_type == 'role':
+                conn = self._filter.get_value(it, COL_CONN)
+                role_name = self._filter.get_value(it, COL_TABLE)
+                self.emit('role-selected', conn, role_name)
+                return True
+            if item_type in ('schema', 'group', 'users'):
+                path, _ = self._tree.get_cursor()
+                if path:
+                    if self._tree.row_expanded(path):
+                        self._tree.collapse_row(path)
+                    else:
+                        self._tree.expand_row(path, False)
+                return True
+
+        if keyval == Gdk.KEY_Right and item_type in ('schema', 'group', 'users'):
+            path, _ = self._tree.get_cursor()
+            if path and not self._tree.row_expanded(path):
+                self._tree.expand_row(path, False)
+                return True
+
+        if keyval == Gdk.KEY_Left and item_type in ('schema', 'group', 'users'):
+            path, _ = self._tree.get_cursor()
+            if path:
+                if self._tree.row_expanded(path):
+                    self._tree.collapse_row(path)
+                elif path.up():
+                    self._tree.set_cursor(path, None, False)
+            return True
+
         return False

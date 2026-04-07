@@ -41,6 +41,51 @@ def _forward(local_sock, transport, remote_host, remote_port):
         channel.close()
 
 
+def apply_conn_settings(db, conn):
+    """Apply session-level settings derived from the connection profile.
+
+    Must be called after psycopg.connect() and before any user queries.
+    Handles: read-only mode, default schema (search_path).
+    """
+    from psycopg import sql as pgsql
+    with db.cursor() as cur:
+        if conn.get('read_only'):
+            cur.execute('SET SESSION default_transaction_read_only = on')
+        if conn.get('default_schema'):
+            cur.execute(
+                pgsql.SQL('SET search_path TO {}').format(
+                    pgsql.Identifier(conn['default_schema'])
+                )
+            )
+    db.commit()
+
+
+@contextmanager
+def open_db(conn, autocommit=False):
+    """Open a psycopg connection via tunnel with session settings applied.
+
+    Preferred over calling open_tunnel + psycopg.connect directly.
+    Guarantees apply_conn_settings() runs on every connection, including
+    read-only enforcement.
+
+    Pass autocommit=True for DDL that must run outside a transaction block,
+    e.g. CREATE/DROP INDEX CONCURRENTLY.
+    """
+    import psycopg
+    with open_tunnel(conn) as (host, port), psycopg.connect(
+        host=host,
+        port=port,
+        dbname=conn['database'],
+        user=conn['username'],
+        password=conn['password'],
+        connect_timeout=10,
+    ) as db:
+        apply_conn_settings(db, conn)
+        if autocommit:
+            db.autocommit = True
+        yield db
+
+
 @contextmanager
 def open_tunnel(conn):
     """

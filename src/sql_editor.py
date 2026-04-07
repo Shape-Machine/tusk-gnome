@@ -1,6 +1,8 @@
+import json
 import os
 import re
 import threading
+import time
 
 import prefs
 
@@ -13,6 +15,8 @@ from gi.repository import Gtk, Adw, GObject, GLib, Gdk, Gio
 
 from data_grid import make_column_view
 
+_HISTORY_LIMIT = 50
+
 # Optional GtkSourceView for syntax highlighting
 try:
     gi.require_version('GtkSource', '5')
@@ -23,6 +27,13 @@ except (ValueError, ImportError):
     _HAS_SOURCE = False
 
 _AUTOSAVE_DELAY_MS = 800
+
+# Optional SQL formatter
+try:
+    import sqlparse
+    _HAS_SQLPARSE = True
+except ImportError:
+    _HAS_SQLPARSE = False
 
 
 def _split_statements(sql):
@@ -276,6 +287,10 @@ def _apply_scheme(buf, dark):
 
 
 _DDL_RE = re.compile(r'\b(CREATE|DROP|ALTER)\b', re.IGNORECASE)
+_AUTOCOMMIT_RE = re.compile(
+    r'^\s*(?:(?:--[^\n]*\n)|(?:/\*.*?\*/\s*))*\s*(CREATE|DROP|ALTER)\s+DATABASE\b',
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 class SqlEditor(Gtk.Box):
@@ -283,6 +298,7 @@ class SqlEditor(Gtk.Box):
         'run-sql':          (GObject.SignalFlags.RUN_FIRST, None, ()),
         'run-selected-sql': (GObject.SignalFlags.RUN_FIRST, None, ()),
         'ddl-executed':     (GObject.SignalFlags.RUN_FIRST, None, ()),
+        'query-finished':   (GObject.SignalFlags.RUN_FIRST, None, (int, bool)),  # elapsed_ms, is_error
     }
 
     def __init__(self, file_path):
@@ -292,10 +308,19 @@ class SqlEditor(Gtk.Box):
         self._connection = None
         self._autosave_timer = 0
         self._save_label_timer = 0
+        self._elapsed_timer = 0
         self._dark_handler_id = 0
         self._active_conn = None
         self._cancel_event = threading.Event()
+        self._first_error_row_index = -1
         self._last_sql = ''
+        self._last_error_msg = ''
+        self._history = []
+        self._run_start_time = time.monotonic()
+        self._explain_last_sql = ''
+        self._explain_last_conn = None
+        self._explain_is_analyze = False
+        self._explain_json_cache = None
         self._build_ui()
         self._load_file()
         self.connect('destroy', self._on_destroy)
@@ -339,7 +364,6 @@ class SqlEditor(Gtk.Box):
 
         self._run_sel_btn = Gtk.Button(label='Run Selected')
         self._run_sel_btn.set_icon_name('media-playback-start-symbolic')
-        self._run_sel_btn.add_css_class('pill')
         self._run_sel_btn.set_sensitive(False)
         self._run_sel_btn.set_tooltip_text('Run selected / at cursor  Ctrl+Enter')
         self._run_sel_btn.connect('clicked', lambda _: self.emit('run-selected-sql'))
@@ -352,14 +376,45 @@ class SqlEditor(Gtk.Box):
         self._run_btn.set_tooltip_text('Run all  F5')
         self._run_btn.connect('clicked', lambda _: self.emit('run-sql'))
 
-        self._cancel_btn = Gtk.Button(label='Cancel')
-        self._cancel_btn.set_icon_name('media-playback-stop-symbolic')
-        self._cancel_btn.add_css_class('destructive-action')
-        self._cancel_btn.add_css_class('pill')
-        self._cancel_btn.set_tooltip_text('Cancel running query')
+        # Explain split button: [Explain | ▾]
+        self._explain_btn = Gtk.Button(label='Explain')
+        self._explain_btn.add_css_class('flat')
+        self._explain_btn.set_sensitive(False)
+        self._explain_btn.set_tooltip_text('EXPLAIN current query')
+        self._explain_btn.connect('clicked', lambda _: self._run_explain('explain'))
+
+        explain_menu = Gio.Menu()
+        explain_menu.append('Explain', 'explain.run-explain')
+        explain_menu.append('Explain Analyze', 'explain.run-explain-analyze')
+
+        self._explain_menu_btn = Gtk.MenuButton()
+        self._explain_menu_btn.set_icon_name('pan-down-symbolic')
+        self._explain_menu_btn.add_css_class('flat')
+        self._explain_menu_btn.set_sensitive(False)
+        self._explain_menu_btn.set_menu_model(explain_menu)
+
+        explain_ag = Gio.SimpleActionGroup()
+        a_explain = Gio.SimpleAction.new('run-explain', None)
+        a_explain.connect('activate', lambda *_: self._run_explain('explain'))
+        explain_ag.add_action(a_explain)
+        a_analyze = Gio.SimpleAction.new('run-explain-analyze', None)
+        a_analyze.connect('activate', lambda *_: self._confirm_explain_analyze())
+        explain_ag.add_action(a_analyze)
+        self._explain_btn.insert_action_group('explain', explain_ag)
+        self._explain_menu_btn.insert_action_group('explain', explain_ag)
+
+        explain_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        explain_box.add_css_class('linked')
+        explain_box.append(self._explain_btn)
+        explain_box.append(self._explain_menu_btn)
+
+        self._cancel_btn = Gtk.Button(icon_name='media-playback-stop-symbolic')
+        self._cancel_btn.add_css_class('flat')
+        self._cancel_btn.set_tooltip_text('Cancel query')
         self._cancel_btn.connect('clicked', self._on_cancel)
 
         run_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        run_box.append(explain_box)
         run_box.append(self._run_sel_btn)
         run_box.append(self._run_btn)
 
@@ -385,7 +440,7 @@ class SqlEditor(Gtk.Box):
 
         # ── Editor ────────────────────────────────────────────────────────────
         self._buffer, self._editor = _make_editor()
-        self._buffer.connect('changed', self._on_changed)
+        self._changed_handler_id = self._buffer.connect('changed', self._on_changed)
 
         self._editor.set_monospace(True)
         self._editor.set_wrap_mode(Gtk.WrapMode.NONE)
@@ -444,7 +499,85 @@ class SqlEditor(Gtk.Box):
         log_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         log_scroll.set_vexpand(True)
         log_scroll.set_child(self._results_log)
-        self._results_stack.add_named(log_scroll, 'log')
+
+        self._results_banner = Adw.Banner()
+        self._results_banner.set_revealed(False)
+        self._results_banner.connect('button-clicked', self._on_banner_action)
+
+        log_outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        log_outer.append(self._results_banner)
+        log_outer.append(log_scroll)
+        self._results_stack.add_named(log_outer, 'log')
+
+        # ── EXPLAIN results pane ──────────────────────────────────────────────
+        self._explain_copy_confirm = Gtk.Label()
+        self._explain_copy_confirm.add_css_class('caption')
+        self._explain_copy_confirm.add_css_class('success')
+        self._explain_copy_confirm.set_visible(False)
+        self._explain_copy_confirm_timer = 0
+
+        copy_text_btn = Gtk.Button(label='Copy Text')
+        copy_text_btn.add_css_class('flat')
+        copy_text_btn.set_icon_name('edit-copy-symbolic')
+        copy_text_btn.connect('clicked', self._on_explain_copy_text)
+
+        copy_json_btn = Gtk.Button(label='Copy JSON')
+        copy_json_btn.add_css_class('flat')
+        copy_json_btn.set_icon_name('edit-copy-symbolic')
+        copy_json_btn.connect('clicked', self._on_explain_copy_json)
+
+        self._explain_tree_toggle = Gtk.ToggleButton(label='Tree')
+        self._explain_tree_toggle.add_css_class('flat')
+        self._explain_tree_toggle.set_icon_name('view-list-tree-symbolic')
+        self._explain_tree_toggle.connect('toggled', self._on_explain_tree_toggled)
+
+        self._explain_analyze_warning = Gtk.Label()
+        self._explain_analyze_warning.add_css_class('caption')
+        self._explain_analyze_warning.add_css_class('warning')
+        self._explain_analyze_warning.set_label('⚠ EXPLAIN ANALYZE executed the query')
+        self._explain_analyze_warning.set_visible(False)
+        self._explain_analyze_warning.set_hexpand(True)
+        self._explain_analyze_warning.set_xalign(0)
+        self._explain_analyze_warning.set_margin_start(8)
+
+        explain_toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        explain_toolbar.set_margin_start(6)
+        explain_toolbar.set_margin_end(6)
+        explain_toolbar.set_margin_top(4)
+        explain_toolbar.set_margin_bottom(4)
+        explain_toolbar.append(copy_text_btn)
+        explain_toolbar.append(copy_json_btn)
+        explain_toolbar.append(self._explain_tree_toggle)
+        explain_toolbar.append(self._explain_analyze_warning)
+        explain_toolbar.append(self._explain_copy_confirm)
+
+        self._explain_text_buf = Gtk.TextBuffer()
+        self._explain_text_view = Gtk.TextView(buffer=self._explain_text_buf)
+        self._explain_text_view.set_editable(False)
+        self._explain_text_view.set_monospace(True)
+        self._explain_text_view.set_top_margin(8)
+        self._explain_text_view.set_bottom_margin(8)
+        self._explain_text_view.set_left_margin(10)
+        self._explain_text_view.set_right_margin(10)
+        self._explain_text_view.set_wrap_mode(Gtk.WrapMode.NONE)
+        explain_text_scroll = Gtk.ScrolledWindow()
+        explain_text_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        explain_text_scroll.set_vexpand(True)
+        explain_text_scroll.set_child(self._explain_text_view)
+
+        self._explain_tree_scroll = Gtk.ScrolledWindow()
+        self._explain_tree_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        self._explain_tree_scroll.set_vexpand(True)
+
+        self._explain_inner_stack = Gtk.Stack()
+        self._explain_inner_stack.add_named(explain_text_scroll, 'text')
+        self._explain_inner_stack.add_named(self._explain_tree_scroll, 'tree')
+
+        explain_outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        explain_outer.append(explain_toolbar)
+        explain_outer.append(Gtk.Separator())
+        explain_outer.append(self._explain_inner_stack)
+        self._results_stack.add_named(explain_outer, 'explain')
 
         # Tab view — "Results" is always the first (pinned) tab;
         # SELECT query results appear as additional tabs beside it.
@@ -455,6 +588,23 @@ class SqlEditor(Gtk.Box):
         self._results_page = self._results_tab_view.append(self._results_stack)
         self._results_page.set_title('Results')
         self._results_tab_view.set_page_pinned(self._results_page, True)
+
+        # ── History tab ───────────────────────────────────────────────────────
+        self._history_list = Gtk.ListBox()
+        self._history_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._history_list.add_css_class('boxed-list')
+        self._history_list.set_margin_start(12)
+        self._history_list.set_margin_end(12)
+        self._history_list.set_margin_top(10)
+        self._history_list.set_margin_bottom(10)
+        history_scroll = Gtk.ScrolledWindow()
+        history_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        history_scroll.set_vexpand(True)
+        history_scroll.set_child(self._history_list)
+
+        self._history_page = self._results_tab_view.append(history_scroll)
+        self._history_page.set_title('History')
+        self._results_tab_view.set_page_pinned(self._history_page, True)
 
         results_tab_bar = Adw.TabBar()
         results_tab_bar.set_view(self._results_tab_view)
@@ -498,18 +648,91 @@ class SqlEditor(Gtk.Box):
         if self._save_label_timer:
             GLib.source_remove(self._save_label_timer)
             self._save_label_timer = 0
+        if self._explain_copy_confirm_timer:
+            GLib.source_remove(self._explain_copy_confirm_timer)
+            self._explain_copy_confirm_timer = 0
+        if self._elapsed_timer:
+            GLib.source_remove(self._elapsed_timer)
+            self._elapsed_timer = 0
         if self._dark_handler_id:
             Adw.StyleManager.get_default().disconnect(self._dark_handler_id)
             self._dark_handler_id = 0
+
+    def _set_buffer_text(self, text):
+        """Set buffer text without triggering the autosave changed handler."""
+        self._buffer.handler_block(self._changed_handler_id)
+        try:
+            self._buffer.set_text(text)
+        finally:
+            self._buffer.handler_unblock(self._changed_handler_id)
+
+    def _trim_buffer(self):
+        """Strip trailing whitespace from each line and remove leading/trailing blank lines.
+
+        Lines that end inside a SQL string literal are preserved as-is to avoid
+        altering intentional whitespace within multi-line string values.
+        """
+        start = self._buffer.get_start_iter()
+        end = self._buffer.get_end_iter()
+        text = self._buffer.get_text(start, end, False)
+        lines = text.split('\n')
+        trimmed = []
+        in_string = False
+        quote_char = None
+        for line in lines:
+            i = 0
+            while i < len(line):
+                c = line[i]
+                if not in_string:
+                    if c in ("'", '"'):
+                        in_string = True
+                        quote_char = c
+                else:
+                    if c == quote_char:
+                        if i + 1 < len(line) and line[i + 1] == quote_char:
+                            i += 1  # skip escaped quote pair
+                        else:
+                            in_string = False
+                            quote_char = None
+                i += 1
+            trimmed.append(line if in_string else line.rstrip())
+        # Remove leading blank lines
+        while trimmed and not trimmed[0]:
+            trimmed.pop(0)
+        # Remove trailing blank lines
+        while trimmed and not trimmed[-1]:
+            trimmed.pop()
+        result = '\n'.join(trimmed)
+        if result != text:
+            self._set_buffer_text(result)
+
+    def _format_buffer(self):
+        """Pretty-print SQL in the buffer using sqlparse (no-op if unavailable)."""
+        if not _HAS_SQLPARSE:
+            return
+        start = self._buffer.get_start_iter()
+        end = self._buffer.get_end_iter()
+        text = self._buffer.get_text(start, end, False)
+        formatted = sqlparse.format(
+            text,
+            reindent=True,
+            keyword_case='upper',
+            identifier_case=None,
+            strip_whitespace=False,
+        ).strip()
+        if formatted != text.strip():
+            self._set_buffer_text(formatted)
 
     def _save_now(self):
         if self._autosave_timer:
             GLib.source_remove(self._autosave_timer)
             self._autosave_timer = 0
+        self._format_buffer()
         self._do_save()
 
     def _do_save(self):
         self._autosave_timer = 0  # timer fired and consumed itself; clear stale ID
+        self._trim_buffer()
         try:
             start = self._buffer.get_start_iter()
             end = self._buffer.get_end_iter()
@@ -522,7 +745,7 @@ class SqlEditor(Gtk.Box):
             self._save_label.set_visible(True)
             self._save_label_timer = GLib.timeout_add(2000, self._hide_save_label)
         except OSError as e:
-            self.show_error(str(e))
+            self._show_save_error(str(e))
         return False  # for GLib.timeout_add
 
     def _hide_save_label(self):
@@ -552,7 +775,71 @@ class SqlEditor(Gtk.Box):
                 self._run_sel_btn.get_sensitive():
             self.emit('run-selected-sql')
             return True
+        if ctrl and keyval == Gdk.KEY_slash:
+            self._toggle_comment()
+            return True
         return False
+
+    def _toggle_comment(self):
+        buf = self._buffer
+        bounds = buf.get_selection_bounds()
+        if bounds:
+            start_iter, end_iter = bounds
+        else:
+            cursor = buf.get_iter_at_mark(buf.get_insert())
+            start_iter = cursor.copy()
+            end_iter = cursor.copy()
+
+        start_line = start_iter.get_line()
+        end_line = end_iter.get_line()
+        # If selection ends exactly at the start of a line (column 0), don't include it
+        if bounds and end_iter.get_line_offset() == 0 and end_line > start_line:
+            end_line -= 1
+
+        # Collect line texts
+        lines = []
+        for ln in range(start_line, end_line + 1):
+            _, it = buf.get_iter_at_line(ln)
+            end_it = it.copy()
+            if not end_it.ends_line():
+                end_it.forward_to_line_end()
+            lines.append(buf.get_text(it, end_it, False))
+
+        # Determine toggle direction:
+        # - All non-empty lines commented → remove comments from all
+        # - Otherwise → add comments only to uncommented lines (never double-comment)
+        non_empty = [l for l in lines if l.strip()]
+        all_commented = non_empty and all(l.lstrip().startswith('--') for l in non_empty)
+
+        buf.begin_user_action()
+        for i, (ln, line_text) in enumerate(zip(range(start_line, end_line + 1), lines)):
+            stripped = line_text.lstrip()
+            is_commented = stripped.startswith('--')
+            leading = len(line_text) - len(stripped)
+
+            if all_commented:
+                # Remove leading '--' (with optional space after)
+                if stripped.startswith('-- '):
+                    new_line = line_text[:leading] + stripped[3:]
+                elif stripped.startswith('--'):
+                    new_line = line_text[:leading] + stripped[2:]
+                else:
+                    new_line = line_text
+            else:
+                # Add '-- ' only to lines that are not already commented
+                if is_commented or not stripped:
+                    new_line = line_text  # leave commented/empty lines unchanged
+                else:
+                    new_line = line_text[:leading] + '-- ' + stripped
+
+            _, it = buf.get_iter_at_line(ln)
+            end_it = it.copy()
+            if not end_it.ends_line():
+                end_it.forward_to_line_end()
+            buf.delete(it, end_it)
+            _, insert_it = buf.get_iter_at_line(ln)
+            buf.insert(insert_it, new_line)
+        buf.end_user_action()
 
     # ── Connection ────────────────────────────────────────────────────────────
 
@@ -562,10 +849,14 @@ class SqlEditor(Gtk.Box):
             self._conn_label.set_label(conn['name'])
             self._run_btn.set_sensitive(True)
             self._run_sel_btn.set_sensitive(True)
+            self._explain_btn.set_sensitive(True)
+            self._explain_menu_btn.set_sensitive(True)
         else:
             self._conn_label.set_label('')
             self._run_btn.set_sensitive(False)
             self._run_sel_btn.set_sensitive(False)
+            self._explain_btn.set_sensitive(False)
+            self._explain_menu_btn.set_sensitive(False)
 
     def is_modified(self):
         return self._modified
@@ -610,29 +901,43 @@ class SqlEditor(Gtk.Box):
             sql = _statement_at_offset(full_text, cursor.get_offset())
         self._start_run(sql)
 
-    def _start_run(self, sql):
+    def _start_run(self, sql, explain_mode=None):
 
         if not sql:
             return
 
         self._last_sql = sql
+        self._run_start_time = time.monotonic()
         self._cancel_event.clear()
         self._clear_result_tabs()
         self._results_tab_view.set_selected_page(self._results_page)
         self._run_btn.set_sensitive(False)
         self._run_sel_btn.set_sensitive(False)
+        self._explain_btn.set_sensitive(False)
+        self._explain_menu_btn.set_sensitive(False)
         self._run_stack.set_visible_child_name('cancel')
         self._results_meta.set_label('')
+        self._results_banner.set_revealed(False)
         self._results_spinner.start()
         self._results_stack.set_visible_child_name('message')
         self._results_message.set_label('Running…')
         self._results_message.remove_css_class('error')
+        if self._elapsed_timer:
+            GLib.source_remove(self._elapsed_timer)
+        self._elapsed_timer = GLib.timeout_add(1000, self._on_elapsed_tick)
 
-        threading.Thread(
-            target=self._execute,
-            args=(dict(self._connection), sql),
-            daemon=True,
-        ).start()
+        if explain_mode:
+            threading.Thread(
+                target=self._execute_explain,
+                args=(dict(self._connection), sql, explain_mode),
+                daemon=True,
+            ).start()
+        else:
+            threading.Thread(
+                target=self._execute,
+                args=(dict(self._connection), sql),
+                daemon=True,
+            ).start()
 
     def _on_cancel(self, _):
         self._cancel_event.set()
@@ -640,21 +945,29 @@ class SqlEditor(Gtk.Box):
         if conn:
             try:
                 conn.cancel_safe()
-            except AttributeError:
+            except Exception:
                 try:
                     conn.cancel()
                 except Exception:
                     pass
-            except Exception:
-                pass
+
+    def _on_elapsed_tick(self):
+        elapsed = int(time.monotonic() - self._run_start_time)
+        self._results_message.set_label(f'Running… ({elapsed}s)')
+        return True  # keep firing until _finish_run removes the source
 
     def _finish_run(self):
         """Restore run buttons; called by all result-display methods."""
+        if self._elapsed_timer:
+            GLib.source_remove(self._elapsed_timer)
+            self._elapsed_timer = 0
         self._results_spinner.stop()
         self._run_stack.set_visible_child_name('run')
         has_conn = self._connection is not None
         self._run_btn.set_sensitive(has_conn)
         self._run_sel_btn.set_sensitive(has_conn)
+        self._explain_btn.set_sensitive(has_conn)
+        self._explain_menu_btn.set_sensitive(has_conn)
 
     def _execute(self, conn, sql):
         stmts = _split_statements(sql)
@@ -668,19 +981,16 @@ class SqlEditor(Gtk.Box):
             return
 
         # Multiple statements — collect results then show log
+        # If any statement requires autocommit (e.g. CREATE/DROP DATABASE),
+        # open the whole connection in autocommit mode so each statement
+        # commits independently. Otherwise use a single transaction.
+        use_autocommit = any(_AUTOCOMMIT_RE.match(s) for s in stmts)
         results = []  # list of dicts: {stmt, kind, data}
         try:
             import psycopg
-            from tunnel import open_tunnel
+            from tunnel import open_db
 
-            with open_tunnel(conn) as (host, port), psycopg.connect(
-                host=host,
-                port=port,
-                dbname=conn['database'],
-                user=conn['username'],
-                password=conn['password'],
-                connect_timeout=10,
-            ) as db:
+            with open_db(conn, autocommit=use_autocommit) as db:
                 self._active_conn = db
                 cancelled = False
                 try:
@@ -713,31 +1023,29 @@ class SqlEditor(Gtk.Box):
                                     msg += f'\nHint: {e.diag.message_hint}'
                                 results.append({'stmt': stmt, 'kind': 'error', 'msg': msg})
                                 break  # transaction is aborted; stop here
-                    if cancelled:
-                        db.rollback()
-                    else:
-                        db.commit()
+                    if not use_autocommit:
+                        if cancelled:
+                            db.rollback()
+                        else:
+                            db.commit()
                 finally:
                     self._active_conn = None
         except Exception as e:
             results.append({'stmt': '', 'kind': 'error', 'msg': str(e)})
 
-        GLib.idle_add(self._show_multi_results, results)
+        GLib.idle_add(self._show_multi_results, results, use_autocommit)
 
     def _execute_single(self, conn, sql):
         try:
             import psycopg
-            from tunnel import open_tunnel
+            from tunnel import open_db
 
-            with open_tunnel(conn) as (host, port), psycopg.connect(
-                host=host,
-                port=port,
-                dbname=conn['database'],
-                user=conn['username'],
-                password=conn['password'],
-                connect_timeout=10,
-            ) as db:
+            with open_db(conn, autocommit=bool(_AUTOCOMMIT_RE.match(sql))) as db:
                 self._active_conn = db
+                if self._cancel_event.is_set():
+                    self._active_conn = None
+                    GLib.idle_add(self.show_message, 'Query cancelled')
+                    return
                 try:
                     with db.cursor() as cur:
                         cur.execute(sql)
@@ -749,7 +1057,8 @@ class SqlEditor(Gtk.Box):
                             count = cur.rowcount
                             msg = f'{count} row{"s" if count != 1 else ""} affected'
                             GLib.idle_add(self.show_message, msg)
-                    db.commit()
+                    if not db.autocommit:
+                        db.commit()
                 finally:
                     self._active_conn = None
         except Exception as e:
@@ -772,37 +1081,54 @@ class SqlEditor(Gtk.Box):
 
     # ── Result display ────────────────────────────────────────────────────────
 
+    def _elapsed_ms(self):
+        return int((time.monotonic() - self._run_start_time) * 1000)
+
     def show_results(self, columns, rows):
+        elapsed = self._elapsed_ms()
         self._finish_run()
+        self.emit('query-finished', elapsed, False)
         if _DDL_RE.search(self._last_sql):
             self.emit('ddl-executed')
-        self._results_meta.set_label(f'{len(rows)} row{"s" if len(rows) != 1 else ""}')
-
-        if not rows:
-            self._results_message.set_label('Query returned 0 rows')
-            self._results_message.remove_css_class('error')
-            self._results_stack.set_visible_child_name('message')
-            return
+        n = len(rows)
+        self._results_meta.set_label(f'{n} row{"s" if n != 1 else ""}')
+        self._append_history(self._last_sql, self._elapsed_ms(), rows=n)
 
         self._results_scroll.set_child(make_column_view(columns, rows))
         self._results_stack.set_visible_child_name('grid')
 
     def show_message(self, text):
+        elapsed = self._elapsed_ms()
         self._finish_run()
+        self.emit('query-finished', elapsed, False)
         if _DDL_RE.search(self._last_sql):
             self.emit('ddl-executed')
         self._results_message.set_label(text)
         self._results_message.remove_css_class('error')
         self._results_stack.set_visible_child_name('message')
+        self._append_history(self._last_sql, self._elapsed_ms())
 
     def show_error(self, text):
+        elapsed = self._elapsed_ms()
         self._finish_run()
+        self._last_error_msg = text
+        self.emit('query-finished', elapsed, True)
+        self._results_message.set_label(text)
+        self._results_message.add_css_class('error')
+        self._results_stack.set_visible_child_name('message')
+        self._append_history(self._last_sql, self._elapsed_ms(), error=text)
+
+    def _show_save_error(self, text):
+        """Show a file I/O error without emitting query-finished or appending history."""
         self._results_message.set_label(text)
         self._results_message.add_css_class('error')
         self._results_stack.set_visible_child_name('message')
 
-    def _show_multi_results(self, results):
+    def _show_multi_results(self, results, use_autocommit=False):
+        elapsed = self._elapsed_ms()
         self._finish_run()
+        errors = sum(1 for r in results if r['kind'] == 'error')
+        self.emit('query-finished', elapsed, errors > 0)
         if any(_DDL_RE.search(r['stmt']) for r in results if r['kind'] in ('select', 'status')):
             self.emit('ddl-executed')
 
@@ -816,12 +1142,30 @@ class SqlEditor(Gtk.Box):
         errors = sum(1 for r in results if r['kind'] == 'error')
         cancelled = any(r['kind'] == 'cancelled' for r in results)
         total = len(results)
+        succeeded = sum(1 for r in results if r['kind'] in ('select', 'status'))
         meta = f'{total} statement{"s" if total != 1 else ""}'
         if errors:
             meta += f', {errors} error{"s" if errors != 1 else ""}'
         if cancelled:
             meta += ', cancelled'
         self._results_meta.set_label(meta)
+
+        self._first_error_row_index = next(
+            (i for i, r in enumerate(results) if r['kind'] == 'error'), -1
+        )
+
+        if errors:
+            self._results_banner.set_title(
+                f'{errors} of {total} statement{"s" if total != 1 else ""} failed'
+            )
+            self._results_banner.set_button_label('Jump to first error')
+        else:
+            self._results_banner.set_title(
+                f'All {succeeded} statement{"s" if succeeded != 1 else ""} succeeded'
+                if succeeded > 0 else ('Cancelled' if cancelled else f'{total} statements ran')
+            )
+            self._results_banner.set_button_label('Dismiss')
+        self._results_banner.set_revealed(True)
 
         for i, result in enumerate(results):
             preview = ' '.join(result['stmt'].split())
@@ -864,4 +1208,329 @@ class SqlEditor(Gtk.Box):
 
             self._results_log.append(row)
 
+        if errors:
+            if use_autocommit:
+                title = 'Batch stopped after error'
+                subtitle = 'Statements that ran before the error were committed independently.'
+            else:
+                title = 'Transaction rolled back'
+                subtitle = 'No changes from this batch were applied to the database.'
+            rollback_row = Adw.ActionRow(title=title, subtitle=subtitle)
+            rollback_row.add_css_class('error')
+            icon = Gtk.Image.new_from_icon_name('edit-undo-symbolic')
+            icon.add_css_class('error')
+            rollback_row.add_prefix(icon)
+            self._results_log.append(rollback_row)
+
         self._results_stack.set_visible_child_name('log')
+        # Record each statement separately in history
+        elapsed = self._elapsed_ms()
+        for result in results:
+            if result['stmt']:
+                err = result.get('msg') if result['kind'] == 'error' else None
+                rows = len(result.get('rows', [])) if result['kind'] == 'select' else None
+                self._append_history(result['stmt'], elapsed, rows=rows, error=err)
+
+    def _on_banner_action(self, _banner):
+        if self._first_error_row_index >= 0:
+            row = self._results_log.get_row_at_index(self._first_error_row_index)
+            if row:
+                row.grab_focus()
+        self._results_banner.set_revealed(False)
+
+    # ── EXPLAIN ───────────────────────────────────────────────────────────────
+
+    def _get_query_for_explain(self):
+        """Return the selection or statement at cursor, same logic as run_selected."""
+        bounds = self._buffer.get_selection_bounds()
+        if bounds:
+            return self._buffer.get_text(bounds[0], bounds[1], False).strip()
+        cursor = self._buffer.get_iter_at_mark(self._buffer.get_insert())
+        start = self._buffer.get_start_iter()
+        end = self._buffer.get_end_iter()
+        full_text = self._buffer.get_text(start, end, False)
+        return _statement_at_offset(full_text, cursor.get_offset())
+
+    def _confirm_explain_analyze(self):
+        dialog = Adw.AlertDialog(
+            heading='Run EXPLAIN ANALYZE?',
+            body='EXPLAIN ANALYZE actually executes the query. DML statements (INSERT, UPDATE, DELETE) will have real side effects.',
+        )
+        dialog.add_response('cancel', 'Cancel')
+        dialog.add_response('run', 'Run Anyway')
+        dialog.set_response_appearance('run', Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.connect('response', lambda d, r: self._run_explain('analyze') if r == 'run' else None)
+        dialog.present(self.get_root())
+
+    def _run_explain(self, mode):
+        sql = self._get_query_for_explain()
+        if not sql or not self._connection:
+            return
+        self._explain_last_sql = sql
+        self._explain_last_conn = dict(self._connection)
+        self._explain_is_analyze = (mode == 'analyze')
+        self._explain_json_cache = None
+        self._explain_tree_toggle.set_active(False)
+        self._start_run(sql, explain_mode=mode)
+
+    def _execute_explain(self, conn, sql, mode):
+        is_analyze = (mode == 'analyze')
+        prefix = 'EXPLAIN (ANALYZE, FORMAT TEXT)' if is_analyze else 'EXPLAIN (FORMAT TEXT)'
+        explain_sql = f'{prefix} {sql}'
+        try:
+            import psycopg
+            from tunnel import open_db
+            with open_db(conn) as db:
+                self._active_conn = db
+                try:
+                    with db.cursor() as cur:
+                        cur.execute(explain_sql)
+                        rows = cur.fetchall()
+                        plan_text = '\n'.join(r[0] for r in rows)
+                    db.rollback()
+                finally:
+                    self._active_conn = None
+            GLib.idle_add(self._show_explain_results, plan_text, is_analyze)
+        except Exception as e:
+            try:
+                import psycopg as _pg
+                if isinstance(e, _pg.Error) and hasattr(e, 'diag'):
+                    msg = e.diag.message_primary or str(e)
+                    if e.diag.message_detail:
+                        msg += f'\nDetail: {e.diag.message_detail}'
+                    GLib.idle_add(self.show_error, msg)
+                    return
+            except ImportError:
+                pass
+            GLib.idle_add(self.show_error, str(e))
+
+    def _show_explain_results(self, plan_text, is_analyze):
+        self._finish_run()
+        self._explain_text_buf.set_text(plan_text)
+        self._explain_analyze_warning.set_visible(is_analyze)
+        self._explain_inner_stack.set_visible_child_name('text')
+        self._results_stack.set_visible_child_name('explain')
+        self._results_meta.set_label(f'{"EXPLAIN ANALYZE" if is_analyze else "EXPLAIN"} — {self._elapsed_ms()} ms')
+        self._append_history(
+            f'{"EXPLAIN ANALYZE" if is_analyze else "EXPLAIN"} {self._explain_last_sql}',
+            self._elapsed_ms(),
+        )
+
+    def _on_explain_copy_text(self, _btn):
+        start = self._explain_text_buf.get_start_iter()
+        end = self._explain_text_buf.get_end_iter()
+        text = self._explain_text_buf.get_text(start, end, False)
+        Gdk.Display.get_default().get_clipboard().set(text)
+        self._show_explain_copy_confirm('Copied')
+
+    def _on_explain_copy_json(self, _btn):
+        if self._explain_json_cache is not None:
+            Gdk.Display.get_default().get_clipboard().set(
+                json.dumps(self._explain_json_cache, indent=2))
+            self._show_explain_copy_confirm('Copied JSON')
+            return
+        # Re-run with FORMAT JSON
+        conn = self._explain_last_conn
+        sql = self._explain_last_sql
+        is_analyze = self._explain_is_analyze
+        if not conn or not sql:
+            return
+        prefix = 'EXPLAIN (ANALYZE, FORMAT JSON)' if is_analyze else 'EXPLAIN (FORMAT JSON)'
+
+        def run():
+            try:
+                import psycopg
+                from tunnel import open_tunnel
+                with open_tunnel(conn) as (host, port), psycopg.connect(
+                    host=host, port=port,
+                    dbname=conn['database'], user=conn['username'],
+                    password=conn['password'], connect_timeout=10,
+                ) as db:
+                    with db.cursor() as cur:
+                        cur.execute(f'{prefix} {sql}')
+                        rows = cur.fetchall()
+                        plan_json = rows[0][0] if rows else []
+                    db.rollback()
+                self._explain_json_cache = plan_json
+                text = json.dumps(plan_json, indent=2)
+                def _copy_and_confirm(t=text):
+                    Gdk.Display.get_default().get_clipboard().set(t)
+                    self._show_explain_copy_confirm('Copied JSON')
+                GLib.idle_add(_copy_and_confirm)
+            except Exception as e:
+                GLib.idle_add(self._show_explain_copy_confirm, f'Error: {e}')
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _show_explain_copy_confirm(self, msg):
+        self._explain_copy_confirm.set_label(msg)
+        self._explain_copy_confirm.set_visible(True)
+        if self._explain_copy_confirm_timer:
+            GLib.source_remove(self._explain_copy_confirm_timer)
+        self._explain_copy_confirm_timer = GLib.timeout_add(
+            2000, self._hide_explain_copy_confirm)
+
+    def _hide_explain_copy_confirm(self):
+        self._explain_copy_confirm.set_visible(False)
+        self._explain_copy_confirm_timer = 0
+        return False
+
+    def _on_explain_tree_toggled(self, btn):
+        if not btn.get_active():
+            self._explain_inner_stack.set_visible_child_name('text')
+            return
+
+        if self._explain_json_cache is not None:
+            self._render_explain_tree(self._explain_json_cache)
+            return
+
+        conn = self._explain_last_conn
+        sql = self._explain_last_sql
+        is_analyze = self._explain_is_analyze
+        if not conn or not sql:
+            btn.set_active(False)
+            return
+
+        prefix = 'EXPLAIN (ANALYZE, FORMAT JSON)' if is_analyze else 'EXPLAIN (FORMAT JSON)'
+
+        def run():
+            try:
+                import psycopg
+                from tunnel import open_tunnel
+                with open_tunnel(conn) as (host, port), psycopg.connect(
+                    host=host, port=port,
+                    dbname=conn['database'], user=conn['username'],
+                    password=conn['password'], connect_timeout=10,
+                ) as db:
+                    with db.cursor() as cur:
+                        cur.execute(f'{prefix} {sql}')
+                        rows = cur.fetchall()
+                        plan_json = rows[0][0] if rows else []
+                    db.rollback()
+                self._explain_json_cache = plan_json
+                GLib.idle_add(self._render_explain_tree, plan_json)
+            except Exception as e:
+                GLib.idle_add(self._explain_tree_toggle.set_active, False)
+                GLib.idle_add(self._show_explain_copy_confirm, f'Tree error: {e}')
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _render_explain_tree(self, plan_json):
+        # plan_json is a list; first element has a "Plan" key
+        if not plan_json or not isinstance(plan_json, list):
+            return
+        top_plan = plan_json[0].get('Plan', {})
+
+        # Find max total cost for highlighting
+        max_cost = [0.0]
+        def _find_max(node):
+            max_cost[0] = max(max_cost[0], node.get('Total Cost', 0.0))
+            for child in node.get('Plans', []):
+                _find_max(child)
+        _find_max(top_plan)
+
+        def _build_row(node, depth=0):
+            node_type = node.get('Node Type', 'Unknown')
+            total_cost = node.get('Total Cost', 0.0)
+            plan_rows = node.get('Plan Rows', '?')
+            actual_rows = node.get('Actual Rows')
+            actual_time = node.get('Actual Total Time')
+
+            title = node_type
+            parts = [f'cost={total_cost:.2f}', f'rows≈{plan_rows}']
+            if actual_rows is not None:
+                parts.append(f'actual={actual_rows}')
+            if actual_time is not None:
+                parts.append(f'{actual_time:.2f} ms')
+            subtitle = '  ·  '.join(parts)
+
+            is_expensive = total_cost >= max_cost[0] * 0.9 and max_cost[0] > 0
+            children = node.get('Plans', [])
+            if children:
+                expander = Adw.ExpanderRow(title=title, subtitle=subtitle)
+                if is_expensive:
+                    expander.set_expanded(True)
+                    expander.add_css_class('error')
+                for child in children:
+                    child_row = _build_row(child, depth + 1)
+                    expander.add_row(child_row)
+                return expander
+            else:
+                row = Adw.ActionRow(title=title, subtitle=subtitle)
+                if is_expensive:
+                    row.add_css_class('error')
+                return row
+
+        page = Adw.PreferencesPage()
+        group = Adw.PreferencesGroup()
+        group.add(_build_row(top_plan))
+        page.add(group)
+
+        self._explain_tree_scroll.set_child(page)
+        self._explain_inner_stack.set_visible_child_name('tree')
+
+    # ── History ───────────────────────────────────────────────────────────────
+
+    def _append_history(self, sql, duration_ms, rows=None, error=None):
+        import datetime
+        ts = datetime.datetime.now().strftime('%H:%M:%S')
+        entry = {'sql': sql, 'ts': ts, 'duration_ms': duration_ms, 'rows': rows, 'error': error}
+
+        self._history.insert(0, entry)
+        if len(self._history) > _HISTORY_LIMIT:
+            self._history.pop()
+
+        preview = ' '.join(sql.split())
+        if len(preview) > 80:
+            preview = preview[:77] + '…'
+
+        if duration_ms < 1000:
+            time_str = f'{duration_ms} ms'
+        else:
+            time_str = f'{duration_ms / 1000:.1f} s'
+
+        if error:
+            subtitle = f'{ts}  ·  {time_str}  ·  error'
+        elif rows is not None:
+            subtitle = f'{ts}  ·  {time_str}  ·  {rows} row{"s" if rows != 1 else ""}'
+        else:
+            subtitle = f'{ts}  ·  {time_str}'
+
+        row = Adw.ActionRow(title=preview, subtitle=subtitle, activatable=True)
+        row.add_css_class('monospace')
+        if error:
+            icon = Gtk.Image.new_from_icon_name('dialog-error-symbolic')
+            icon.add_css_class('error')
+            row.add_prefix(icon)
+
+        rerun_btn = Gtk.Button(icon_name='media-playback-start-symbolic')
+        rerun_btn.add_css_class('flat')
+        rerun_btn.set_tooltip_text('Re-run this query')
+        rerun_btn.set_valign(Gtk.Align.CENTER)
+        rerun_btn.connect('clicked', lambda _btn, s=sql: self._history_rerun(s))
+        row.add_suffix(rerun_btn)
+
+        row.connect('activated', lambda r, s=sql: self._history_populate(s))
+
+        # Prepend to list (most recent first)
+        self._history_list.prepend(row)
+
+        # Trim list widget to cap
+        count = 0
+        child = self._history_list.get_first_child()
+        while child:
+            count += 1
+            child = child.get_next_sibling()
+        if count > _HISTORY_LIMIT:
+            last = self._history_list.get_last_child()
+            if last:
+                self._history_list.remove(last)
+
+    def _history_populate(self, sql):
+        self._buffer.set_text(sql)
+
+    def _history_rerun(self, sql):
+        if not self._connection:
+            return
+        self._buffer.set_text(sql)
+        self._start_run(sql)
