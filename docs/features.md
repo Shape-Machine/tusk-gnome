@@ -1,5 +1,5 @@
 # Features
-_Generated from source: v2026.04.06-00_
+_Generated from source: v2026.04.07-00_
 
 ## Connections
 
@@ -8,9 +8,8 @@ _Generated from source: v2026.04.06-00_
 - SSH tunnel: host, port, user, private key file (file picker), optional passphrase
 - Read-only mode — prevents accidental writes; enforced at session level
 - Default schema field — sets `search_path` on connect and expands that schema in the browser
-- Test connection before saving
 - PostgreSQL URI import: paste URI to auto-fill all fields; copy connection as URI to clipboard
-- Import connections from a `.pgpass` file
+- Import connections from a `.pgpass` file; export a connection to `.pgpass` format
 - Edit, duplicate, and delete connections
 - Active connection highlighted with an accent bar indicator in the sidebar
 - Superuser role badge shown when the connected role has superuser privileges
@@ -23,17 +22,18 @@ _Generated from source: v2026.04.06-00_
 - Live filter bar — type to narrow all schema objects by name; tree expands to show matches and restores on clear (Ctrl+F to focus)
 - Database switcher in the header; drop database with confirmation
 - Right-click a schema: Create Schema, Rename Schema, Drop Schema (CASCADE option)
-- Right-click a table: Rename, Clone (with column selection), Truncate (with RESTART IDENTITY option), Drop (CASCADE option)
+- Right-click a table: Rename, Clone (with column selection and optional data copy), Truncate (with RESTART IDENTITY option), Drop (CASCADE option)
 - Right-click a view: Drop (CASCADE option)
 - Pin tables and views as favourites (shown in a Favourites section at the top)
 - Function browser — click a function to view its definition
 - Activity panel shortcut in the sidebar
+- Command palette (Ctrl+P): jump to any table, view, or function by name (max 100 results)
 - Spinner shown while connecting; switching connections closes table tabs from the previous connection
 
 ## Table Inspector
 
 - Eight tabs per table: Schema, Keys, Relations, Triggers, Indexes, DDL, Definition (views only), Data
-- **Schema** — column name, type, length, nullable, default value; right-click to Rename, Change Type, Set Default, Toggle Nullable, Set as Primary Key, or Drop; toolbar `+` to add a column
+- **Schema** — column name, type, length, nullable, default value; right-click to Rename, Change Type, Set Default, Toggle Nullable, Set as Primary Key, or Drop; toolbar `+` to add a column; per-column statistics (count, nulls, distinct, min/max, top 5 values)
 - **Keys** — constraint name, type (PRIMARY KEY / UNIQUE / CHECK / FOREIGN KEY), associated columns; Add Constraint button; right-click to drop
 - **Relations** — foreign key constraints with column mappings, referenced table and column, ON UPDATE/DELETE actions
 - **Triggers** — name, event, timing, orientation, and statement text
@@ -42,7 +42,7 @@ _Generated from source: v2026.04.06-00_
 - **Definition** — view definition SQL (views only; read-only)
 - **Data** — paginated data browser with inline insert, edit, and delete (see Data Browser section)
 - All tabs lazy-load on first access; Ctrl+R refreshes all tabs
-- Row count estimate and total table size shown in a status bar (tables only)
+- Row count estimate and total table size shown in a status bar (tables only); Exact Count button for precise row count
 
 ## Data Browser
 
@@ -53,7 +53,7 @@ _Generated from source: v2026.04.06-00_
 - NULL values displayed with a distinct greyed "NULL" label
 - Insert new rows via modal form with type-aware inputs, required-field markers, database-default hints, and boolean toggle support (tables with primary key only)
 - Edit existing rows via modal form; modified-field indicators; primary key fields locked (tables with primary key only)
-- Delete selected rows with confirmation; navigates back a page if the current page becomes empty (tables with primary key only)
+- Delete selected rows with confirmation and Undo toast (5 second timeout); navigates back a page if the current page becomes empty (tables with primary key only)
 - Multi-row selection: Ctrl+Click, Shift+Click
 - Right-click a cell: copy cell value
 - Right-click selected rows: copy as CSV, JSON, or INSERT SQL
@@ -63,7 +63,7 @@ _Generated from source: v2026.04.06-00_
 
 - Syntax highlighting via GtkSourceView; respects system dark/light mode automatically
 - Line numbers and current-line highlight
-- Auto-save with 800 ms debounce; unsaved-changes indicator in toolbar; manual save with Ctrl+S
+- Auto-save with 2 second debounce; unsaved-changes indicator in toolbar; manual save with Ctrl+S
 - Run All (F5) — executes the entire buffer
 - Run Selected (Ctrl+Return) — executes selected text, or the statement at the cursor
 - Cancel button — stops a running query mid-execution
@@ -73,9 +73,8 @@ _Generated from source: v2026.04.06-00_
 - Multi-statement log: each statement's outcome listed (row count, execution time, error detail); SELECT results open as additional closeable tabs
 - Query history — last 50 executed statements stored with timestamp and duration; click an entry to restore it to the editor
 - Toggle line comment with Ctrl+/ (adds or removes `--` prefix)
-- Optional SQL formatter (via sqlparse)
 - Configurable notification threshold for long-running queries (seconds; set to 0 to disable)
-- Command palette (Ctrl+P) for quick navigation
+- Command palette (Ctrl+P) for quick navigation to any table, view, or function
 
 ## File Explorer
 
