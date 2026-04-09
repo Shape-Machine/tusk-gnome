@@ -44,6 +44,7 @@
     {
       "name": "python3-psycopg-binary",
       "buildsystem": "simple",
+      "only-arches": ["x86_64"],
       "build-commands": [
         "pip3 install --no-index --find-links=. --prefix=/app psycopg_binary-3.3.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
       ],
@@ -100,6 +101,7 @@
     {
       "name": "python3-cffi",
       "buildsystem": "simple",
+      "only-arches": ["x86_64"],
       "build-commands": [
         "pip3 install --no-index --find-links=. --prefix=/app cffi-2.0.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
       ],
@@ -114,6 +116,7 @@
     {
       "name": "python3-cryptography",
       "buildsystem": "simple",
+      "only-arches": ["x86_64"],
       "build-commands": [
         "pip3 install --no-index --find-links=. --prefix=/app cryptography-46.0.5-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
       ],
@@ -226,6 +229,7 @@
     {
       "name": "python3-pynacl",
       "buildsystem": "simple",
+      "only-arches": ["x86_64"],
       "build-commands": [
         "pip3 install --no-index --find-links=. --prefix=/app PyNaCl-1.5.0-cp36-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.manylinux_2_24_x86_64.whl"
       ],
@@ -240,6 +244,7 @@
     {
       "name": "python3-bcrypt",
       "buildsystem": "simple",
+      "only-arches": ["x86_64"],
       "build-commands": [
         "pip3 install --no-index --find-links=. --prefix=/app bcrypt-5.0.0-cp38-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
       ],
