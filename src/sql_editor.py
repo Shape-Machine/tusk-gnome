@@ -14,6 +14,7 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GObject, GLib, Gdk, Gio
 
 from data_grid import make_column_view
+from explain_graph import ExplainGraph
 
 _HISTORY_LIMIT = 50
 
@@ -531,6 +532,11 @@ class SqlEditor(Gtk.Box):
         self._explain_tree_toggle.set_icon_name('view-list-tree-symbolic')
         self._explain_tree_toggle.connect('toggled', self._on_explain_tree_toggled)
 
+        self._explain_graph_toggle = Gtk.ToggleButton(label='Graph')
+        self._explain_graph_toggle.add_css_class('flat')
+        self._explain_graph_toggle.set_icon_name('preferences-system-network-symbolic')
+        self._explain_graph_toggle.connect('toggled', self._on_explain_graph_toggled)
+
         self._explain_analyze_warning = Gtk.Label()
         self._explain_analyze_warning.add_css_class('caption')
         self._explain_analyze_warning.add_css_class('warning')
@@ -548,6 +554,7 @@ class SqlEditor(Gtk.Box):
         explain_toolbar.append(copy_text_btn)
         explain_toolbar.append(copy_json_btn)
         explain_toolbar.append(self._explain_tree_toggle)
+        explain_toolbar.append(self._explain_graph_toggle)
         explain_toolbar.append(self._explain_analyze_warning)
         explain_toolbar.append(self._explain_copy_confirm)
 
@@ -569,9 +576,18 @@ class SqlEditor(Gtk.Box):
         self._explain_tree_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         self._explain_tree_scroll.set_vexpand(True)
 
+        self._explain_graph = ExplainGraph()
+        self._explain_graph.set_vexpand(True)
+        self._explain_graph.set_hexpand(True)
+        self._explain_graph_scroll = Gtk.ScrolledWindow()
+        self._explain_graph_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        self._explain_graph_scroll.set_vexpand(True)
+        self._explain_graph_scroll.set_child(self._explain_graph)
+
         self._explain_inner_stack = Gtk.Stack()
         self._explain_inner_stack.add_named(explain_text_scroll, 'text')
         self._explain_inner_stack.add_named(self._explain_tree_scroll, 'tree')
+        self._explain_inner_stack.add_named(self._explain_graph_scroll, 'graph')
 
         explain_outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         explain_outer.append(explain_toolbar)
@@ -1271,6 +1287,7 @@ class SqlEditor(Gtk.Box):
         self._explain_is_analyze = (mode == 'analyze')
         self._explain_json_cache = None
         self._explain_tree_toggle.set_active(False)
+        self._explain_graph_toggle.set_active(False)
         self._start_run(sql, explain_mode=mode)
 
     def _execute_explain(self, conn, sql, mode):
@@ -1375,22 +1392,14 @@ class SqlEditor(Gtk.Box):
         self._explain_copy_confirm_timer = 0
         return False
 
-    def _on_explain_tree_toggled(self, btn):
-        if not btn.get_active():
-            self._explain_inner_stack.set_visible_child_name('text')
-            return
-
-        if self._explain_json_cache is not None:
-            self._render_explain_tree(self._explain_json_cache)
-            return
-
-        conn = self._explain_last_conn
-        sql = self._explain_last_sql
+    def _fetch_explain_json(self, on_success, on_error):
+        """Fetch EXPLAIN JSON in a background thread, calling callbacks on the main thread."""
+        conn       = self._explain_last_conn
+        sql        = self._explain_last_sql
         is_analyze = self._explain_is_analyze
         if not conn or not sql:
-            btn.set_active(False)
+            on_error('No plan to fetch')
             return
-
         prefix = 'EXPLAIN (ANALYZE, FORMAT JSON)' if is_analyze else 'EXPLAIN (FORMAT JSON)'
 
         def run():
@@ -1408,12 +1417,57 @@ class SqlEditor(Gtk.Box):
                         plan_json = rows[0][0] if rows else []
                     db.rollback()
                 self._explain_json_cache = plan_json
-                GLib.idle_add(self._render_explain_tree, plan_json)
+                GLib.idle_add(on_success, plan_json)
             except Exception as e:
-                GLib.idle_add(self._explain_tree_toggle.set_active, False)
-                GLib.idle_add(self._show_explain_copy_confirm, f'Tree error: {e}')
+                GLib.idle_add(on_error, str(e))
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _on_explain_tree_toggled(self, btn):
+        if not btn.get_active():
+            if not self._explain_graph_toggle.get_active():
+                self._explain_inner_stack.set_visible_child_name('text')
+            return
+        self._explain_graph_toggle.set_active(False)
+
+        if self._explain_json_cache is not None:
+            self._render_explain_tree(self._explain_json_cache)
+            return
+
+        if not self._explain_last_conn or not self._explain_last_sql:
+            btn.set_active(False)
+            return
+
+        self._fetch_explain_json(
+            on_success=self._render_explain_tree,
+            on_error=lambda e: (
+                self._explain_tree_toggle.set_active(False),
+                self._show_explain_copy_confirm(f'Tree error: {e}'),
+            ),
+        )
+
+    def _on_explain_graph_toggled(self, btn):
+        if not btn.get_active():
+            if not self._explain_tree_toggle.get_active():
+                self._explain_inner_stack.set_visible_child_name('text')
+            return
+        self._explain_tree_toggle.set_active(False)
+
+        if self._explain_json_cache is not None:
+            self._render_explain_graph(self._explain_json_cache)
+            return
+
+        if not self._explain_last_conn or not self._explain_last_sql:
+            btn.set_active(False)
+            return
+
+        self._fetch_explain_json(
+            on_success=self._render_explain_graph,
+            on_error=lambda e: (
+                self._explain_graph_toggle.set_active(False),
+                self._show_explain_copy_confirm(f'Graph error: {e}'),
+            ),
+        )
 
     def _render_explain_tree(self, plan_json):
         # plan_json is a list; first element has a "Plan" key
@@ -1468,6 +1522,10 @@ class SqlEditor(Gtk.Box):
 
         self._explain_tree_scroll.set_child(page)
         self._explain_inner_stack.set_visible_child_name('tree')
+
+    def _render_explain_graph(self, plan_json):
+        self._explain_graph.set_plan(plan_json)
+        self._explain_inner_stack.set_visible_child_name('graph')
 
     # ── History ───────────────────────────────────────────────────────────────
 
