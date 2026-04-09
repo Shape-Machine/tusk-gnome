@@ -50,11 +50,6 @@ class FileExplorer(Gtk.Box):
         nav.set_margin_top(MARGIN_XS)
         nav.set_margin_bottom(MARGIN_XS)
 
-        self._up_btn = Gtk.Button(icon_name='go-up-symbolic')
-        self._up_btn.add_css_class('flat')
-        self._up_btn.set_tooltip_text('Go up')
-        self._up_btn.connect('clicked', self._on_go_up)
-
         home_btn = Gtk.Button(icon_name='go-home-symbolic')
         home_btn.add_css_class('flat')
         home_btn.set_tooltip_text('Home directory')
@@ -82,7 +77,6 @@ class FileExplorer(Gtk.Box):
         self._collapse_btn.set_tooltip_text('Collapse file explorer')
         self._collapse_btn.connect('clicked', lambda _: self._toggle_collapsed())
 
-        nav.append(self._up_btn)
         nav.append(home_btn)
         nav.append(self._path_label)
         nav.append(new_folder_btn)
@@ -95,29 +89,6 @@ class FileExplorer(Gtk.Box):
         self._collapsible = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
 
         self._collapsible.append(Gtk.Separator())
-
-        # New Query CTA — shown only when a connection is active
-        nq_icon = Gtk.Image.new_from_icon_name('tab-new-symbolic')
-        nq_label = Gtk.Label(label='New Query')
-        nq_content = Gtk.Box(spacing=6)
-        nq_content.set_halign(Gtk.Align.CENTER)
-        nq_content.append(nq_icon)
-        nq_content.append(nq_label)
-        self._new_query_btn = Gtk.Button(child=nq_content)
-        self._new_query_btn.add_css_class('suggested-action')
-        self._new_query_btn.set_hexpand(True)
-        self._new_query_btn.set_margin_start(MARGIN_SM)
-        self._new_query_btn.set_margin_end(MARGIN_SM)
-        self._new_query_btn.set_margin_top(MARGIN_SM)
-        self._new_query_btn.set_margin_bottom(MARGIN_XS)
-        self._new_query_btn.set_tooltip_text('Create a new query file and open it')
-        self._new_query_btn.connect('clicked', lambda _: self._prompt_create('file'))
-        self._new_query_btn.set_visible(False)
-        self._collapsible.append(self._new_query_btn)
-
-        self._cta_separator = Gtk.Separator()
-        self._cta_separator.set_visible(False)
-        self._collapsible.append(self._cta_separator)
 
         self.append(self._collapsible)
 
@@ -194,10 +165,6 @@ class FileExplorer(Gtk.Box):
         right_click.connect('pressed', self._on_right_click)
         self._tree.add_controller(right_click)
 
-    def set_connected(self, connected):
-        self._new_query_btn.set_visible(connected)
-        self._cta_separator.set_visible(connected)
-
     def _toggle_collapsed(self):
         self._collapsed = not self._collapsed
         prefs.put('file_explorer_collapsed', self._collapsed)
@@ -218,7 +185,6 @@ class FileExplorer(Gtk.Box):
         self._store.clear()
         self._list_stack.set_visible_child_name('list')
         self._path_label.set_label(self._current_dir)
-        self._up_btn.set_sensitive(os.path.dirname(self._current_dir) != self._current_dir)
 
         parent = os.path.dirname(self._current_dir)
         if parent != self._current_dir:

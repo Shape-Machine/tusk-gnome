@@ -67,6 +67,8 @@ class TuskWindow(Adw.ApplicationWindow):
             self.add_action(a)
 
         add('quick-open',     lambda *_: self._on_quick_open())
+        add('new-sql-file',   lambda *_: self._file_explorer._prompt_create('file'))
+        add('new-folder',     lambda *_: self._file_explorer._prompt_create('folder'))
         add('close-tab',      lambda *_: self._close_current_tab())
         add('next-tab',       lambda *_: self._tab_view.select_next_page())
         add('prev-tab',       lambda *_: self._tab_view.select_previous_page())
@@ -219,6 +221,18 @@ class TuskWindow(Adw.ApplicationWindow):
                 <property name="accelerator">&lt;ctrl&gt;p</property>
               </object>
             </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">New SQL File</property>
+                <property name="accelerator">&lt;ctrl&gt;n</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">New Folder</property>
+                <property name="accelerator">&lt;ctrl&gt;&lt;shift&gt;n</property>
+              </object>
+            </child>
           </object>
         </child>
         <child>
@@ -359,6 +373,7 @@ class TuskWindow(Adw.ApplicationWindow):
         sidebar_paned.set_shrink_end_child(False)
         self._sidebar_paned = sidebar_paned
         self._sidebar_paned_adjusting = False
+        self._sidebar_paned_pos_saved = prefs.get('sidebar_pane_pos', 320)
         sidebar_paned.connect('notify::position', self._on_sidebar_pane_moved)
 
         self._browser = DbBrowser()
@@ -391,6 +406,10 @@ class TuskWindow(Adw.ApplicationWindow):
         self._file_explorer.connect('file-renamed', self._on_file_renamed)
         self._file_explorer.connect('collapsed-changed', self._on_file_explorer_collapsed)
         sidebar_paned.set_end_child(self._file_explorer)
+        if prefs.get('file_explorer_collapsed', False):
+            self._sidebar_paned_adjusting = True
+            self._sidebar_paned.set_position(99999)
+            self._sidebar_paned_adjusting = False
 
         sidebar.append(sidebar_paned)
         return sidebar
@@ -1023,9 +1042,6 @@ class TuskWindow(Adw.ApplicationWindow):
                 )
             row = row.get_next_sibling()
 
-        # Update file explorer New Query button visibility
-        self._file_explorer.set_connected(bool(conn))
-
         # Update dropdown label
         if conn:
             label = conn['name']
@@ -1188,10 +1204,7 @@ class TuskWindow(Adw.ApplicationWindow):
             self._sidebar_paned_pos_saved = self._sidebar_paned.get_position()
             self._sidebar_paned.set_position(99999)
         else:
-            self._sidebar_paned.set_position(
-                getattr(self, '_sidebar_paned_pos_saved',
-                        prefs.get('sidebar_pane_pos', 320))
-            )
+            self._sidebar_paned.set_position(self._sidebar_paned_pos_saved)
         self._sidebar_paned_adjusting = False
 
     def _on_query_finished(self, editor, elapsed_ms, is_error):
