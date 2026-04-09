@@ -567,7 +567,7 @@ class SqlEditor(Gtk.Box):
 
         self._explain_view_stack = Adw.ViewStack()
         self._explain_view_stack.add_titled_with_icon(
-            explain_text_scroll, 'text', 'Text', 'format-text-plaintext-symbolic')
+            explain_text_scroll, 'text', 'Text', 'view-paged-symbolic')
         self._explain_view_stack.add_titled_with_icon(
             self._explain_tree_scroll, 'tree', 'Tree', 'view-list-tree-symbolic')
         self._explain_view_stack.add_titled_with_icon(
