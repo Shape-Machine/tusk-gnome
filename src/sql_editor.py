@@ -562,10 +562,13 @@ class SqlEditor(Gtk.Box):
         _s3.append('Copy SVG', 'explain-copy.copy-svg')
         _copy_menu.append_section(None, _s3)
 
+        _copy_content = Adw.ButtonContent()
+        _copy_content.set_icon_name('edit-copy-symbolic')
+        _copy_content.set_label('Copy')
+
         copy_menu_btn = Gtk.MenuButton()
         copy_menu_btn.add_css_class('flat')
-        copy_menu_btn.set_icon_name('edit-copy-symbolic')
-        copy_menu_btn.set_tooltip_text('Copy')
+        copy_menu_btn.set_child(_copy_content)
         copy_menu_btn.set_menu_model(_copy_menu)
 
         self._explain_analyze_warning = Gtk.Label()
@@ -573,7 +576,6 @@ class SqlEditor(Gtk.Box):
         self._explain_analyze_warning.add_css_class('warning')
         self._explain_analyze_warning.set_label('⚠ EXPLAIN ANALYZE executed the query')
         self._explain_analyze_warning.set_visible(False)
-        self._explain_analyze_warning.set_hexpand(True)
         self._explain_analyze_warning.set_xalign(0)
         self._explain_analyze_warning.set_margin_start(8)
 
@@ -621,7 +623,11 @@ class SqlEditor(Gtk.Box):
         explain_toolbar.set_margin_end(6)
         explain_toolbar.set_margin_top(4)
         explain_toolbar.set_margin_bottom(4)
+        _toolbar_spacer = Gtk.Box()
+        _toolbar_spacer.set_hexpand(True)
+
         explain_toolbar.append(explain_view_switcher)
+        explain_toolbar.append(_toolbar_spacer)
         explain_toolbar.append(self._explain_analyze_warning)
         explain_toolbar.append(self._explain_copy_confirm)
         explain_toolbar.append(copy_menu_btn)
