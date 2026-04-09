@@ -1492,7 +1492,7 @@ class SqlEditor(Gtk.Box):
         self._explain_copy_confirm_timer = 0
         return False
 
-    def _fetch_explain_json(self, on_success, on_error):
+    def _fetch_explain_json(self, on_error):
         """Fetch EXPLAIN JSON in a background thread, calling callbacks on the main thread."""
         conn       = self._explain_last_conn
         sql        = self._explain_last_sql
@@ -1519,7 +1519,6 @@ class SqlEditor(Gtk.Box):
                     db.rollback()
                 self._explain_json_cache = plan_json
                 self._explain_fetching = False
-                GLib.idle_add(on_success, plan_json)
                 GLib.idle_add(self._refresh_current_explain_view)
             except Exception as e:
                 self._explain_fetching = False
@@ -1555,11 +1554,11 @@ class SqlEditor(Gtk.Box):
             if self._explain_fetching:
                 return
             self._fetch_explain_json(
-                on_success=self._render_explain_tree,
                 on_error=lambda e: (
                     stack.set_visible_child_name('text'),
                     self._show_explain_copy_confirm(f'Tree error: {e}'),
-                ),
+                    False,
+                )[-1],
             )
 
         elif page_name == 'graph':
@@ -1572,11 +1571,11 @@ class SqlEditor(Gtk.Box):
             if self._explain_fetching:
                 return
             self._fetch_explain_json(
-                on_success=self._render_explain_graph,
                 on_error=lambda e: (
                     stack.set_visible_child_name('text'),
                     self._show_explain_copy_confirm(f'Graph error: {e}'),
-                ),
+                    False,
+                )[-1],
             )
 
     def _render_explain_tree(self, plan_json):
