@@ -322,6 +322,9 @@ class SqlEditor(Gtk.Box):
         self._explain_last_conn = None
         self._explain_is_analyze = False
         self._explain_json_cache = None
+        self._explain_fetching = False
+        self._explain_tree_rendered = False
+        self._explain_graph_rendered = False
         self._build_ui()
         self._load_file()
         self.connect('destroy', self._on_destroy)
@@ -527,16 +530,6 @@ class SqlEditor(Gtk.Box):
         copy_json_btn.set_icon_name('edit-copy-symbolic')
         copy_json_btn.connect('clicked', self._on_explain_copy_json)
 
-        self._explain_tree_toggle = Gtk.ToggleButton(label='Tree')
-        self._explain_tree_toggle.add_css_class('flat')
-        self._explain_tree_toggle.set_icon_name('view-list-tree-symbolic')
-        self._explain_tree_toggle.connect('toggled', self._on_explain_tree_toggled)
-
-        self._explain_graph_toggle = Gtk.ToggleButton(label='Graph')
-        self._explain_graph_toggle.add_css_class('flat')
-        self._explain_graph_toggle.set_icon_name('preferences-system-network-symbolic')
-        self._explain_graph_toggle.connect('toggled', self._on_explain_graph_toggled)
-
         self._explain_analyze_warning = Gtk.Label()
         self._explain_analyze_warning.add_css_class('caption')
         self._explain_analyze_warning.add_css_class('warning')
@@ -545,18 +538,6 @@ class SqlEditor(Gtk.Box):
         self._explain_analyze_warning.set_hexpand(True)
         self._explain_analyze_warning.set_xalign(0)
         self._explain_analyze_warning.set_margin_start(8)
-
-        explain_toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        explain_toolbar.set_margin_start(6)
-        explain_toolbar.set_margin_end(6)
-        explain_toolbar.set_margin_top(4)
-        explain_toolbar.set_margin_bottom(4)
-        explain_toolbar.append(copy_text_btn)
-        explain_toolbar.append(copy_json_btn)
-        explain_toolbar.append(self._explain_tree_toggle)
-        explain_toolbar.append(self._explain_graph_toggle)
-        explain_toolbar.append(self._explain_analyze_warning)
-        explain_toolbar.append(self._explain_copy_confirm)
 
         self._explain_text_buf = Gtk.TextBuffer()
         self._explain_text_view = Gtk.TextView(buffer=self._explain_text_buf)
@@ -584,15 +565,34 @@ class SqlEditor(Gtk.Box):
         self._explain_graph_scroll.set_vexpand(True)
         self._explain_graph_scroll.set_child(self._explain_graph)
 
-        self._explain_inner_stack = Gtk.Stack()
-        self._explain_inner_stack.add_named(explain_text_scroll, 'text')
-        self._explain_inner_stack.add_named(self._explain_tree_scroll, 'tree')
-        self._explain_inner_stack.add_named(self._explain_graph_scroll, 'graph')
+        self._explain_view_stack = Adw.ViewStack()
+        self._explain_view_stack.add_titled_with_icon(
+            explain_text_scroll, 'text', 'Text', 'format-text-plaintext-symbolic')
+        self._explain_view_stack.add_titled_with_icon(
+            self._explain_tree_scroll, 'tree', 'Tree', 'view-list-tree-symbolic')
+        self._explain_view_stack.add_titled_with_icon(
+            self._explain_graph_scroll, 'graph', 'Graph', 'preferences-system-network-symbolic')
+        self._explain_view_stack.connect('notify::visible-child', self._on_explain_view_changed)
+
+        explain_view_switcher = Adw.ViewSwitcher()
+        explain_view_switcher.set_stack(self._explain_view_stack)
+        explain_view_switcher.set_policy(Adw.ViewSwitcherPolicy.WIDE)
+
+        explain_toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        explain_toolbar.set_margin_start(6)
+        explain_toolbar.set_margin_end(6)
+        explain_toolbar.set_margin_top(4)
+        explain_toolbar.set_margin_bottom(4)
+        explain_toolbar.append(copy_text_btn)
+        explain_toolbar.append(copy_json_btn)
+        explain_toolbar.append(explain_view_switcher)
+        explain_toolbar.append(self._explain_analyze_warning)
+        explain_toolbar.append(self._explain_copy_confirm)
 
         explain_outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         explain_outer.append(explain_toolbar)
         explain_outer.append(Gtk.Separator())
-        explain_outer.append(self._explain_inner_stack)
+        explain_outer.append(self._explain_view_stack)
         self._results_stack.add_named(explain_outer, 'explain')
 
         # Tab view — "Results" is always the first (pinned) tab;
@@ -1286,8 +1286,9 @@ class SqlEditor(Gtk.Box):
         self._explain_last_conn = dict(self._connection)
         self._explain_is_analyze = (mode == 'analyze')
         self._explain_json_cache = None
-        self._explain_tree_toggle.set_active(False)
-        self._explain_graph_toggle.set_active(False)
+        self._explain_fetching = False
+        self._explain_tree_rendered = False
+        self._explain_graph_rendered = False
         self._start_run(sql, explain_mode=mode)
 
     def _execute_explain(self, conn, sql, mode):
@@ -1325,7 +1326,7 @@ class SqlEditor(Gtk.Box):
         self._finish_run()
         self._explain_text_buf.set_text(plan_text)
         self._explain_analyze_warning.set_visible(is_analyze)
-        self._explain_inner_stack.set_visible_child_name('text')
+        self._explain_view_stack.set_visible_child_name('text')
         self._results_stack.set_visible_child_name('explain')
         self._results_meta.set_label(f'{"EXPLAIN ANALYZE" if is_analyze else "EXPLAIN"} — {self._elapsed_ms()} ms')
         self._append_history(
@@ -1401,6 +1402,7 @@ class SqlEditor(Gtk.Box):
             on_error('No plan to fetch')
             return
         prefix = 'EXPLAIN (ANALYZE, FORMAT JSON)' if is_analyze else 'EXPLAIN (FORMAT JSON)'
+        self._explain_fetching = True
 
         def run():
             try:
@@ -1417,59 +1419,56 @@ class SqlEditor(Gtk.Box):
                         plan_json = rows[0][0] if rows else []
                     db.rollback()
                 self._explain_json_cache = plan_json
+                self._explain_fetching = False
                 GLib.idle_add(on_success, plan_json)
             except Exception as e:
+                self._explain_fetching = False
                 GLib.idle_add(on_error, str(e))
 
         threading.Thread(target=run, daemon=True).start()
 
-    def _on_explain_tree_toggled(self, btn):
-        if not btn.get_active():
-            if not self._explain_graph_toggle.get_active():
-                self._explain_inner_stack.set_visible_child_name('text')
-            return
-        self._explain_graph_toggle.set_active(False)
-
-        if self._explain_json_cache is not None:
-            self._render_explain_tree(self._explain_json_cache)
+    def _on_explain_view_changed(self, stack, _pspec):
+        page_name = stack.get_visible_child_name()
+        if page_name == 'text':
             return
 
-        if not self._explain_last_conn or not self._explain_last_sql:
-            btn.set_active(False)
-            return
+        if page_name == 'tree':
+            if self._explain_json_cache is not None:
+                self._render_explain_tree(self._explain_json_cache)
+                return
+            if not self._explain_last_conn or not self._explain_last_sql:
+                stack.set_visible_child_name('text')
+                return
+            if self._explain_fetching:
+                return
+            self._fetch_explain_json(
+                on_success=self._render_explain_tree,
+                on_error=lambda e: (
+                    stack.set_visible_child_name('text'),
+                    self._show_explain_copy_confirm(f'Tree error: {e}'),
+                ),
+            )
 
-        self._fetch_explain_json(
-            on_success=self._render_explain_tree,
-            on_error=lambda e: (
-                self._explain_tree_toggle.set_active(False),
-                self._show_explain_copy_confirm(f'Tree error: {e}'),
-            ),
-        )
-
-    def _on_explain_graph_toggled(self, btn):
-        if not btn.get_active():
-            if not self._explain_tree_toggle.get_active():
-                self._explain_inner_stack.set_visible_child_name('text')
-            return
-        self._explain_tree_toggle.set_active(False)
-
-        if self._explain_json_cache is not None:
-            self._render_explain_graph(self._explain_json_cache)
-            return
-
-        if not self._explain_last_conn or not self._explain_last_sql:
-            btn.set_active(False)
-            return
-
-        self._fetch_explain_json(
-            on_success=self._render_explain_graph,
-            on_error=lambda e: (
-                self._explain_graph_toggle.set_active(False),
-                self._show_explain_copy_confirm(f'Graph error: {e}'),
-            ),
-        )
+        elif page_name == 'graph':
+            if self._explain_json_cache is not None:
+                self._render_explain_graph(self._explain_json_cache)
+                return
+            if not self._explain_last_conn or not self._explain_last_sql:
+                stack.set_visible_child_name('text')
+                return
+            if self._explain_fetching:
+                return
+            self._fetch_explain_json(
+                on_success=self._render_explain_graph,
+                on_error=lambda e: (
+                    stack.set_visible_child_name('text'),
+                    self._show_explain_copy_confirm(f'Graph error: {e}'),
+                ),
+            )
 
     def _render_explain_tree(self, plan_json):
+        if self._explain_tree_rendered:
+            return
         # plan_json is a list; first element has a "Plan" key
         if not plan_json or not isinstance(plan_json, list):
             return
@@ -1521,11 +1520,13 @@ class SqlEditor(Gtk.Box):
         page.add(group)
 
         self._explain_tree_scroll.set_child(page)
-        self._explain_inner_stack.set_visible_child_name('tree')
+        self._explain_tree_rendered = True
 
     def _render_explain_graph(self, plan_json):
+        if self._explain_graph_rendered:
+            return
         self._explain_graph.set_plan(plan_json)
-        self._explain_inner_stack.set_visible_child_name('graph')
+        self._explain_graph_rendered = True
 
     # ── History ───────────────────────────────────────────────────────────────
 
