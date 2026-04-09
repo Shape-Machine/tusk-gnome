@@ -116,7 +116,6 @@ class FileExplorer(Gtk.Box):
         self._collapsible.append(self._new_query_btn)
 
         self._cta_separator = Gtk.Separator()
-        self._cta_separator.set_margin_top(MARGIN_SM)
         self._cta_separator.set_visible(False)
         self._collapsible.append(self._cta_separator)
 
