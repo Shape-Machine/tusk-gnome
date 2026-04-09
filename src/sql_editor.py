@@ -1459,19 +1459,25 @@ class SqlEditor(Gtk.Box):
         threading.Thread(target=run, daemon=True).start()
 
     def _on_explain_copy_png(self, _action, _param):
-        png = self._explain_graph.render_to_png_bytes()
-        if not png:
-            return
-        texture = Gdk.Texture.new_from_bytes(GLib.Bytes.new(png))
-        Gdk.Display.get_default().get_clipboard().set(texture)
-        self._show_explain_copy_confirm('Copied PNG')
+        try:
+            png = self._explain_graph.render_to_png_bytes()
+            if not png:
+                return
+            texture = Gdk.Texture.new_from_bytes(GLib.Bytes.new(png))
+            Gdk.Display.get_default().get_clipboard().set(texture)
+            self._show_explain_copy_confirm('Copied PNG')
+        except Exception as e:
+            self._show_explain_copy_confirm(f'PNG error: {e}')
 
     def _on_explain_copy_svg(self, _action, _param):
-        svg = self._explain_graph.render_to_svg_bytes()
-        if not svg:
-            return
-        Gdk.Display.get_default().get_clipboard().set(svg.decode('utf-8'))
-        self._show_explain_copy_confirm('Copied SVG')
+        try:
+            svg = self._explain_graph.render_to_svg_bytes()
+            if not svg:
+                return
+            Gdk.Display.get_default().get_clipboard().set(svg.decode('utf-8'))
+            self._show_explain_copy_confirm('Copied SVG')
+        except Exception as e:
+            self._show_explain_copy_confirm(f'SVG error: {e}')
 
     def _show_explain_copy_confirm(self, msg):
         self._explain_copy_confirm.set_label(msg)
@@ -1514,11 +1520,20 @@ class SqlEditor(Gtk.Box):
                 self._explain_json_cache = plan_json
                 self._explain_fetching = False
                 GLib.idle_add(on_success, plan_json)
+                GLib.idle_add(self._refresh_current_explain_view)
             except Exception as e:
                 self._explain_fetching = False
                 GLib.idle_add(on_error, str(e))
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _refresh_current_explain_view(self):
+        """After a fetch completes, render the currently visible tab if it still needs it."""
+        page = self._explain_view_stack.get_visible_child_name()
+        if page == 'tree' and not self._explain_tree_rendered and self._explain_json_cache:
+            self._render_explain_tree(self._explain_json_cache)
+        elif page == 'graph' and not self._explain_graph_rendered and self._explain_json_cache:
+            self._render_explain_graph(self._explain_json_cache)
 
     def _on_explain_view_changed(self, stack, _pspec):
         page_name = stack.get_visible_child_name()
