@@ -97,6 +97,8 @@ _Generated from source: v2026.04.07-00_
 | Preferences | Ctrl+, |
 | Quit | Ctrl+Q |
 | Quick Open | Ctrl+P |
+| New SQL File | Ctrl+N |
+| New Folder | Ctrl+Shift+N |
 | Close Tab | Ctrl+W |
 | Next Tab | Ctrl+Tab |
 | Previous Tab | Ctrl+Shift+Tab |
