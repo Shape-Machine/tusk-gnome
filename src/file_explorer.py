@@ -107,7 +107,7 @@ class FileExplorer(Gtk.Box):
         self._new_query_btn.set_margin_top(MARGIN_SM)
         self._new_query_btn.set_margin_bottom(MARGIN_XS)
         self._new_query_btn.set_tooltip_text('Create a new query file and open it')
-        self._new_query_btn.connect('clicked', lambda _: self._new_query())
+        self._new_query_btn.connect('clicked', lambda _: self._prompt_create('file'))
         self._new_query_btn.set_visible(False)
         self._collapsible.append(self._new_query_btn)
 
@@ -205,22 +205,6 @@ class FileExplorer(Gtk.Box):
         else:
             self._collapse_btn.set_icon_name('pan-down-symbolic')
             self._collapse_btn.set_tooltip_text('Collapse file explorer')
-
-    def _new_query(self):
-        n = 1
-        while True:
-            name = f'query_{n}.sql'
-            path = os.path.join(self._current_dir, name)
-            if not os.path.exists(path):
-                break
-            n += 1
-        try:
-            open(path, 'a').close()
-            self._refresh()
-            self._select_path(path)
-            self.emit('file-activated', path)
-        except OSError as e:
-            self._show_create_error('Could Not Create Query', str(e))
 
     def _can_select(self, _sel, model, path, _current):
         it = model.get_iter(path)
