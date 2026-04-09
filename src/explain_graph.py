@@ -28,7 +28,10 @@ class ExplainGraph(Gtk.DrawingArea):
     # ── Public API ────────────────────────────────────────────────────────────
 
     def set_plan(self, plan_json):
+        self._nodes = []
+        self._edges = []
         if not plan_json or not isinstance(plan_json, list):
+            self.queue_draw()
             return
         top = plan_json[0].get('Plan', {})
         self._build_layout(top)
