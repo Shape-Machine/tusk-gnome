@@ -223,6 +223,7 @@ if [[ $DO_RPM == 1 ]]; then
         --maintainer "Shape Machine <tusk.gnome@shapemachine.xyz>" \
         --depends "python3" \
         --depends "python3-gobject" \
+        --depends "python3-keyring" \
         --depends "gtk4" \
         --depends "libadwaita" \
         --package "$DIST/tusk-gnome-$VERSION.rpm" \
