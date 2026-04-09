@@ -520,15 +520,53 @@ class SqlEditor(Gtk.Box):
         self._explain_copy_confirm.set_visible(False)
         self._explain_copy_confirm_timer = 0
 
-        copy_text_btn = Gtk.Button(label='Copy Text')
-        copy_text_btn.add_css_class('flat')
-        copy_text_btn.set_icon_name('edit-copy-symbolic')
-        copy_text_btn.connect('clicked', self._on_explain_copy_text)
+        # Copy action group — items enabled contextually as views are rendered
+        _copy_ag = Gio.SimpleActionGroup()
+        self._explain_copy_text_action = Gio.SimpleAction.new('copy-text', None)
+        self._explain_copy_text_action.connect('activate', self._on_explain_copy_text)
+        self._explain_copy_text_action.set_enabled(False)
+        _copy_ag.add_action(self._explain_copy_text_action)
 
-        copy_json_btn = Gtk.Button(label='Copy JSON')
-        copy_json_btn.add_css_class('flat')
-        copy_json_btn.set_icon_name('edit-copy-symbolic')
-        copy_json_btn.connect('clicked', self._on_explain_copy_json)
+        self._explain_copy_markdown_action = Gio.SimpleAction.new('copy-markdown', None)
+        self._explain_copy_markdown_action.connect('activate', self._on_explain_copy_markdown)
+        self._explain_copy_markdown_action.set_enabled(False)
+        _copy_ag.add_action(self._explain_copy_markdown_action)
+
+        self._explain_copy_json_action = Gio.SimpleAction.new('copy-json', None)
+        self._explain_copy_json_action.connect('activate', self._on_explain_copy_json)
+        self._explain_copy_json_action.set_enabled(False)
+        _copy_ag.add_action(self._explain_copy_json_action)
+
+        self._explain_copy_png_action = Gio.SimpleAction.new('copy-png', None)
+        self._explain_copy_png_action.connect('activate', self._on_explain_copy_png)
+        self._explain_copy_png_action.set_enabled(False)
+        _copy_ag.add_action(self._explain_copy_png_action)
+
+        self._explain_copy_svg_action = Gio.SimpleAction.new('copy-svg', None)
+        self._explain_copy_svg_action.connect('activate', self._on_explain_copy_svg)
+        self._explain_copy_svg_action.set_enabled(False)
+        _copy_ag.add_action(self._explain_copy_svg_action)
+
+        self.insert_action_group('explain-copy', _copy_ag)
+
+        _copy_menu = Gio.Menu()
+        _s1 = Gio.Menu()
+        _s1.append('Copy Text', 'explain-copy.copy-text')
+        _s1.append('Copy Markdown', 'explain-copy.copy-markdown')
+        _copy_menu.append_section(None, _s1)
+        _s2 = Gio.Menu()
+        _s2.append('Copy JSON', 'explain-copy.copy-json')
+        _copy_menu.append_section(None, _s2)
+        _s3 = Gio.Menu()
+        _s3.append('Copy PNG', 'explain-copy.copy-png')
+        _s3.append('Copy SVG', 'explain-copy.copy-svg')
+        _copy_menu.append_section(None, _s3)
+
+        copy_menu_btn = Gtk.MenuButton()
+        copy_menu_btn.add_css_class('flat')
+        copy_menu_btn.set_icon_name('edit-copy-symbolic')
+        copy_menu_btn.set_tooltip_text('Copy')
+        copy_menu_btn.set_menu_model(_copy_menu)
 
         self._explain_analyze_warning = Gtk.Label()
         self._explain_analyze_warning.add_css_class('caption')
@@ -583,11 +621,10 @@ class SqlEditor(Gtk.Box):
         explain_toolbar.set_margin_end(6)
         explain_toolbar.set_margin_top(4)
         explain_toolbar.set_margin_bottom(4)
-        explain_toolbar.append(copy_text_btn)
-        explain_toolbar.append(copy_json_btn)
         explain_toolbar.append(explain_view_switcher)
         explain_toolbar.append(self._explain_analyze_warning)
         explain_toolbar.append(self._explain_copy_confirm)
+        explain_toolbar.append(copy_menu_btn)
 
         explain_outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         explain_outer.append(explain_toolbar)
@@ -1289,6 +1326,11 @@ class SqlEditor(Gtk.Box):
         self._explain_fetching = False
         self._explain_tree_rendered = False
         self._explain_graph_rendered = False
+        self._explain_copy_text_action.set_enabled(False)
+        self._explain_copy_markdown_action.set_enabled(False)
+        self._explain_copy_json_action.set_enabled(False)
+        self._explain_copy_png_action.set_enabled(False)
+        self._explain_copy_svg_action.set_enabled(False)
         self._start_run(sql, explain_mode=mode)
 
     def _execute_explain(self, conn, sql, mode):
@@ -1327,6 +1369,8 @@ class SqlEditor(Gtk.Box):
         self._explain_text_buf.set_text(plan_text)
         self._explain_analyze_warning.set_visible(is_analyze)
         self._explain_view_stack.set_visible_child_name('text')
+        self._explain_copy_text_action.set_enabled(True)
+        self._explain_copy_json_action.set_enabled(True)
         self._results_stack.set_visible_child_name('explain')
         self._results_meta.set_label(f'{"EXPLAIN ANALYZE" if is_analyze else "EXPLAIN"} — {self._elapsed_ms()} ms')
         self._append_history(
@@ -1334,14 +1378,40 @@ class SqlEditor(Gtk.Box):
             self._elapsed_ms(),
         )
 
-    def _on_explain_copy_text(self, _btn):
+    def _on_explain_copy_text(self, _action, _param):
         start = self._explain_text_buf.get_start_iter()
         end = self._explain_text_buf.get_end_iter()
         text = self._explain_text_buf.get_text(start, end, False)
         Gdk.Display.get_default().get_clipboard().set(text)
         self._show_explain_copy_confirm('Copied')
 
-    def _on_explain_copy_json(self, _btn):
+    def _on_explain_copy_markdown(self, _action, _param):
+        if self._explain_json_cache is None:
+            return
+        plan = self._explain_json_cache[0].get('Plan', {})
+        lines = []
+        def _walk(node, depth):
+            indent = '  ' * depth
+            node_type = node.get('Node Type', '?')
+            cost = node.get('Total Cost', 0.0)
+            plan_rows = node.get('Plan Rows', '?')
+            parts = [f'cost={cost:.2f}', f'rows≈{plan_rows}']
+            actual_rows = node.get('Actual Rows')
+            actual_time = node.get('Actual Total Time')
+            if actual_rows is not None:
+                parts.append(f'actual={actual_rows}')
+            if actual_time is not None:
+                parts.append(f'{actual_time:.2f}ms')
+            relation = node.get('Relation Name', '')
+            title = f'{node_type} on {relation}' if relation else node_type
+            lines.append(f'{indent}- **{title}** ({", ".join(parts)})')
+            for child in node.get('Plans', []):
+                _walk(child, depth + 1)
+        _walk(plan, 0)
+        Gdk.Display.get_default().get_clipboard().set('\n'.join(lines))
+        self._show_explain_copy_confirm('Copied Markdown')
+
+    def _on_explain_copy_json(self, _action, _param):
         if self._explain_json_cache is not None:
             Gdk.Display.get_default().get_clipboard().set(
                 json.dumps(self._explain_json_cache, indent=2))
@@ -1379,6 +1449,21 @@ class SqlEditor(Gtk.Box):
                 GLib.idle_add(self._show_explain_copy_confirm, f'Error: {e}')
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _on_explain_copy_png(self, _action, _param):
+        png = self._explain_graph.render_to_png_bytes()
+        if not png:
+            return
+        texture = Gdk.Texture.new_from_bytes(GLib.Bytes.new(png))
+        Gdk.Display.get_default().get_clipboard().set(texture)
+        self._show_explain_copy_confirm('Copied PNG')
+
+    def _on_explain_copy_svg(self, _action, _param):
+        svg = self._explain_graph.render_to_svg_bytes()
+        if not svg:
+            return
+        Gdk.Display.get_default().get_clipboard().set(svg.decode('utf-8'))
+        self._show_explain_copy_confirm('Copied SVG')
 
     def _show_explain_copy_confirm(self, msg):
         self._explain_copy_confirm.set_label(msg)
@@ -1521,12 +1606,15 @@ class SqlEditor(Gtk.Box):
 
         self._explain_tree_scroll.set_child(page)
         self._explain_tree_rendered = True
+        self._explain_copy_markdown_action.set_enabled(True)
 
     def _render_explain_graph(self, plan_json):
         if self._explain_graph_rendered:
             return
         self._explain_graph.set_plan(plan_json)
         self._explain_graph_rendered = True
+        self._explain_copy_png_action.set_enabled(True)
+        self._explain_copy_svg_action.set_enabled(True)
 
     # ── History ───────────────────────────────────────────────────────────────
 
