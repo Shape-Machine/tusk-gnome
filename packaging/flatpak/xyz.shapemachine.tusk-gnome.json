@@ -42,6 +42,20 @@
       ]
     },
     {
+      "name": "python3-psycopg-binary",
+      "buildsystem": "simple",
+      "build-commands": [
+        "pip3 install --no-index --find-links=. --prefix=/app psycopg_binary-3.3.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
+      ],
+      "sources": [
+        {
+          "type": "file",
+          "url": "https://files.pythonhosted.org/packages/7f/c3/4f4e040902b82a344eff1c736cde2f2720f127fe939c7e7565706f96dd44/psycopg_binary-3.3.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+          "sha256": "263a24f39f26e19ed7fc982d7859a36f17841b05bebad3eb47bb9cd2dd785351"
+        }
+      ]
+    },
+    {
       "name": "python3-sqlparse",
       "buildsystem": "simple",
       "build-commands": [
