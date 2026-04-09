@@ -19,9 +19,10 @@ COL_SENSITIVE = 4
 
 class FileExplorer(Gtk.Box):
     __gsignals__ = {
-        'file-activated': (GObject.SignalFlags.RUN_FIRST, None, (str,)),
-        'file-deleted':   (GObject.SignalFlags.RUN_FIRST, None, (str,)),
-        'file-renamed':   (GObject.SignalFlags.RUN_FIRST, None, (str, str)),
+        'file-activated':    (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        'file-deleted':      (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        'file-renamed':      (GObject.SignalFlags.RUN_FIRST, None, (str, str)),
+        'collapsed-changed': (GObject.SignalFlags.RUN_FIRST, None, (bool,)),
     }
 
     def __init__(self):
@@ -205,6 +206,7 @@ class FileExplorer(Gtk.Box):
         else:
             self._collapse_btn.set_icon_name('pan-down-symbolic')
             self._collapse_btn.set_tooltip_text('Collapse file explorer')
+        self.emit('collapsed-changed', self._collapsed)
 
     def _can_select(self, _sel, model, path, _current):
         it = model.get_iter(path)

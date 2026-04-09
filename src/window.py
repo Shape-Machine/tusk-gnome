@@ -356,9 +356,10 @@ class TuskWindow(Adw.ApplicationWindow):
         sidebar_paned.set_position(prefs.get('sidebar_pane_pos', 320))
         sidebar_paned.set_vexpand(True)
         sidebar_paned.set_shrink_start_child(False)
-        sidebar_paned.set_shrink_end_child(True)
-        sidebar_paned.connect('notify::position',
-                              lambda p, _: prefs.put('sidebar_pane_pos', p.get_position()))
+        sidebar_paned.set_shrink_end_child(False)
+        self._sidebar_paned = sidebar_paned
+        self._sidebar_paned_adjusting = False
+        sidebar_paned.connect('notify::position', self._on_sidebar_pane_moved)
 
         self._browser = DbBrowser()
         self._browser.connect('table-selected', self._on_table_selected)
@@ -388,6 +389,7 @@ class TuskWindow(Adw.ApplicationWindow):
         self._file_explorer.connect('file-activated', self._on_file_activated)
         self._file_explorer.connect('file-deleted', self._on_file_deleted)
         self._file_explorer.connect('file-renamed', self._on_file_renamed)
+        self._file_explorer.connect('collapsed-changed', self._on_file_explorer_collapsed)
         sidebar_paned.set_end_child(self._file_explorer)
 
         sidebar.append(sidebar_paned)
@@ -1175,6 +1177,22 @@ class TuskWindow(Adw.ApplicationWindow):
             page._tab_id = f'file:{new_path}'
             page.set_title(os.path.basename(new_path))
             page.get_child().file_path = new_path
+
+    def _on_sidebar_pane_moved(self, paned, _):
+        if not self._sidebar_paned_adjusting:
+            prefs.put('sidebar_pane_pos', paned.get_position())
+
+    def _on_file_explorer_collapsed(self, _explorer, is_collapsed):
+        self._sidebar_paned_adjusting = True
+        if is_collapsed:
+            self._sidebar_paned_pos_saved = self._sidebar_paned.get_position()
+            self._sidebar_paned.set_position(99999)
+        else:
+            self._sidebar_paned.set_position(
+                getattr(self, '_sidebar_paned_pos_saved',
+                        prefs.get('sidebar_pane_pos', 320))
+            )
+        self._sidebar_paned_adjusting = False
 
     def _on_query_finished(self, editor, elapsed_ms, is_error):
         threshold_s = prefs.get('notify_threshold_s', 10)
