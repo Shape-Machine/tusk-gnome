@@ -1425,38 +1425,20 @@ class SqlEditor(Gtk.Box):
                 json.dumps(self._explain_json_cache, indent=2))
             self._show_explain_copy_confirm('Copied JSON')
             return
-        # Re-run with FORMAT JSON
-        conn = self._explain_last_conn
-        sql = self._explain_last_sql
-        is_analyze = self._explain_is_analyze
-        if not conn or not sql:
+        if self._explain_fetching:
             return
-        prefix = 'EXPLAIN (ANALYZE, FORMAT JSON)' if is_analyze else 'EXPLAIN (FORMAT JSON)'
-
-        def run():
-            try:
-                import psycopg
-                from tunnel import open_tunnel
-                with open_tunnel(conn) as (host, port), psycopg.connect(
-                    host=host, port=port,
-                    dbname=conn['database'], user=conn['username'],
-                    password=conn['password'], connect_timeout=10,
-                ) as db:
-                    with db.cursor() as cur:
-                        cur.execute(f'{prefix} {sql}')
-                        rows = cur.fetchall()
-                        plan_json = rows[0][0] if rows else []
-                    db.rollback()
-                self._explain_json_cache = plan_json
-                text = json.dumps(plan_json, indent=2)
-                def _copy_and_confirm(t=text):
-                    Gdk.Display.get_default().get_clipboard().set(t)
-                    self._show_explain_copy_confirm('Copied JSON')
-                GLib.idle_add(_copy_and_confirm)
-            except Exception as e:
-                GLib.idle_add(self._show_explain_copy_confirm, f'Error: {e}')
-
-        threading.Thread(target=run, daemon=True).start()
+        def _copy_after_fetch():
+            if self._explain_json_cache is not None:
+                Gdk.Display.get_default().get_clipboard().set(
+                    json.dumps(self._explain_json_cache, indent=2))
+                self._show_explain_copy_confirm('Copied JSON')
+        self._fetch_explain_json(
+            on_error=lambda e: (
+                self._show_explain_copy_confirm(f'Error: {e}'),
+                False,
+            )[-1],
+            on_complete=_copy_after_fetch,
+        )
 
     def _on_explain_copy_png(self, _action, _param):
         try:
@@ -1493,7 +1475,7 @@ class SqlEditor(Gtk.Box):
         self._explain_copy_confirm_timer = 0
         return False
 
-    def _fetch_explain_json(self, on_error):
+    def _fetch_explain_json(self, on_error, on_complete=None):
         """Fetch EXPLAIN JSON in a background thread, calling callbacks on the main thread."""
         conn       = self._explain_last_conn
         sql        = self._explain_last_sql
@@ -1521,6 +1503,8 @@ class SqlEditor(Gtk.Box):
                 self._explain_json_cache = plan_json
                 self._explain_fetching = False
                 GLib.idle_add(self._refresh_current_explain_view)
+                if on_complete:
+                    GLib.idle_add(on_complete)
             except Exception as e:
                 self._explain_fetching = False
                 GLib.idle_add(on_error, str(e))
