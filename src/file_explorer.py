@@ -33,7 +33,10 @@ class FileExplorer(Gtk.Box):
         self._build_ui()
         self._refresh()
         if prefs.get('file_explorer_collapsed', False):
-            self._toggle_collapsed()
+            self._collapsed = True
+            self._collapsible.set_visible(False)
+            self._collapse_btn.set_icon_name('pan-up-symbolic')
+            self._collapse_btn.set_tooltip_text('Expand file explorer')
 
     @property
     def current_dir(self):
