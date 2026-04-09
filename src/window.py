@@ -356,7 +356,7 @@ class TuskWindow(Adw.ApplicationWindow):
         sidebar_paned.set_position(prefs.get('sidebar_pane_pos', 320))
         sidebar_paned.set_vexpand(True)
         sidebar_paned.set_shrink_start_child(False)
-        sidebar_paned.set_shrink_end_child(False)
+        sidebar_paned.set_shrink_end_child(True)
         sidebar_paned.connect('notify::position',
                               lambda p, _: prefs.put('sidebar_pane_pos', p.get_position()))
 
@@ -1020,6 +1020,9 @@ class TuskWindow(Adw.ApplicationWindow):
                     bool(conn and row._conn['id'] == conn['id'])
                 )
             row = row.get_next_sibling()
+
+        # Update file explorer New Query button visibility
+        self._file_explorer.set_connected(bool(conn))
 
         # Update dropdown label
         if conn:

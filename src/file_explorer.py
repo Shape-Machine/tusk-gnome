@@ -28,8 +28,11 @@ class FileExplorer(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         start = prefs.get('last_folder', os.path.expanduser('~'))
         self._current_dir = start if os.path.isdir(start) else os.path.expanduser('~')
+        self._collapsed = False
         self._build_ui()
         self._refresh()
+        if prefs.get('file_explorer_collapsed', False):
+            self._toggle_collapsed()
 
     @property
     def current_dir(self):
@@ -70,14 +73,50 @@ class FileExplorer(Gtk.Box):
         new_file_btn.set_tooltip_text('New SQL file')
         new_file_btn.connect('clicked', lambda _: self._prompt_create('file'))
 
+        self._collapse_btn = Gtk.Button(icon_name='pan-down-symbolic')
+        self._collapse_btn.add_css_class('flat')
+        self._collapse_btn.set_tooltip_text('Collapse file explorer')
+        self._collapse_btn.connect('clicked', lambda _: self._toggle_collapsed())
+
         nav.append(self._up_btn)
         nav.append(home_btn)
         nav.append(self._path_label)
         nav.append(new_folder_btn)
         nav.append(new_file_btn)
+        nav.append(self._collapse_btn)
 
         self.append(nav)
-        self.append(Gtk.Separator())
+
+        # ── Collapsible content ───────────────────────────────────────────────
+        self._collapsible = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+
+        self._collapsible.append(Gtk.Separator())
+
+        # New Query CTA — shown only when a connection is active
+        nq_icon = Gtk.Image.new_from_icon_name('tab-new-symbolic')
+        nq_label = Gtk.Label(label='New Query')
+        nq_content = Gtk.Box(spacing=6)
+        nq_content.set_halign(Gtk.Align.CENTER)
+        nq_content.append(nq_icon)
+        nq_content.append(nq_label)
+        self._new_query_btn = Gtk.Button(child=nq_content)
+        self._new_query_btn.add_css_class('suggested-action')
+        self._new_query_btn.set_hexpand(True)
+        self._new_query_btn.set_margin_start(MARGIN_SM)
+        self._new_query_btn.set_margin_end(MARGIN_SM)
+        self._new_query_btn.set_margin_top(MARGIN_SM)
+        self._new_query_btn.set_margin_bottom(MARGIN_XS)
+        self._new_query_btn.set_tooltip_text('Create a new query file and open it')
+        self._new_query_btn.connect('clicked', lambda _: self._new_query())
+        self._new_query_btn.set_visible(False)
+        self._collapsible.append(self._new_query_btn)
+
+        self._cta_separator = Gtk.Separator()
+        self._cta_separator.set_margin_top(MARGIN_SM)
+        self._cta_separator.set_visible(False)
+        self._collapsible.append(self._cta_separator)
+
+        self.append(self._collapsible)
 
         # ── File tree ─────────────────────────────────────────────────────────
         self._store = Gtk.ListStore(str, str, str, GObject.TYPE_BOOLEAN, GObject.TYPE_BOOLEAN)
@@ -121,7 +160,7 @@ class FileExplorer(Gtk.Box):
         self._list_stack.set_vexpand(True)
         self._list_stack.add_named(scroll, 'list')
         self._list_stack.add_named(self._error_status, 'error')
-        self.append(self._list_stack)
+        self._collapsible.append(self._list_stack)
 
         # ── Context menu ──────────────────────────────────────────────────────
         self._ctx_path = None
@@ -151,6 +190,37 @@ class FileExplorer(Gtk.Box):
         right_click = Gtk.GestureClick(button=3)
         right_click.connect('pressed', self._on_right_click)
         self._tree.add_controller(right_click)
+
+    def set_connected(self, connected):
+        self._new_query_btn.set_visible(connected)
+        self._cta_separator.set_visible(connected)
+
+    def _toggle_collapsed(self):
+        self._collapsed = not self._collapsed
+        prefs.put('file_explorer_collapsed', self._collapsed)
+        self._collapsible.set_visible(not self._collapsed)
+        if self._collapsed:
+            self._collapse_btn.set_icon_name('pan-up-symbolic')
+            self._collapse_btn.set_tooltip_text('Expand file explorer')
+        else:
+            self._collapse_btn.set_icon_name('pan-down-symbolic')
+            self._collapse_btn.set_tooltip_text('Collapse file explorer')
+
+    def _new_query(self):
+        n = 1
+        while True:
+            name = f'query_{n}.sql'
+            path = os.path.join(self._current_dir, name)
+            if not os.path.exists(path):
+                break
+            n += 1
+        try:
+            open(path, 'a').close()
+            self._refresh()
+            self._select_path(path)
+            self.emit('file-activated', path)
+        except OSError as e:
+            self._show_create_error('Could Not Create Query', str(e))
 
     def _can_select(self, _sel, model, path, _current):
         it = model.get_iter(path)
