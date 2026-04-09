@@ -566,10 +566,11 @@ class SqlEditor(Gtk.Box):
         _copy_content.set_icon_name('edit-copy-symbolic')
         _copy_content.set_label('Copy')
 
-        copy_menu_btn = Gtk.MenuButton()
-        copy_menu_btn.add_css_class('flat')
-        copy_menu_btn.set_child(_copy_content)
-        copy_menu_btn.set_menu_model(_copy_menu)
+        self._explain_copy_btn = Adw.SplitButton()
+        self._explain_copy_btn.add_css_class('flat')
+        self._explain_copy_btn.set_child(_copy_content)
+        self._explain_copy_btn.set_menu_model(_copy_menu)
+        self._explain_copy_btn.set_action_name('explain-copy.copy-text')
 
         self._explain_analyze_warning = Gtk.Label()
         self._explain_analyze_warning.add_css_class('caption')
@@ -630,7 +631,7 @@ class SqlEditor(Gtk.Box):
         explain_toolbar.append(_toolbar_spacer)
         explain_toolbar.append(self._explain_analyze_warning)
         explain_toolbar.append(self._explain_copy_confirm)
-        explain_toolbar.append(copy_menu_btn)
+        explain_toolbar.append(self._explain_copy_btn)
 
         explain_outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         explain_outer.append(explain_toolbar)
@@ -1375,6 +1376,7 @@ class SqlEditor(Gtk.Box):
         self._explain_text_buf.set_text(plan_text)
         self._explain_analyze_warning.set_visible(is_analyze)
         self._explain_view_stack.set_visible_child_name('text')
+        self._explain_copy_btn.set_action_name('explain-copy.copy-text')
         self._explain_copy_text_action.set_enabled(True)
         self._explain_copy_json_action.set_enabled(True)
         self._results_stack.set_visible_child_name('explain')
@@ -1520,6 +1522,11 @@ class SqlEditor(Gtk.Box):
 
     def _on_explain_view_changed(self, stack, _pspec):
         page_name = stack.get_visible_child_name()
+        self._explain_copy_btn.set_action_name({
+            'text':  'explain-copy.copy-text',
+            'tree':  'explain-copy.copy-markdown',
+            'graph': 'explain-copy.copy-png',
+        }.get(page_name, 'explain-copy.copy-text'))
         if page_name == 'text':
             return
 
