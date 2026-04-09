@@ -1463,8 +1463,8 @@ class SqlEditor(Gtk.Box):
             png = self._explain_graph.render_to_png_bytes()
             if not png:
                 return
-            texture = Gdk.Texture.new_from_bytes(GLib.Bytes.new(png))
-            Gdk.Display.get_default().get_clipboard().set(texture)
+            provider = Gdk.ContentProvider.new_for_bytes('image/png', GLib.Bytes.new(png))
+            Gdk.Display.get_default().get_clipboard().set_content(provider)
             self._show_explain_copy_confirm('Copied PNG')
         except Exception as e:
             self._show_explain_copy_confirm(f'PNG error: {e}')
@@ -1474,7 +1474,8 @@ class SqlEditor(Gtk.Box):
             svg = self._explain_graph.render_to_svg_bytes()
             if not svg:
                 return
-            Gdk.Display.get_default().get_clipboard().set(svg.decode('utf-8'))
+            provider = Gdk.ContentProvider.new_for_bytes('image/svg+xml', GLib.Bytes.new(svg))
+            Gdk.Display.get_default().get_clipboard().set_content(provider)
             self._show_explain_copy_confirm('Copied SVG')
         except Exception as e:
             self._show_explain_copy_confirm(f'SVG error: {e}')
