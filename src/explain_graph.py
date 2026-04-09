@@ -194,7 +194,7 @@ class ExplainGraph(Gtk.DrawingArea):
             return None
         surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, w, h)
         cr = cairo.Context(surface)
-        self._on_draw(self, cr, w, h)
+        self._on_draw(None, cr, w, h)
         buf = io.BytesIO()
         surface.write_to_png(buf)
         return buf.getvalue()
@@ -209,6 +209,6 @@ class ExplainGraph(Gtk.DrawingArea):
         buf = io.BytesIO()
         surface = cairo.SVGSurface(buf, w, h)
         cr = cairo.Context(surface)
-        self._on_draw(self, cr, w, h)
+        self._on_draw(None, cr, w, h)
         surface.finish()
         return buf.getvalue()
