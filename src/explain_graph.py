@@ -179,3 +179,33 @@ class ExplainGraph(Gtk.DrawingArea):
         cr.set_source_rgba(1, 1, 1, 0.85)
         cr.move_to(x + 8, y + NODE_H - 22)
         PangoCairo.show_layout(cr, lo2)
+
+    # ── Export ────────────────────────────────────────────────────────────────
+
+    def render_to_png_bytes(self):
+        import io
+        import cairo
+        w = self.get_content_width()
+        h = self.get_content_height()
+        if not w or not h:
+            return None
+        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, w, h)
+        cr = cairo.Context(surface)
+        self._on_draw(self, cr, w, h)
+        buf = io.BytesIO()
+        surface.write_to_png(buf)
+        return buf.getvalue()
+
+    def render_to_svg_bytes(self):
+        import io
+        import cairo
+        w = self.get_content_width()
+        h = self.get_content_height()
+        if not w or not h:
+            return None
+        buf = io.BytesIO()
+        surface = cairo.SVGSurface(buf, w, h)
+        cr = cairo.Context(surface)
+        self._on_draw(self, cr, w, h)
+        surface.finish()
+        return buf.getvalue()
