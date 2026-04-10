@@ -271,7 +271,9 @@ class GcpDiscoveryDialog(Adw.Dialog):
         text = self._project_search.get_text().lower()
         if not text:
             return True
-        return text in row.get_title().lower() or text in row.get_subtitle().lower()
+        title = (row.get_title() or '').lower()
+        subtitle = (row.get_subtitle() or '').lower()
+        return text in title or text in subtitle
 
     def _on_project_check_toggled(self, check):
         if check.get_active():
@@ -424,7 +426,11 @@ class GcpDiscoveryDialog(Adw.Dialog):
             error_label.set_margin_end(12)
             error_label.set_margin_top(8)
             error_label.set_margin_bottom(8)
-            expander.add_row(error_label)
+            error_row = Gtk.ListBoxRow()
+            error_row.set_selectable(False)
+            error_row.set_activatable(False)
+            error_row.set_child(error_label)
+            expander.add_row(error_row)
             self._results_list.append(expander)
 
         # Show proxy banner if any instances need a proxy binary that isn't installed
