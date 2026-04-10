@@ -144,16 +144,9 @@ class TagsDialog(Adw.Dialog):
     def _on_delete_confirmed(self, _dialog, response, name):
         if response != 'delete':
             return
-        # Remove from registry
+        # Remove from registry and all connections (single save)
         self._store.remove_tag(name)
-        # Remove from all connections
-        for conn in self._store.list():
-            if name in conn.get('tags', []):
-                updated = {**conn, 'tags': [t for t in conn['tags'] if t != name]}
-                try:
-                    self._store.update(updated)
-                except Exception as e:
-                    print(f'Warning: failed to remove tag "{name}" from connection {conn.get("id")}: {e}')
+        self._store.remove_tag_from_connections(name)
         self._load_tags()
         self.emit('tags-changed')
 

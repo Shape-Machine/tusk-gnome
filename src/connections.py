@@ -200,6 +200,14 @@ class ConnectionStore:
         self._save()
         return conn
 
+    def remove_tag_from_connections(self, tag_name):
+        """Remove a tag from all connections in a single save."""
+        for i, c in enumerate(self._connections):
+            if tag_name in c.get('tags', []):
+                updated = {**c, 'tags': [t for t in c['tags'] if t != tag_name]}
+                self._connections[i] = updated
+        self._save()
+
 
 class FavouritesStore:
     """Persists per-connection pinned table/view favourites."""
