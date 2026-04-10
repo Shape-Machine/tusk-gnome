@@ -397,9 +397,26 @@ class GcpDiscoveryDialog(Adw.Dialog):
         summary = f'{total} instance{"s" if total != 1 else ""} found.'
         if already_count:
             summary += f' {already_count} already imported.'
-        if errors:
-            summary += f' (Errors: {"; ".join(errors)})'
         self._summary_label.set_text(summary)
+
+        if errors:
+            n = len(errors)
+            expander = Adw.ExpanderRow(
+                title=f'{n} discovery warning{"s" if n != 1 else ""}',
+                subtitle='Some services could not be queried — click to expand',
+            )
+            expander.set_icon_name('dialog-warning-symbolic')
+            error_label = Gtk.Label(label='\n\n'.join(errors))
+            error_label.set_wrap(True)
+            error_label.set_xalign(0)
+            error_label.add_css_class('dim-label')
+            error_label.set_selectable(True)
+            error_label.set_margin_start(12)
+            error_label.set_margin_end(12)
+            error_label.set_margin_top(8)
+            error_label.set_margin_bottom(8)
+            expander.add_row(error_label)
+            self._results_list.append(expander)
 
         # Show proxy banner if any instances need a proxy binary that isn't installed
         _PROXY_BINARY = {
