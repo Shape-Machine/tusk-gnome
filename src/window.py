@@ -1,8 +1,10 @@
 import datetime
+import json
 import os
 import re
 import socket
 import threading
+import urllib.request
 
 import gi
 
@@ -11,6 +13,7 @@ gi.require_version('Adw', '1')
 
 from gi.repository import Gtk, Adw, Gio, GLib, GObject, Gdk, Pango
 
+import config
 import prefs
 from connections import ConnectionStore, KeyringUnavailableError
 from connection_dialog import ConnectionDialog
@@ -522,6 +525,11 @@ class TuskWindow(Adw.ApplicationWindow):
 
         mgr_box.append(mgr_toolbar)
 
+        self._update_banner = Adw.Banner(button_label='Release notes')
+        self._update_banner.set_revealed(False)
+        self._update_banner.connect('button-clicked', self._on_update_banner_clicked)
+        mgr_box.append(self._update_banner)
+
         # Tag filter column (vertical, hidden until tags exist)
         self._mgr_tag_strip = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         self._mgr_tag_strip.set_margin_top(MARGIN_XS)
@@ -578,13 +586,26 @@ class TuskWindow(Adw.ApplicationWindow):
         footer_icon.set_pixel_size(24)
         footer.append(footer_icon)
 
-        footer_label = Gtk.Label(label='Tusk · free and open source')
+        version_suffix = f' · v{config.VERSION}' if config.VERSION != 'dev' else ''
+        footer_label = Gtk.Label(label=f'Tusk · free and open source{version_suffix}')
         footer_label.add_css_class('caption')
         footer.append(footer_label)
 
         footer_spacer = Gtk.Box()
         footer_spacer.set_hexpand(True)
         footer.append(footer_spacer)
+
+        self._update_status_label = Gtk.Label()
+        self._update_status_label.add_css_class('caption')
+        self._update_status_label.add_css_class('dim-label')
+        self._update_status_label.set_visible(False)
+        footer.append(self._update_status_label)
+
+        self._update_check_btn = Gtk.Button(label='Check for Updates')
+        self._update_check_btn.add_css_class('flat')
+        self._update_check_btn.add_css_class('caption')
+        self._update_check_btn.connect('clicked', self._on_check_updates_clicked)
+        footer.append(self._update_check_btn)
 
         for label, action in [
             ('Keyboard Shortcuts', 'win.show-help-overlay'),
@@ -1297,6 +1318,61 @@ class TuskWindow(Adw.ApplicationWindow):
             widget = pages.get_item(i).get_child()
             if isinstance(widget, SqlEditor):
                 widget.set_connection(conn)
+
+    # ── Update check ─────────────────────────────────────────────────────────
+
+    def _on_check_updates_clicked(self, _btn):
+        self._update_check_btn.set_sensitive(False)
+        self._update_status_label.set_visible(False)
+        self._update_banner.set_revealed(False)
+        threading.Thread(target=self._fetch_latest_version, daemon=True).start()
+
+    def _fetch_latest_version(self):
+        try:
+            url = 'https://api.github.com/repos/Shape-Machine/tusk-gnome/releases/latest'
+            req = urllib.request.Request(url, headers={'User-Agent': 'tusk-gnome'})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+            tag = data.get('tag_name', '').lstrip('v')
+            GLib.idle_add(self._on_update_result, tag, None)
+        except Exception as e:
+            GLib.idle_add(self._on_update_result, None, str(e))
+
+    def _on_update_result(self, latest_tag, error):
+        self._update_check_btn.set_sensitive(True)
+        if error or not latest_tag:
+            self._show_update_status('Could not check for updates')
+            return
+        if self._version_newer(config.VERSION, latest_tag):
+            self._update_banner.set_title(f'Tusk v{latest_tag} is available')
+            self._update_banner.set_revealed(True)
+        else:
+            self._show_update_status(f'Up to date (v{latest_tag})')
+
+    def _show_update_status(self, text):
+        self._update_status_label.set_text(text)
+        self._update_status_label.set_visible(True)
+        GLib.timeout_add(5000, self._hide_update_status)
+
+    def _hide_update_status(self):
+        self._update_status_label.set_visible(False)
+        return GLib.SOURCE_REMOVE
+
+    def _on_update_banner_clicked(self, _banner):
+        Gtk.show_uri(self, 'https://github.com/Shape-Machine/tusk-gnome/releases/latest',
+                     Gdk.CURRENT_TIME)
+
+    @staticmethod
+    def _version_newer(current, latest):
+        """Return True if latest > current. Returns False for dev builds."""
+        if current == 'dev' or not current or not latest:
+            return False
+        try:
+            def parse(v):
+                return tuple(int(x) for x in v.lstrip('v').split('.'))
+            return parse(latest) > parse(current)
+        except (ValueError, AttributeError):
+            return False
 
     # ── Connection manager helpers ────────────────────────────────────────────
 
