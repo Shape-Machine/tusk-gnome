@@ -23,7 +23,7 @@ class GcpDiscoveryDialog(Adw.Dialog):
     }
 
     def __init__(self, existing_instance_ids=None):
-        super().__init__(title='Import from GCP', content_width=540, content_height=580)
+        super().__init__(title='Import from GCP', content_width=540)
         self._existing_ids = set(existing_instance_ids or [])
         self._conns = []   # discovered connection dicts with internal _gcp_* keys
         self._checks = {}  # idx → (Gtk.CheckButton, conn_dict)
@@ -87,6 +87,11 @@ class GcpDiscoveryDialog(Adw.Dialog):
         self._project_list_box = Gtk.ListBox()
         self._project_list_box.add_css_class('boxed-list')
         self._project_list_box.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._project_list_box.set_filter_func(self._project_filter_func)
+
+        self._project_search = Gtk.SearchEntry(placeholder_text='Filter projects…')
+        self._project_search.connect('search-changed',
+                                     lambda _: self._project_list_box.invalidate_filter())
 
         self._project_list_scroll = Gtk.ScrolledWindow()
         self._project_list_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -131,6 +136,7 @@ class GcpDiscoveryDialog(Adw.Dialog):
         box.set_margin_end(20)
         box.set_vexpand(True)
         box.append(list_group)
+        box.append(self._project_search)
         box.append(self._project_list_scroll)
         box.append(self._project_fetch_error)
         box.append(manual_group)
@@ -228,10 +234,12 @@ class GcpDiscoveryDialog(Adw.Dialog):
             self._project_list_box.remove(row)
 
         if not projects:
+            self._project_search.set_visible(False)
             self._project_list_scroll.set_visible(False)
             self._project_fetch_error.set_visible(True)
             return
 
+        self._project_search.set_visible(True)
         self._project_list_scroll.set_visible(True)
         self._project_fetch_error.set_visible(False)
 
@@ -252,6 +260,15 @@ class GcpDiscoveryDialog(Adw.Dialog):
         self._project_list_box.append(row)
         self._project_rows.append((check, project_id))
 
+    def _project_filter_func(self, row):
+        text = self._project_search.get_text().lower()
+        if not text:
+            return True
+        child = row.get_child()
+        title = (child.get_title() if hasattr(child, 'get_title') else '').lower()
+        subtitle = (child.get_subtitle() if hasattr(child, 'get_subtitle') else '').lower()
+        return text in title or text in subtitle
+
     def _on_manual_add(self, _widget):
         project_id = self._manual_entry.get_text().strip()
         if not project_id:
@@ -261,6 +278,7 @@ class GcpDiscoveryDialog(Adw.Dialog):
         if project_id in existing_ids:
             self._manual_entry.set_text('')
             return
+        self._project_search.set_visible(True)
         self._project_list_scroll.set_visible(True)
         self._add_project_row(project_id, checked=True)
         self._manual_entry.set_text('')
