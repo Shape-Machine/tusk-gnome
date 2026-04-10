@@ -95,7 +95,7 @@ class GcpDiscoveryDialog(Adw.Dialog):
 
         self._project_list_scroll = Gtk.ScrolledWindow()
         self._project_list_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        self._project_list_scroll.set_max_content_height(220)
+        self._project_list_scroll.set_max_content_height(360)
         self._project_list_scroll.set_propagate_natural_height(True)
         self._project_list_scroll.set_child(self._project_list_box)
 
@@ -204,6 +204,7 @@ class GcpDiscoveryDialog(Adw.Dialog):
                 'Download: https://cloud.google.com/sdk/docs/install')
             return
 
+        GLib.idle_add(self._loading_label_widget.set_text, 'Checking authentication…')
         account = gcp_discovery.get_active_account()
         if not account:
             GLib.idle_add(self._show_error,
@@ -211,6 +212,7 @@ class GcpDiscoveryDialog(Adw.Dialog):
                 'No active gcloud credentials found.\n\nRun `gcloud auth login` in a terminal and try again.')
             return
 
+        GLib.idle_add(self._loading_label_widget.set_text, 'Fetching project list…')
         active_project = gcp_discovery.get_active_project()
         try:
             projects = gcp_discovery.list_projects()
