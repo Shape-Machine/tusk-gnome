@@ -42,6 +42,7 @@ class TuskWindow(Adw.ApplicationWindow):
         self._conn_sort = prefs.get('conn_sort', 'manual')
         self._active_tag_filters = set()
         self._warned_conn_ids = set()  # conn_ids warned this session (warn_on_connect)
+        self._conn_health = {}         # conn_id → {status, msg, ts}
         self._conn_mgr_rows = {}       # conn_id → manager list row
         self._conn_popover_rows = {}   # conn_id → popover list row
         self._sidebar_css = Gtk.CssProvider()
@@ -93,8 +94,13 @@ class TuskWindow(Adw.ApplicationWindow):
         add('close-tab',      lambda *_: self._close_current_tab())
         add('next-tab',       lambda *_: self._tab_view.select_next_page())
         add('prev-tab',       lambda *_: self._tab_view.select_previous_page())
-        add('import-pgpass',  lambda *_: self._on_import_pgpass())
-        add('show-connection-manager', lambda *_: self._show_connection_manager())
+        add('import-pgpass',              lambda *_: self._on_import_pgpass())
+        add('show-connection-manager',    lambda *_: self._show_connection_manager())
+        add('check-all-health',           lambda *_: self._on_check_all_health())
+        add('export-pgpass-bulk',         lambda *_: self._on_export_pgpass_bulk())
+        add('export-connections-json',    lambda *_: self._on_export_connections_json())
+        add('import-connections-json',    lambda *_: self._on_import_connections_json())
+        add('cleanup-stale',              lambda *_: self._on_cleanup_stale())
         for _key in ('name', 'last-connected', 'manual'):
             _a = Gio.SimpleAction.new(f'conn-sort-{_key}', None)
             _a.connect('activate', lambda _act, _par, k=_key: self._on_sort_changed(k))
@@ -506,6 +512,19 @@ class TuskWindow(Adw.ApplicationWindow):
         self._mgr_search.connect('search-changed', self._on_mgr_search_changed)
         mgr_toolbar.append(self._mgr_search)
 
+        overflow_menu = Gio.Menu()
+        overflow_menu.append('Check all connections', 'win.check-all-health')
+        overflow_menu.append('Export all to .pgpass…', 'win.export-pgpass-bulk')
+        overflow_menu.append('Export connections…', 'win.export-connections-json')
+        overflow_menu.append('Import connections…', 'win.import-connections-json')
+        overflow_menu.append('Clean up stale…', 'win.cleanup-stale')
+        overflow_btn = Gtk.MenuButton()
+        overflow_btn.set_icon_name('view-more-symbolic')
+        overflow_btn.set_tooltip_text('More actions')
+        overflow_btn.set_menu_model(overflow_menu)
+        overflow_btn.add_css_class('flat')
+        mgr_toolbar.append(overflow_btn)
+
         mgr_add_btn = Gtk.Button(label='Add Connection')
         mgr_add_btn.add_css_class('suggested-action')
         mgr_add_btn.add_css_class('pill')
@@ -723,9 +742,17 @@ class TuskWindow(Adw.ApplicationWindow):
         row.add_prefix(icon)
         row._active_icon = icon
 
+        # Health dot — grey until a check has run
+        health_dot = Gtk.Label()
+        health_dot.set_valign(Gtk.Align.CENTER)
+        self._apply_health_dot(health_dot, self._conn_health.get(conn['id'], {}))
+        row.add_prefix(health_dot)
+        row._health_dot = health_dot
+
         # Context menu
         menu = Gio.Menu()
         menu.append('Disconnect', 'mgr.disconnect')
+        menu.append('Check connection', 'mgr.check-health')
         menu.append('Edit', 'mgr.edit')
         menu.append('Duplicate', 'mgr.duplicate')
         menu.append('Copy as URI', 'mgr.copy-uri')
@@ -746,6 +773,7 @@ class TuskWindow(Adw.ApplicationWindow):
         ag.add_action(disconnect_action)
         row._disconnect_action = disconnect_action
         for name, cb in [
+            ('check-health',  lambda _a, _p, r=row: self._check_health(r._conn)),
             ('edit',          lambda _a, _p, r=row: self._on_edit_connection(r)),
             ('duplicate',     lambda _a, _p, r=row: self._on_duplicate_connection(r)),
             ('copy-uri',      lambda _a, _p, r=row: self._on_copy_as_uri(r)),
@@ -1424,6 +1452,279 @@ class TuskWindow(Adw.ApplicationWindow):
         else:
             self._active_tag_filters.discard(tag_name)
         self._mgr_list.invalidate_filter()
+
+    # ── Health checks ─────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _apply_health_dot(dot, health):
+        status = health.get('status', 'unknown')
+        color = {'ok': '#33d17a', 'error': '#e01b24', 'tunnel': '#e5a50a'}.get(status, '#888888')
+        dot.set_markup(f'<span foreground="{color}">⬤</span>')
+        msg = health.get('msg', 'Not checked')
+        ts = health.get('ts')
+        tip = msg
+        if ts:
+            try:
+                dt = datetime.datetime.fromisoformat(ts.rstrip('Z')).replace(tzinfo=datetime.timezone.utc)
+                tip += f'\nChecked {dt.strftime("%H:%M:%S UTC")}'
+            except (ValueError, TypeError):
+                pass
+        dot.set_tooltip_text(tip)
+
+    def _check_health(self, conn):
+        import socket
+        import threading as _threading
+        conn_id = conn['id']
+        # Tunnel/proxy connections can't be TCP-checked to the raw host
+        if conn.get('ssh_host') or conn.get('cloud_proxy_enabled'):
+            self._conn_health[conn_id] = {'status': 'tunnel', 'msg': 'Requires tunnel/proxy', 'ts': None}
+            self._update_health_dot(conn_id)
+            return
+
+        def _run():
+            ts = datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(3)
+                err = sock.connect_ex((conn['host'], int(conn['port'])))
+                sock.close()
+                if err == 0:
+                    result = {'status': 'ok', 'msg': 'Reachable', 'ts': ts}
+                else:
+                    result = {'status': 'error', 'msg': os.strerror(err), 'ts': ts}
+            except socket.timeout:
+                result = {'status': 'error', 'msg': 'Timed out', 'ts': ts}
+            except OSError as exc:
+                result = {'status': 'error', 'msg': str(exc), 'ts': ts}
+            self._conn_health[conn_id] = result
+            GLib.idle_add(self._update_health_dot, conn_id)
+
+        _threading.Thread(target=_run, daemon=True).start()
+
+    def _update_health_dot(self, conn_id):
+        row = self._conn_mgr_rows.get(conn_id)
+        if row and hasattr(row, '_health_dot'):
+            self._apply_health_dot(row._health_dot, self._conn_health.get(conn_id, {}))
+
+    def _on_check_all_health(self):
+        for conn in self._store.list():
+            self._check_health(conn)
+
+    # ── Connection import / export ────────────────────────────────────────────
+
+    def _on_export_pgpass_bulk(self):
+        import os
+        import stat
+        import tempfile
+        conns = self._store.list()
+        written = skipped_dup = skipped_no_pwd = skipped_tunnel = 0
+
+        pgpass_path = os.path.expanduser('~/.pgpass')
+        existing_lines = []
+        if os.path.exists(pgpass_path):
+            try:
+                with open(pgpass_path, encoding='utf-8') as f:
+                    existing_lines = f.read().splitlines()
+            except OSError as e:
+                self._show_toast(f'Could not read ~/.pgpass: {e}')
+                return
+
+        def _escape(s):
+            return str(s).replace('\\', '\\\\').replace(':', '\\:')
+
+        new_lines = list(existing_lines)
+        for conn in conns:
+            if conn.get('ssh_host') or conn.get('cloud_proxy_enabled'):
+                skipped_tunnel += 1
+                continue
+            try:
+                password = self._store.get_password(conn['id'])
+            except Exception:
+                skipped_no_pwd += 1
+                continue
+            if not password:
+                skipped_no_pwd += 1
+                continue
+            line = ':'.join([
+                _escape(conn['host']),
+                _escape(conn['port']),
+                '*',
+                _escape(conn['username']),
+                _escape(password),
+            ])
+            if line in new_lines:
+                skipped_dup += 1
+                continue
+            new_lines.append(line)
+            written += 1
+
+        if written == 0:
+            parts = [f'Nothing written to ~/.pgpass.']
+            if skipped_dup:
+                parts.append(f'{skipped_dup} already present.')
+            if skipped_no_pwd:
+                parts.append(f'{skipped_no_pwd} skipped (no password).')
+            if skipped_tunnel:
+                parts.append(f'{skipped_tunnel} skipped (SSH/proxy).')
+            self._show_toast(' '.join(parts))
+            return
+
+        tmp_path = None
+        try:
+            content = '\n'.join(new_lines) + '\n'
+            pgpass_dir = os.path.dirname(pgpass_path) or os.path.expanduser('~')
+            with tempfile.NamedTemporaryFile(
+                mode='w', encoding='utf-8', dir=pgpass_dir, delete=False,
+            ) as tmp:
+                tmp.write(content)
+                tmp_path = tmp.name
+            os.chmod(tmp_path, 0o600)
+            os.replace(tmp_path, pgpass_path)
+            tmp_path = None
+        except OSError as e:
+            self._show_toast(f'Export failed: {e}')
+            return
+        finally:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+
+        parts = [f'{written} {"entry" if written == 1 else "entries"} written to ~/.pgpass.']
+        if skipped_dup:
+            parts.append(f'{skipped_dup} skipped (duplicate).')
+        if skipped_no_pwd:
+            parts.append(f'{skipped_no_pwd} skipped (no password).')
+        if skipped_tunnel:
+            parts.append(f'{skipped_tunnel} skipped (SSH/proxy).')
+        self._show_toast(' '.join(parts))
+
+    def _on_export_connections_json(self):
+        def _do_export(include_passwords):
+            data = self._store.export_json(include_passwords=include_passwords)
+            file_dialog = Gtk.FileDialog()
+            file_dialog.set_title('Export Connections')
+            file_dialog.set_initial_name('connections.tusk-connections.json')
+            filter_json = Gtk.FileFilter()
+            filter_json.set_name('Tusk connection files (*.tusk-connections.json)')
+            filter_json.add_pattern('*.tusk-connections.json')
+            filters = Gio.ListStore.new(Gtk.FileFilter)
+            filters.append(filter_json)
+            file_dialog.set_filters(filters)
+            file_dialog.save(self, None, self._on_export_json_file_chosen, data)
+
+        dialog = Adw.AlertDialog(
+            heading='Export Connections',
+            body='Passwords are excluded by default. Including them in the export file is a security risk — do not share the file with others.',
+        )
+        dialog.add_response('cancel', 'Cancel')
+        dialog.add_response('without', 'Export Without Passwords')
+        dialog.add_response('with', 'Include Passwords')
+        dialog.set_response_appearance('with', Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response('without')
+        dialog.set_close_response('cancel')
+        dialog.connect('response', lambda d, r: _do_export(r == 'with') if r != 'cancel' else None)
+        dialog.present(self)
+
+    def _on_export_json_file_chosen(self, file_dialog, result, data):
+        try:
+            gfile = file_dialog.save_finish(result)
+        except Exception:
+            return
+        import json as _json
+        try:
+            path = gfile.get_path()
+            tmp = path + '.tmp'
+            with open(tmp, 'w', encoding='utf-8') as f:
+                _json.dump(data, f, indent=2)
+            os.replace(tmp, path)
+            n = len(data.get('connections', []))
+            self._show_toast(f'{n} connection{"s" if n != 1 else ""} exported.')
+        except OSError as e:
+            self._show_toast(f'Export failed: {e}')
+
+    def _on_import_connections_json(self):
+        file_dialog = Gtk.FileDialog()
+        file_dialog.set_title('Import Connections')
+        filter_json = Gtk.FileFilter()
+        filter_json.set_name('Tusk connection files (*.tusk-connections.json)')
+        filter_json.add_pattern('*.tusk-connections.json')
+        filter_all = Gtk.FileFilter()
+        filter_all.set_name('All files')
+        filter_all.add_pattern('*')
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(filter_json)
+        filters.append(filter_all)
+        file_dialog.set_filters(filters)
+        file_dialog.open(self, None, self._on_import_json_file_chosen)
+
+    def _on_import_json_file_chosen(self, file_dialog, result):
+        import json as _json
+        try:
+            gfile = file_dialog.open_finish(result)
+        except Exception:
+            return
+        try:
+            path = gfile.get_path()
+            with open(path, encoding='utf-8') as f:
+                data = _json.load(f)
+        except (OSError, ValueError) as e:
+            self._show_toast(f'Could not read file: {e}')
+            return
+        conns = data.get('connections', [])
+        tags = data.get('tags_registry', {})
+        if not conns:
+            self._show_toast('No connections found in file.')
+            return
+        from connections_import_dialog import ConnectionsImportDialog
+        existing_names = {c['name'] for c in self._store.list()}
+        dlg = ConnectionsImportDialog(conns, tags, existing_names)
+        dlg.connect('import-confirmed', self._on_import_json_confirmed)
+        dlg.present(self)
+
+    def _on_import_json_confirmed(self, _dlg, resolved_conns, tags_registry):
+        added, skipped = self._store.bulk_import(resolved_conns, tags_registry)
+        # Add new rows to UI for freshly imported connections
+        existing_ids = set(self._conn_mgr_rows.keys())
+        tags_reg = self._store.get_tags_registry()
+        for conn in self._store.list():
+            if conn['id'] not in existing_ids:
+                self._add_connection_row(conn, tags_registry=tags_reg)
+        self._refresh_tag_strip()
+        msg = f'{added} connection{"s" if added != 1 else ""} imported.'
+        if skipped:
+            msg += f' {skipped} skipped (already present).'
+        self._show_toast(msg)
+
+    def _on_cleanup_stale(self):
+        from stale_dialog import StaleConnectionsDialog
+        dlg = StaleConnectionsDialog(self._store, self._conn_health)
+        dlg.connect('connections-deleted', self._on_stale_connections_deleted)
+        dlg.present(self)
+
+    def _on_stale_connections_deleted(self, _dlg, conn_ids):
+        for conn_id in conn_ids:
+            try:
+                self._store.remove(conn_id)
+            except Exception:
+                pass
+            mgr_row = self._conn_mgr_rows.pop(conn_id, None)
+            if mgr_row:
+                self._mgr_list.remove(mgr_row)
+            pop_row = self._conn_popover_rows.pop(conn_id, None)
+            if pop_row:
+                self._conn_list.remove(pop_row)
+            self._conn_health.pop(conn_id, None)
+            if conn_id == self._active_conn_id:
+                self._set_active_conn(None)
+        n = len(conn_ids)
+        self._show_toast(f'{n} connection{"s" if n != 1 else ""} deleted.')
+
+    def _show_toast(self, msg, timeout=4):
+        toast = Adw.Toast(title=msg)
+        toast.set_timeout(timeout)
+        self._toast_overlay.add_toast(toast)
 
     # ── Table / file tabs ─────────────────────────────────────────────────────
 

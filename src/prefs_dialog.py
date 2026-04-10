@@ -41,6 +41,15 @@ class PrefsDialog(Adw.PreferencesDialog):
         editor_page.add(notif_group)
         notif_group.add(self._notify_threshold_row())
 
+        conn_page = Adw.PreferencesPage(
+            title='Connections',
+            icon_name='network-server-symbolic',
+        )
+        self.add(conn_page)
+        stale_group = Adw.PreferencesGroup(title='Stale Connection Cleanup')
+        conn_page.add(stale_group)
+        stale_group.add(self._stale_days_row())
+
     def _font_combo_row(self, key):
         model = Gtk.StringList()
         for label in FONT_LABELS:
@@ -68,6 +77,17 @@ class PrefsDialog(Adw.PreferencesDialog):
             adjustment=adj,
         )
         row.connect('notify::value', lambda r, _: prefs.put('notify_threshold_s', int(r.get_value())))
+        return row
+
+    def _stale_days_row(self):
+        current = prefs.get('stale_days', 30)
+        adj = Gtk.Adjustment(value=current, lower=1, upper=365, step_increment=1, page_increment=7)
+        row = Adw.SpinRow(
+            title='Stale threshold',
+            subtitle='Connections unused for this many days are shown in cleanup',
+            adjustment=adj,
+        )
+        row.connect('notify::value', lambda r, _: prefs.put('stale_days', int(r.get_value())))
         return row
 
     def _save(self, key, value):
