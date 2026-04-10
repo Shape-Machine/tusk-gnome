@@ -28,6 +28,7 @@ class GcpDiscoveryDialog(Adw.Dialog):
         self._conns = []   # discovered connection dicts with internal _gcp_* keys
         self._checks = {}  # idx → (Gtk.CheckButton, conn_dict)
         self._project = None
+        self._missing_proxy_binaries = set()
         self._build_ui()
 
     # ── UI skeleton ────────────────────────────────────────────────────────────
@@ -287,10 +288,31 @@ class GcpDiscoveryDialog(Adw.Dialog):
             summary += f' (Errors: {"; ".join(errors)})'
         self._summary_label.set_text(summary)
 
-        # Show proxy banner if any instances need the proxy and it's not installed
-        needs_proxy = any(c.get('cloud_proxy_enabled') for c in conns)
-        proxy_missing = needs_proxy and not shutil.which('cloud-sql-proxy')
-        self._proxy_banner.set_revealed(proxy_missing)
+        # Show proxy banner if any instances need a proxy binary that isn't installed
+        _PROXY_BINARY = {
+            'gcp-cloudsql': 'cloud-sql-proxy',
+            'gcp-alloydb': 'alloydb-auth-proxy',
+        }
+        _PROXY_NAME = {
+            'cloud-sql-proxy': 'Cloud SQL Auth Proxy',
+            'alloydb-auth-proxy': 'AlloyDB Auth Proxy',
+        }
+        self._missing_proxy_binaries = {
+            _PROXY_BINARY[c['cloud_provider']]
+            for c in conns
+            if c.get('cloud_proxy_enabled') and c.get('cloud_provider') in _PROXY_BINARY
+            and not shutil.which(_PROXY_BINARY[c['cloud_provider']])
+        }
+        if self._missing_proxy_binaries:
+            names = ' and '.join(
+                _PROXY_NAME.get(b, b) for b in sorted(self._missing_proxy_binaries)
+            )
+            self._proxy_banner.set_title(
+                f'{names} required for some instances — install before connecting.'
+            )
+            self._proxy_banner.set_revealed(True)
+        else:
+            self._proxy_banner.set_revealed(False)
 
         self._stack.set_visible_child_name('results')
 
@@ -300,10 +322,19 @@ class GcpDiscoveryDialog(Adw.Dialog):
         self._stack.set_visible_child_name('error')
 
     def _on_proxy_banner_clicked(self, _banner):
-        install_url = 'https://cloud.google.com/sql/docs/postgres/sql-proxy#install'
+        _INSTALL_URLS = {
+            'cloud-sql-proxy': ('Cloud SQL Auth Proxy',
+                                'https://cloud.google.com/sql/docs/postgres/sql-proxy#install'),
+            'alloydb-auth-proxy': ('AlloyDB Auth Proxy',
+                                   'https://cloud.google.com/alloydb/docs/auth-proxy/connect#install-proxy'),
+        }
+        missing = getattr(self, '_missing_proxy_binaries', {'cloud-sql-proxy'})
+        lines = [f'{name}:\n{url}' for b in sorted(missing)
+                 for name, url in [_INSTALL_URLS.get(b, (b, ''))]]
+        heading = 'Install Required Proxy' if len(missing) == 1 else 'Install Required Proxies'
         dialog = Adw.AlertDialog(
-            heading='Install Cloud SQL Auth Proxy',
-            body=f'See the installation guide for the latest download:\n\n{install_url}',
+            heading=heading,
+            body='See the installation guides for the latest downloads:\n\n' + '\n\n'.join(lines),
         )
         dialog.add_response('ok', 'OK')
         dialog.set_default_response('ok')

@@ -15,6 +15,30 @@ CERT_DIR = os.path.join(os.path.expanduser('~'), '.config', 'tusk', 'certs')
 
 # ── gcloud helpers ─────────────────────────────────────────────────────────────
 
+def _friendly_gcloud_error(stderr, fallback):
+    """Return a user-readable error message for a failed gcloud command.
+
+    Detects common failure patterns (API not enabled, permission denied) and
+    replaces the raw gcloud stderr with actionable guidance.
+    """
+    detail = stderr or fallback
+    low = detail.lower()
+    if 'has not been used' in low or 'is disabled' in low or 'enable it by visiting' in low:
+        # Extract the API name if present (e.g. sqladmin.googleapis.com)
+        api = ''
+        for word in detail.split():
+            if 'googleapis.com' in word:
+                api = word.strip('[].,')
+                break
+        msg = 'A required GCP API is not enabled on this project.'
+        if api:
+            msg += f'\n\nEnable it in the GCP console:\nhttps://console.cloud.google.com/apis/library/{api}'
+        else:
+            msg += '\n\nOpen the GCP console → APIs & Services → Enable APIs and Services.'
+        return msg
+    return detail
+
+
 def gcloud_available():
     """Return True if `gcloud` is on $PATH."""
     return shutil.which('gcloud') is not None
@@ -41,8 +65,8 @@ def _gcloud(*args, project=None):
         raise RuntimeError('gcloud not found on $PATH.')
 
     if result.returncode != 0:
-        stderr = result.stderr.strip()
-        raise RuntimeError(stderr or f'gcloud exited with code {result.returncode}')
+        raise RuntimeError(_friendly_gcloud_error(result.stderr.strip(),
+                                                   f'gcloud exited with code {result.returncode}'))
 
     try:
         return json.loads(result.stdout)
@@ -190,11 +214,12 @@ def build_cloud_sql_conn(instance, project, fetch_cert=True):
 # ── AlloyDB discovery ──────────────────────────────────────────────────────────
 
 def discover_alloydb(project):
-    """Return a list of (cluster, instance) tuples for AlloyDB primary instances."""
-    try:
-        clusters = _gcloud('alloydb', 'clusters', 'list', '--region=-', project=project)
-    except RuntimeError:
-        return []
+    """Return a list of (cluster, instance) tuples for AlloyDB primary instances.
+
+    Raises RuntimeError if the initial cluster list fails (auth error, API disabled, etc.).
+    Per-cluster instance listing errors are silently skipped so a partial list is returned.
+    """
+    clusters = _gcloud('alloydb', 'clusters', 'list', '--region=-', project=project)
     if not isinstance(clusters, list):
         return []
 
@@ -221,28 +246,13 @@ def discover_alloydb(project):
 
 
 def fetch_alloydb_server_ca(cluster_name, project):
-    """Fetch the server CA cert PEM for an AlloyDB cluster.
+    """Return the AlloyDB server CA cert path, or None.
 
-    Writes the cert to CERT_DIR and returns the file path, or None on failure.
+    AlloyDB uses a Google-managed CA that is trusted by the system root store,
+    so no custom ssl_root_cert is needed. psycopg will validate against system
+    CAs when ssl_mode='require'. Returns None to leave ssl_root_cert unset.
     """
-    try:
-        pem = _gcloud_value(
-            'alloydb', 'clusters', 'describe', cluster_name,
-            '--region=-',
-            '--format=value(sslConfig.caSource)',
-            project=project,
-        )
-        # sslConfig.caSource is not the cert itself — AlloyDB uses a managed CA.
-        # Fetch via the REST equivalent if available; otherwise skip.
-        if not pem:
-            return None
-        os.makedirs(CERT_DIR, exist_ok=True)
-        cert_path = os.path.join(CERT_DIR, f'alloydb-{project}-{cluster_name}.pem')
-        with open(cert_path, 'w') as f:
-            f.write(pem)
-        return cert_path
-    except Exception:
-        return None
+    return None
 
 
 def _alloydb_has_public_ip(instance):
