@@ -1,3 +1,4 @@
+import shutil
 import threading
 
 import gi
@@ -37,8 +38,10 @@ class GcpDiscoveryDialog(Adw.Dialog):
         self._stack = Gtk.Stack()
         self._stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
 
-        # Page: checking gcloud
-        self._loading_page = self._build_loading_page('Checking gcloud…')
+        # Page: checking gcloud / discovering
+        self._loading_label_widget = Gtk.Label(label='Checking gcloud…')
+        self._loading_label_widget.add_css_class('dim-label')
+        self._loading_page = self._build_loading_page_with_label(self._loading_label_widget)
         self._stack.add_named(self._loading_page, 'loading')
 
         # Page: project entry (shown if no active project)
@@ -61,19 +64,22 @@ class GcpDiscoveryDialog(Adw.Dialog):
         # Start checking gcloud availability
         threading.Thread(target=self._check_gcloud, daemon=True).start()
 
-    def _build_loading_page(self, label_text):
+    def _build_loading_page_with_label(self, label_widget):
         spinner = Gtk.Spinner()
         spinner.set_size_request(32, 32)
         spinner.start()
-        label = Gtk.Label(label=label_text)
-        label.add_css_class('dim-label')
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         box.set_halign(Gtk.Align.CENTER)
         box.set_valign(Gtk.Align.CENTER)
         box.set_vexpand(True)
         box.append(spinner)
-        box.append(label)
+        box.append(label_widget)
         return box
+
+    def _build_loading_page(self, label_text):
+        label = Gtk.Label(label=label_text)
+        label.add_css_class('dim-label')
+        return self._build_loading_page_with_label(label)
 
     def _build_project_page(self):
         group = Adw.PreferencesGroup(
@@ -106,6 +112,13 @@ class GcpDiscoveryDialog(Adw.Dialog):
         self._summary_label.set_wrap(True)
         self._summary_label.set_xalign(0)
 
+        self._proxy_banner = Adw.Banner(
+            title='Cloud SQL Auth Proxy required for some instances — install it before connecting.',
+            button_label='How to install',
+        )
+        self._proxy_banner.set_revealed(False)
+        self._proxy_banner.connect('button-clicked', self._on_proxy_banner_clicked)
+
         self._results_list = Gtk.ListBox()
         self._results_list.add_css_class('boxed-list')
         self._results_list.set_selection_mode(Gtk.SelectionMode.NONE)
@@ -121,6 +134,7 @@ class GcpDiscoveryDialog(Adw.Dialog):
         box.set_margin_bottom(20)
         box.set_margin_start(20)
         box.set_margin_end(20)
+        box.append(self._proxy_banner)
         box.append(self._summary_label)
         box.append(self._results_list)
         box.append(self._import_btn)
@@ -172,20 +186,11 @@ class GcpDiscoveryDialog(Adw.Dialog):
             return
         self._project_entry.remove_css_class('error')
         self._project = project
-
-        # Replace project page with a loading spinner
-        loading = self._build_loading_page(f'Discovering databases in {project}…')
-        self._stack.add_named(loading, 'loading2')
-        self._stack.set_visible_child_name('loading2')
         self._start_discovery(project)
 
     def _start_discovery(self, project):
-        loading = self._build_loading_page(f'Discovering databases in {project}…')
-        existing = self._stack.get_child_by_name('loading_discovery')
-        if existing:
-            self._stack.remove(existing)
-        self._stack.add_named(loading, 'loading_discovery')
-        self._stack.set_visible_child_name('loading_discovery')
+        self._loading_label_widget.set_text(f'Discovering databases in {project}…')
+        self._stack.set_visible_child_name('loading')
         threading.Thread(target=self._run_discovery, args=(project,), daemon=True).start()
 
     def _run_discovery(self, project):
@@ -282,12 +287,28 @@ class GcpDiscoveryDialog(Adw.Dialog):
             summary += f' (Errors: {"; ".join(errors)})'
         self._summary_label.set_text(summary)
 
+        # Show proxy banner if any instances need the proxy and it's not installed
+        needs_proxy = any(c.get('cloud_proxy_enabled') for c in conns)
+        proxy_missing = needs_proxy and not shutil.which('cloud-sql-proxy')
+        self._proxy_banner.set_revealed(proxy_missing)
+
         self._stack.set_visible_child_name('results')
 
     def _show_error(self, title, description):
         self._error_status.set_title(title)
         self._error_status.set_description(description)
         self._stack.set_visible_child_name('error')
+
+    def _on_proxy_banner_clicked(self, _banner):
+        install_url = 'https://cloud.google.com/sql/docs/postgres/sql-proxy#install'
+        dialog = Adw.AlertDialog(
+            heading='Install Cloud SQL Auth Proxy',
+            body=f'See the installation guide for the latest download:\n\n{install_url}',
+        )
+        dialog.add_response('ok', 'OK')
+        dialog.set_default_response('ok')
+        dialog.set_close_response('ok')
+        dialog.present(self)
 
     # ── Import ─────────────────────────────────────────────────────────────────
 

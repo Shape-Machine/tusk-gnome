@@ -118,6 +118,13 @@ class DbBrowser(Gtk.Box):
             GObject.SignalFlags.RUN_FIRST, None,
             (GObject.TYPE_PYOBJECT,),  # conn
         ),
+        'proxy-not-found': (
+            GObject.SignalFlags.RUN_FIRST, None,
+            (str,),  # binary name, e.g. 'cloud-sql-proxy'
+        ),
+        'connection-failed': (
+            GObject.SignalFlags.RUN_FIRST, None, (),
+        ),
     }
 
     def __init__(self):
@@ -215,6 +222,7 @@ class DbBrowser(Gtk.Box):
         self._conn_error_label.add_css_class('caption')
         self._conn_error_label.add_css_class('error')
         self._conn_error_label.set_xalign(0)
+        self._conn_error_label.set_selectable(True)
         self._conn_error_label.set_wrap(True)
         self._conn_error_label.set_hexpand(True)
         self._conn_error_bar.append(self._conn_error_label)
@@ -509,7 +517,7 @@ class DbBrowser(Gtk.Box):
         """Call before load() after a schema rename so expansion state is preserved."""
         self._rename_hint = (old_schema, new_schema)
 
-    def load(self, conn):
+    def load(self, conn, initial_connect=False):
         self._load_gen += 1
         gen = self._load_gen
         self._last_conn = conn
@@ -536,9 +544,9 @@ class DbBrowser(Gtk.Box):
         self._store.append(None, [
             'content-loading-symbolic', 'Loading…', 'loading', conn, '', ''
         ])
-        threading.Thread(target=self._fetch_schema, args=(conn, gen), daemon=True).start()
+        threading.Thread(target=self._fetch_schema, args=(conn, gen, initial_connect), daemon=True).start()
 
-    def _fetch_schema(self, conn, gen):
+    def _fetch_schema(self, conn, gen, initial_connect=False):
         try:
             import psycopg
             from tunnel import open_db
@@ -718,7 +726,12 @@ class DbBrowser(Gtk.Box):
                           schema_warning, schemas_hidden, current_role_attrs, roles_list, gen)
 
         except Exception as e:
-            GLib.idle_add(self._show_error, _friendly_pg_error(e), gen)
+            from tunnel import ProxyNotFoundError
+            if isinstance(e, ProxyNotFoundError):
+                GLib.idle_add(self.emit, 'proxy-not-found', e.binary)
+                GLib.idle_add(self._show_error, str(e), gen, initial_connect)
+            else:
+                GLib.idle_add(self._show_error, _friendly_pg_error(e), gen, initial_connect)
 
     def _populate(self, conn, schema_items, all_databases,
                   schema_warning, schemas_hidden, current_role_attrs, roles_list, gen):
@@ -946,7 +959,7 @@ class DbBrowser(Gtk.Box):
         if pinned:
             self._expand_favourites()
 
-    def _show_error(self, error_msg, gen):
+    def _show_error(self, error_msg, gen, initial_connect=False):
         if gen != self._load_gen:
             return
         self._loading_spinner.stop()
@@ -956,6 +969,8 @@ class DbBrowser(Gtk.Box):
         self._search_bar.set_visible(False)
         self._conn_error_label.set_label(error_msg)
         self._conn_error_bar.set_visible(True)
+        if initial_connect:
+            self.emit('connection-failed')
 
     def get_loaded_schemas(self):
         """Return list of schema names currently loaded in the tree."""
