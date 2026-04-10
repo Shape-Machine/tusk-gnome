@@ -3,6 +3,8 @@ import threading
 import uuid
 from urllib.parse import urlparse, unquote, quote
 
+from aws_discovery import is_aurora_writer_endpoint, aurora_reader_from_writer
+
 import gi
 import keyring
 
@@ -88,8 +90,17 @@ class ConnectionDialog(Adw.Dialog):
 
         self._uri_preview_row.set_title('Connection String')
 
+        # Aurora reader endpoint — shown when writer hostname is detected
+        self._aurora_reader_row = Adw.EntryRow(title='Aurora Reader Endpoint')
+        self._aurora_reader_row.set_tooltip_text(
+            'Optional. Reader endpoint for this Aurora cluster — load-balanced across replicas. '
+            'Tusk will add a writer/reader toggle to the connection sidebar.'
+        )
+        self._aurora_reader_row.set_visible(False)
+
         details_group.add(self._host_row)
         details_group.add(self._port_row)
+        details_group.add(self._aurora_reader_row)
         details_group.add(self._database_row)
         details_group.add(self._uri_preview_row)
 
@@ -195,10 +206,18 @@ class ConnectionDialog(Adw.Dialog):
         )
         self._keyring_banner.set_revealed(keyring_failed)
 
+        # Populate Aurora reader endpoint from existing profile
+        existing_reader = conn.get('secondary_endpoint', '') if conn else ''
+        if existing_reader:
+            self._aurora_reader_row.set_text(existing_reader)
+            self._aurora_reader_row.set_visible(True)
+
         # Connect live preview signals
         for row in (self._host_row, self._port_row, self._database_row, self._username_row):
             row.connect('notify::text', self._update_uri_preview)
+        self._host_row.connect('notify::text', self._on_host_changed)
         self._update_uri_preview()
+        self._on_host_changed()  # run once to show reader row on edit if already Aurora
 
         # ── 2-column layout ───────────────────────────────────────────────────
         left_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
@@ -301,6 +320,20 @@ class ConnectionDialog(Adw.Dialog):
         self._toast_overlay = Adw.ToastOverlay()
         self._toast_overlay.set_child(toolbar_view)
         self.set_child(self._toast_overlay)
+
+    def _on_host_changed(self, *_):
+        host = self._host_row.get_text().strip()
+        if is_aurora_writer_endpoint(host):
+            self._aurora_reader_row.set_visible(True)
+            # Auto-populate reader endpoint only if the field is currently empty
+            if not self._aurora_reader_row.get_text().strip():
+                reader = aurora_reader_from_writer(host)
+                if reader:
+                    self._aurora_reader_row.set_text(reader)
+        else:
+            # Only hide if the user hasn't manually entered a reader endpoint
+            if not self._aurora_reader_row.get_text().strip():
+                self._aurora_reader_row.set_visible(False)
 
     def _on_tag_toggled(self, check, tag_name):
         if check.get_active():
@@ -498,5 +531,12 @@ class ConnectionDialog(Adw.Dialog):
         default_schema = self._default_schema_row.get_text().strip()
         if default_schema:
             conn['default_schema'] = default_schema
+        reader = self._aurora_reader_row.get_text().strip()
+        if reader:
+            conn['secondary_endpoint'] = reader
+            conn['secondary_port'] = port
+        else:
+            conn['secondary_endpoint'] = None
+            conn['secondary_port'] = None
         self.emit('connection-saved', conn)
         self.close()

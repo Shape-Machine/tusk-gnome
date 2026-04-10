@@ -58,10 +58,11 @@ def apply_conn_settings(db, conn):
 
     Must be called after psycopg.connect() and before any user queries.
     Handles: read-only mode, default schema (search_path).
+    When active_endpoint='secondary' (Aurora reader), read-only is forced on.
     """
     from psycopg import sql as pgsql
     with db.cursor() as cur:
-        if conn.get('read_only'):
+        if conn.get('read_only') or conn.get('active_endpoint') == 'secondary':
             cur.execute('SET SESSION default_transaction_read_only = on')
         if conn.get('default_schema'):
             cur.execute(
@@ -115,8 +116,30 @@ def open_db(conn, autocommit=False):
     # Resolve password (IAM token or stored password)
     password = conn.get('password', '')
     if conn.get('cloud_auth_mode') == 'iam':
-        from gcp_discovery import get_iam_token
-        password = get_iam_token()
+        provider = conn.get('cloud_provider', '')
+        if provider.startswith('aws-'):
+            from aws_discovery import get_iam_token as _aws_iam
+            # Use the effective host/port (may be secondary endpoint for Aurora reader)
+            effective_host = (
+                conn.get('secondary_endpoint', conn.get('host', ''))
+                if conn.get('active_endpoint') == 'secondary'
+                else conn.get('host', '')
+            )
+            effective_port = (
+                conn.get('secondary_port', conn.get('port', 5432))
+                if conn.get('active_endpoint') == 'secondary'
+                else conn.get('port', 5432)
+            )
+            password = _aws_iam(
+                effective_host,
+                effective_port,
+                conn.get('database', 'postgres'),
+                conn.get('username', ''),
+                conn.get('cloud_region', ''),
+            )
+        else:
+            from gcp_discovery import get_iam_token
+            password = get_iam_token()
 
     with open_tunnel(conn) as (host, port), psycopg.connect(
         **_psycopg_kwargs(conn, host, port, password=password,
@@ -249,6 +272,7 @@ def open_tunnel(conn):
     Yields (host, port) to connect Postgres to.
     - SSH tunnel when conn['ssh_enabled'] is True
     - Cloud proxy when conn['cloud_proxy_enabled'] is True
+    - Secondary endpoint when conn['active_endpoint'] == 'secondary'
     - Direct otherwise
     """
     if conn.get('cloud_proxy_enabled'):
@@ -257,7 +281,11 @@ def open_tunnel(conn):
         return
 
     if not conn.get('ssh_enabled'):
-        yield conn['host'], conn['port']
+        if conn.get('active_endpoint') == 'secondary':
+            yield conn.get('secondary_endpoint') or conn['host'], \
+                  conn.get('secondary_port') or conn['port']
+        else:
+            yield conn['host'], conn['port']
         return
 
     import paramiko
