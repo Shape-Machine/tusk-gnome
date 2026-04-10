@@ -1,5 +1,6 @@
 import datetime
 import os
+import re
 import threading
 
 import gi
@@ -21,6 +22,9 @@ from role_panel import RolePanel
 from function_editor import FunctionEditor
 from command_palette import CommandPalette
 from activity_panel import ActivityPanel
+
+
+_COLOR_RE = re.compile(r'^#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?$')
 
 
 class TuskWindow(Adw.ApplicationWindow):
@@ -690,7 +694,8 @@ class TuskWindow(Adw.ApplicationWindow):
         if tags_registry is None:
             tags_registry = self._store.get_tags_registry()
         for tag_name in conn.get('tags', []):
-            color = tags_registry.get(tag_name, {}).get('color', '#888888')
+            raw_color = tags_registry.get(tag_name, {}).get('color', '#888888')
+            color = raw_color if _COLOR_RE.match(raw_color) else '#888888'
             chip = Gtk.Label()
             chip.set_markup(
                 f'<span foreground="{color}" size="small">'
@@ -1011,20 +1016,17 @@ class TuskWindow(Adw.ApplicationWindow):
             return
         conn_id = conn['id']
 
-        # Update popover row
-        p_row = self._conn_popover_rows.get(conn_id)
+        # Rebuild both rows so suffix widgets (lock icon, tag chips) stay in sync.
+        p_row = self._conn_popover_rows.pop(conn_id, None)
+        pos = p_row.get_index() if p_row else -1
         if p_row:
-            p_row._conn = conn
-            p_row.set_title(conn['name'])
-            p_row.set_subtitle(self._conn_subtitle(conn))
+            self._conn_list.remove(p_row)
 
-        # Update manager row
-        m_row = self._conn_mgr_rows.get(conn_id)
+        m_row = self._conn_mgr_rows.pop(conn_id, None)
         if m_row:
-            m_row._conn = conn
-            m_row.set_title(conn['name'])
-            m_row.set_subtitle(self._conn_subtitle(conn))
-            m_row._ts_label.set_label(self._format_last_connected(conn.get('last_connected')))
+            self._mgr_list.remove(m_row)
+
+        self._add_connection_row(conn, position=pos)
 
         if self._active_conn_id == conn_id:
             self._set_active_conn(conn)
@@ -1305,7 +1307,7 @@ class TuskWindow(Adw.ApplicationWindow):
         # tag: prefix syntax
         if text.startswith('tag:'):
             tag_name = text[4:].strip()
-            return tag_name in conn.get('tags', [])
+            return tag_name in [t.lower() for t in conn.get('tags', [])]
         haystack = ' '.join([
             conn.get('name', ''),
             conn.get('host', ''),
