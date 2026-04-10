@@ -104,6 +104,21 @@ def get_active_project():
     return val if val and val != '(unset)' else None
 
 
+def list_projects():
+    """Return accessible GCP projects sorted by display name.
+
+    Each dict: {id: str, name: str}
+    Raises RuntimeError on failure.
+    """
+    projects = _gcloud(
+        'projects', 'list',
+        '--filter=lifecycleState:ACTIVE',
+        '--sort-by=name',
+    )
+    return [{'id': p['projectId'], 'name': p.get('name', p['projectId'])}
+            for p in (projects if isinstance(projects, list) else [])]
+
+
 def get_active_account():
     """Return the active gcloud account email, or None if not authenticated."""
     try:
@@ -207,6 +222,7 @@ def build_cloud_sql_conn(instance, project, fetch_cert=True):
         '_gcp_service': 'Cloud SQL',
         '_gcp_version': db_version,
         '_gcp_region': region,
+        '_gcp_project': project,
     }
     return conn
 
@@ -302,6 +318,7 @@ def build_alloydb_conn(cluster, instance, project, fetch_cert=True):
         '_gcp_service': 'AlloyDB',
         '_gcp_version': 'AlloyDB',
         '_gcp_region': region,
+        '_gcp_project': project,
     }
     return conn
 
