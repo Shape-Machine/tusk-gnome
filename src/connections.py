@@ -210,7 +210,11 @@ class ConnectionStore:
         self._save()
 
     def export_json(self, include_passwords=False):
-        """Return a JSON-serialisable dict of all connections and the tags registry."""
+        """Return a JSON-serialisable dict of all connections and the tags registry.
+
+        Raises KeyringUnavailableError if include_passwords=True and any keyring
+        lookup fails, so callers can surface the error to the user.
+        """
         conns = []
         for c in self._connections:
             entry = dict(c)
@@ -219,14 +223,14 @@ class ConnectionStore:
                     pwd = keyring.get_password(KEYRING_SERVICE, c['id']) or ''
                     if pwd:
                         entry['password'] = pwd
-                except Exception:
-                    pass
+                except Exception as e:
+                    raise KeyringUnavailableError(str(e)) from e
                 try:
                     ssh_pp = keyring.get_password(KEYRING_SERVICE, _ssh_key(c['id'])) or ''
                     if ssh_pp:
                         entry['ssh_passphrase'] = ssh_pp
-                except Exception:
-                    pass
+                except Exception as e:
+                    raise KeyringUnavailableError(str(e)) from e
             conns.append(entry)
         return {
             'schema_version': SCHEMA_VERSION,
@@ -248,7 +252,11 @@ class ConnectionStore:
         existing_names = {c['name'] for c in self._connections}
         added = 0
         skipped = 0
+        required = ('name', 'host', 'port', 'database', 'username')
         for conn in conns:
+            if any(not conn.get(f) for f in required):
+                skipped += 1
+                continue
             if conn.get('id') in existing_ids:
                 skipped += 1
                 continue

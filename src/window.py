@@ -1483,14 +1483,12 @@ class TuskWindow(Adw.ApplicationWindow):
         def _run():
             ts = datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
             try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(3)
-                sock.connect((conn['host'], int(conn['port'])))
-                sock.close()
+                with socket.create_connection((conn['host'], int(conn['port'])), timeout=3):
+                    pass
                 result = {'status': 'ok', 'msg': 'Reachable', 'ts': ts}
             except socket.timeout:
                 result = {'status': 'error', 'msg': 'Timed out', 'ts': ts}
-            except OSError as exc:
+            except (OSError, ValueError) as exc:
                 result = {'status': 'error', 'msg': str(exc), 'ts': ts}
             self._conn_health[conn_id] = result
             GLib.idle_add(self._update_health_dot, conn_id)
@@ -1541,13 +1539,12 @@ class TuskWindow(Adw.ApplicationWindow):
             if not password:
                 skipped_no_pwd += 1
                 continue
-            line = ':'.join([
-                _escape(conn['host']),
-                _escape(conn['port']),
-                '*',
-                _escape(conn['username']),
-                _escape(password),
-            ])
+            fields = [str(conn.get('host', '')), str(conn.get('port', '')),
+                      '*', str(conn.get('username', '')), password]
+            if any('\n' in v or '\r' in v for v in fields):
+                skipped_no_pwd += 1
+                continue
+            line = ':'.join(_escape(v) for v in fields)
             if line in new_lines:
                 skipped_dup += 1
                 continue
@@ -1598,7 +1595,11 @@ class TuskWindow(Adw.ApplicationWindow):
 
     def _on_export_connections_json(self):
         def _do_export(include_passwords):
-            data = self._store.export_json(include_passwords=include_passwords)
+            try:
+                data = self._store.export_json(include_passwords=include_passwords)
+            except KeyringUnavailableError as e:
+                self._show_toast(f'Export failed: keyring unavailable — {e}')
+                return
             file_dialog = Gtk.FileDialog()
             file_dialog.set_title('Export Connections')
             file_dialog.set_initial_name('connections.tusk-connections.json')
@@ -1631,6 +1632,9 @@ class TuskWindow(Adw.ApplicationWindow):
         import json as _json
         try:
             path = gfile.get_path()
+            if path is None:
+                self._show_toast('Export failed: only local files are supported.')
+                return
             tmp = path + '.tmp'
             with open(tmp, 'w', encoding='utf-8') as f:
                 _json.dump(data, f, indent=2)
@@ -1663,6 +1667,9 @@ class TuskWindow(Adw.ApplicationWindow):
             return
         try:
             path = gfile.get_path()
+            if path is None:
+                self._show_toast('Import failed: only local files are supported.')
+                return
             with open(path, encoding='utf-8') as f:
                 data = _json.load(f)
         except (OSError, ValueError) as e:
