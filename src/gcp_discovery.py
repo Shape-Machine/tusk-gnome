@@ -66,12 +66,17 @@ def _gcloud_value(*args, project=None):
         raise RuntimeError('gcloud timed out.')
     except FileNotFoundError:
         raise RuntimeError('gcloud not found on $PATH.')
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or f'gcloud exited with code {result.returncode}')
     return result.stdout.strip()
 
 
 def get_active_project():
     """Return the currently configured gcloud project, or None."""
-    val = _gcloud_value('config', 'get-value', 'project')
+    try:
+        val = _gcloud_value('config', 'get-value', 'project')
+    except RuntimeError:
+        return None
     return val if val and val != '(unset)' else None
 
 
@@ -98,19 +103,18 @@ def discover_cloud_sql(project):
     return instances if isinstance(instances, list) else []
 
 
-def fetch_cloud_sql_server_ca(instance_name, project):
-    """Fetch the server CA cert PEM for a Cloud SQL instance.
+def save_cloud_sql_server_ca(instance, project):
+    """Extract the server CA cert from the instance dict and write it to disk.
 
-    Writes the cert to CERT_DIR and returns the file path, or None on failure.
+    The cert is already present in the instances list response under
+    instance['serverCaCert']['cert'], so no extra gcloud call is needed.
+    Returns the file path, or None if the cert is missing/write fails.
     """
     try:
-        pem = _gcloud_value(
-            'sql', 'instances', 'describe', instance_name,
-            '--format=value(serverCaCert.cert)',
-            project=project,
-        )
+        pem = instance.get('serverCaCert', {}).get('cert', '')
         if not pem:
             return None
+        instance_name = instance.get('name', 'unknown')
         os.makedirs(CERT_DIR, exist_ok=True)
         cert_path = os.path.join(CERT_DIR, f'cloudsql-{project}-{instance_name}.pem')
         with open(cert_path, 'w') as f:
@@ -154,9 +158,7 @@ def build_cloud_sql_conn(instance, project, fetch_cert=True):
             host = ip['ipAddress']
             break
 
-    cert_path = None
-    if fetch_cert:
-        cert_path = fetch_cloud_sql_server_ca(name, project)
+    cert_path = save_cloud_sql_server_ca(instance, project) if fetch_cert else None
 
     tags = ['gcp']
     if region:
@@ -168,7 +170,7 @@ def build_cloud_sql_conn(instance, project, fetch_cert=True):
         'host': host,
         'port': 5432,
         'database': 'postgres',
-        'username': '',
+        'username': 'postgres',
         'cloud_provider': 'gcp-cloudsql',
         'cloud_instance_id': connection_name,
         'cloud_region': region,
@@ -245,8 +247,6 @@ def fetch_alloydb_server_ca(cluster_name, project):
 
 def _alloydb_has_public_ip(instance):
     """Return True if the AlloyDB instance has a public IP address."""
-    network_config = instance.get('networkConfig', {})
-    # If publicIpAddress is set and non-empty, there's a public endpoint
     return bool(instance.get('publicIpAddress'))
 
 
@@ -261,8 +261,6 @@ def build_alloydb_conn(cluster, instance, project, fetch_cert=True):
 
     # Public IP if available, else localhost (proxy)
     host = instance.get('publicIpAddress') or 'localhost'
-    if proxy_enabled:
-        host = 'localhost'
 
     # AlloyDB instance URI for Auth Proxy: projects/PROJECT/locations/REGION/clusters/CLUSTER/instances/INSTANCE
     instance_uri = instance.get('name', '')
@@ -281,7 +279,7 @@ def build_alloydb_conn(cluster, instance, project, fetch_cert=True):
         'host': host,
         'port': 5432,
         'database': 'postgres',
-        'username': '',
+        'username': 'postgres',
         'cloud_provider': 'gcp-alloydb',
         'cloud_instance_id': instance_uri,
         'cloud_region': region,

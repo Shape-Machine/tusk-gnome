@@ -7,6 +7,15 @@ import time
 from contextlib import contextmanager
 
 
+class ProxyNotFoundError(RuntimeError):
+    """Raised when a cloud proxy binary is required but not on $PATH."""
+    def __init__(self, binary):
+        self.binary = binary
+        super().__init__(
+            f'{binary} not found on $PATH — install it to connect to this instance.'
+        )
+
+
 def _free_port():
     with socket.socket() as s:
         s.bind(('127.0.0.1', 0))
@@ -63,8 +72,12 @@ def apply_conn_settings(db, conn):
     db.commit()
 
 
-def _psycopg_kwargs(conn, host, port, password=None):
-    """Build psycopg.connect keyword arguments from a connection profile."""
+def _psycopg_kwargs(conn, host, port, password=None, skip_ssl=False):
+    """Build psycopg.connect keyword arguments from a connection profile.
+
+    skip_ssl should be True when connecting through a cloud proxy — the proxy
+    handles SSL to Cloud SQL internally; the local psycopg→proxy leg is plain TCP.
+    """
     kwargs = dict(
         host=host,
         port=port,
@@ -73,12 +86,13 @@ def _psycopg_kwargs(conn, host, port, password=None):
         password=password if password is not None else conn.get('password', ''),
         connect_timeout=10,
     )
-    ssl_mode = conn.get('ssl_mode')
-    if ssl_mode and ssl_mode != 'prefer':
-        kwargs['sslmode'] = ssl_mode
-    ssl_root_cert = conn.get('ssl_root_cert')
-    if ssl_root_cert:
-        kwargs['sslrootcert'] = ssl_root_cert
+    if not skip_ssl:
+        ssl_mode = conn.get('ssl_mode')
+        if ssl_mode and ssl_mode != 'prefer':
+            kwargs['sslmode'] = ssl_mode
+        ssl_root_cert = conn.get('ssl_root_cert')
+        if ssl_root_cert:
+            kwargs['sslrootcert'] = ssl_root_cert
     return kwargs
 
 
@@ -105,7 +119,8 @@ def open_db(conn, autocommit=False):
         password = get_iam_token()
 
     with open_tunnel(conn) as (host, port), psycopg.connect(
-        **_psycopg_kwargs(conn, host, port, password=password)
+        **_psycopg_kwargs(conn, host, port, password=password,
+                          skip_ssl=conn.get('cloud_proxy_enabled', False))
     ) as db:
         apply_conn_settings(db, conn)
         if autocommit:
@@ -135,10 +150,7 @@ def _cloud_proxy_tunnel(conn):
         binary = 'cloud-sql-proxy'
 
     if not shutil.which(binary):
-        raise RuntimeError(
-            f'{binary} not found on $PATH. '
-            'Install it to connect to this instance.'
-        )
+        raise ProxyNotFoundError(binary)
 
     local_port = _free_port()
     cmd = [binary, instance_id, '--port', str(local_port)]
@@ -146,10 +158,49 @@ def _cloud_proxy_tunnel(conn):
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
         )
     except OSError as e:
         raise RuntimeError(f'Could not start {binary}: {e}')
+
+    # Capture stderr in a background thread so we don't miss lines emitted
+    # after startup (e.g. when proxy crashes mid-connection).
+    stderr_lines = []
+
+    def _capture_stderr():
+        try:
+            for raw in proc.stderr:
+                stderr_lines.append(raw.decode('utf-8', errors='replace').rstrip())
+        except Exception:
+            pass
+
+    stderr_thread = threading.Thread(target=_capture_stderr, daemon=True)
+    stderr_thread.start()
+
+    def _get_stderr():
+        stderr_thread.join(timeout=1)
+        return '\n'.join(stderr_lines).strip()
+
+    def _friendly_proxy_error(detail):
+        if 'default credentials' in detail or 'could not find default credentials' in detail:
+            return (
+                f'{binary} could not authenticate.\n\n'
+                'Run the following in a terminal, then retry:\n\n'
+                'gcloud auth application-default login\n\n'
+                'Note: this is separate from `gcloud auth login` — the proxy '
+                'uses Application Default Credentials (ADC).'
+            )
+        if 'NOT_AUTHORIZED' in detail or 'cloudsql.instances.connect' in detail or (
+            '403' in detail and 'forbidden' in detail.lower()
+        ):
+            return (
+                'Permission denied: your account does not have access to this Cloud SQL instance.\n\n'
+                'Ask a project owner to grant you the Cloud SQL Client role:\n\n'
+                'gcloud projects add-iam-policy-binding PROJECT \\\n'
+                '  --member="user:YOUR_EMAIL" \\\n'
+                '  --role="roles/cloudsql.client"'
+            )
+        return f'{binary} crashed.\n\n{detail}' if detail else f'{binary} crashed.'
 
     try:
         # Wait for the proxy to begin listening (up to 10 s)
@@ -160,13 +211,31 @@ def _cloud_proxy_tunnel(conn):
                     break
             except OSError:
                 if proc.poll() is not None:
-                    raise RuntimeError(f'{binary} exited unexpectedly during startup.')
+                    raise RuntimeError(_friendly_proxy_error(_get_stderr()))
                 time.sleep(0.2)
         else:
             proc.terminate()
-            raise RuntimeError(f'{binary} did not start listening within 10 seconds.')
-        yield '127.0.0.1', local_port
+            msg = f'{binary} did not start listening within 10 seconds.'
+            detail = _get_stderr()
+            if detail:
+                msg += f'\n\n{detail}'
+            raise RuntimeError(msg)
+        try:
+            yield '127.0.0.1', local_port
+        except Exception as exc:
+            # Terminate proxy now so the stderr pipe closes and we can read it.
+            proc.terminate()
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=1)
+            detail = _get_stderr()
+            if detail:
+                raise RuntimeError(_friendly_proxy_error(detail)) from exc
+            raise
     finally:
+        # No-op if already terminated above; cleans up on the success path.
         proc.terminate()
         try:
             proc.wait(timeout=5)

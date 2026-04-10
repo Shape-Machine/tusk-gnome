@@ -348,6 +348,8 @@ class TuskWindow(Adw.ApplicationWindow):
         add_btn.connect('clicked', self._on_add_connection)
         add_menu = Gio.Menu()
         add_menu.append('Import from .pgpass…', 'win.import-pgpass')
+        add_menu.append('Import connections…', 'win.import-connections-json')
+        add_menu.append('Import from GCP…', 'win.import-from-gcp')
         add_btn.set_menu_model(add_menu)
         header.pack_end(add_btn)
 
@@ -439,6 +441,8 @@ class TuskWindow(Adw.ApplicationWindow):
         self._browser.connect('edit-connection-requested', self._on_edit_connection_from_browser)
         self._browser.connect('copy-to-clipboard', self._on_copy_to_clipboard)
         self._browser.connect('server-activity-requested', lambda _b, conn: self._on_server_activity(conn))
+        self._browser.connect('proxy-not-found', self._on_proxy_not_found)
+        self._browser.connect('connection-failed', lambda _b: self._set_active_conn(None))
         sidebar_paned.set_start_child(self._browser)
 
         self._file_explorer = FileExplorer()
@@ -519,8 +523,6 @@ class TuskWindow(Adw.ApplicationWindow):
         overflow_menu.append('Check all connections', 'win.check-all-health')
         overflow_menu.append('Export all to .pgpass…', 'win.export-pgpass-bulk')
         overflow_menu.append('Export connections…', 'win.export-connections-json')
-        overflow_menu.append('Import connections…', 'win.import-connections-json')
-        overflow_menu.append('Import from GCP…', 'win.import-from-gcp')
         overflow_menu.append('Clean up stale…', 'win.cleanup-stale')
         overflow_btn = Gtk.MenuButton()
         overflow_btn.set_icon_name('view-more-symbolic')
@@ -529,10 +531,15 @@ class TuskWindow(Adw.ApplicationWindow):
         overflow_btn.add_css_class('flat')
         mgr_toolbar.append(overflow_btn)
 
-        mgr_add_btn = Gtk.Button(label='Add Connection')
+        mgr_add_btn = Adw.SplitButton(label='Add Connection')
         mgr_add_btn.add_css_class('suggested-action')
         mgr_add_btn.add_css_class('pill')
         mgr_add_btn.connect('clicked', self._on_add_connection)
+        mgr_add_menu = Gio.Menu()
+        mgr_add_menu.append('Import from .pgpass…', 'win.import-pgpass')
+        mgr_add_menu.append('Import connections…', 'win.import-connections-json')
+        mgr_add_menu.append('Import from GCP…', 'win.import-from-gcp')
+        mgr_add_btn.set_menu_model(mgr_add_menu)
         mgr_toolbar.append(mgr_add_btn)
 
         mgr_box.append(mgr_toolbar)
@@ -1178,7 +1185,7 @@ class TuskWindow(Adw.ApplicationWindow):
             self._mgr_list.invalidate_sort()
 
         self._set_active_conn(conn)
-        self._browser.load(conn)
+        self._browser.load(conn, initial_connect=True)
 
     def _on_database_switched(self, _browser, conn, new_dbname):
         # Close all table and function tabs from the current database before switching
@@ -1196,7 +1203,7 @@ class TuskWindow(Adw.ApplicationWindow):
 
         new_conn = {**conn, 'database': new_dbname}
         self._set_active_conn(new_conn)
-        self._browser.load(new_conn)
+        self._browser.load(new_conn, initial_connect=True)
 
     def _on_role_attrs_loaded(self, _browser, conn, attrs):
         """Update the role badge on the matching connection row and dropdown."""
@@ -1291,7 +1298,7 @@ class TuskWindow(Adw.ApplicationWindow):
         # Switch active connection to postgres fallback and reload browser
         new_conn = {**conn, 'database': 'postgres'}
         self._set_active_conn(new_conn)
-        self._browser.load(new_conn)
+        self._browser.load(new_conn, initial_connect=True)
 
     def _on_disconnect(self, row):
         if self._active_conn_id == row._conn['id']:
@@ -1702,6 +1709,31 @@ class TuskWindow(Adw.ApplicationWindow):
         if skipped:
             msg += f' {skipped} skipped (already present).'
         self._show_toast(msg)
+
+    def _on_proxy_not_found(self, _browser, binary):
+        _INSTALL = {
+            'cloud-sql-proxy': (
+                'Cloud SQL Auth Proxy',
+                'https://cloud.google.com/sql/docs/postgres/sql-proxy#install',
+            ),
+            'alloydb-auth-proxy': (
+                'AlloyDB Auth Proxy',
+                'https://cloud.google.com/alloydb/docs/auth-proxy/connect#install-proxy',
+            ),
+        }
+        name, install_url = _INSTALL.get(binary, (binary, f'https://cloud.google.com/'))
+        dialog = Adw.AlertDialog(
+            heading=f'{name} Required',
+            body=(
+                f'This connection uses a private IP and requires {name} to create a '
+                f'secure tunnel. Install it and make sure it is on your $PATH.\n\n'
+                f'See the installation guide for the latest download:\n{install_url}'
+            ),
+        )
+        dialog.add_response('ok', 'OK')
+        dialog.set_default_response('ok')
+        dialog.set_close_response('ok')
+        dialog.present(self)
 
     def _on_import_from_gcp(self):
         existing_instance_ids = {
