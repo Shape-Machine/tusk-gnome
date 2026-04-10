@@ -207,10 +207,11 @@ class ConnectionDialog(Adw.Dialog):
         left_col.append(auth_group)
 
         # ── Tags ─────────────────────────────────────────────────────────────
-        tags_group = Adw.PreferencesGroup(title='Tags')
         self._tag_checks = {}  # name → Gtk.CheckButton
-        if self._store:
-            registry = self._store.get_tags_registry()
+        registry = self._store.get_tags_registry() if self._store else {}
+        tags_group = None
+        if registry:
+            tags_group = Adw.PreferencesGroup(title='Tags')
             for tag_name in sorted(registry):
                 meta = registry[tag_name]
                 row = Adw.ActionRow(title=tag_name)
@@ -238,7 +239,8 @@ class ConnectionDialog(Adw.Dialog):
         right_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
         right_col.set_hexpand(True)
         right_col.append(options_group)
-        right_col.append(tags_group)
+        if tags_group:
+            right_col.append(tags_group)
         right_col.append(ssh_group)
 
         two_col = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=20)
