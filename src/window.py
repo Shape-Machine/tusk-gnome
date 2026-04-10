@@ -1,3 +1,4 @@
+import datetime
 import os
 import threading
 
@@ -33,6 +34,11 @@ class TuskWindow(Adw.ApplicationWindow):
         self._store = ConnectionStore()
         self._active_conn_id = None
         self._active_conn = None       # full conn dict with password
+        self._conn_search = ''
+        self._conn_sort = prefs.get('conn_sort', 'manual')
+        self._active_tag_filters = set()
+        self._conn_mgr_rows = {}       # conn_id → manager list row
+        self._conn_popover_rows = {}   # conn_id → popover list row
         self._sidebar_css = Gtk.CssProvider()
         self._main_css = Gtk.CssProvider()
         self._static_css = Gtk.CssProvider()
@@ -73,6 +79,11 @@ class TuskWindow(Adw.ApplicationWindow):
         add('next-tab',       lambda *_: self._tab_view.select_next_page())
         add('prev-tab',       lambda *_: self._tab_view.select_previous_page())
         add('import-pgpass',  lambda *_: self._on_import_pgpass())
+        add('show-connection-manager', lambda *_: self._show_connection_manager())
+        for _key in ('name', 'last-connected', 'manual'):
+            _a = Gio.SimpleAction.new(f'conn-sort-{_key}', None)
+            _a.connect('activate', lambda _act, _par, k=_key: self._on_sort_changed(k))
+            self.add_action(_a)
         self._refresh_action = Gio.SimpleAction.new('refresh-tab', None)
         self._refresh_action.connect('activate', lambda *_: self._refresh_current_tab())
         self._refresh_action.set_enabled(False)
@@ -215,6 +226,18 @@ class TuskWindow(Adw.ApplicationWindow):
         <child>
           <object class="GtkShortcutsGroup">
             <property name="title">Navigation</property>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Connection Manager</property>
+                <property name="accelerator">&lt;ctrl&gt;Home</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Search Connections</property>
+                <property name="accelerator">&lt;ctrl&gt;f</property>
+              </object>
+            </child>
             <child>
               <object class="GtkShortcutsShortcut">
                 <property name="title">Quick Open</property>
@@ -423,12 +446,10 @@ class TuskWindow(Adw.ApplicationWindow):
         self._main_header.set_title_widget(self._header_label)
 
         menu = Gio.Menu()
-
         util_section = Gio.Menu()
         util_section.append('Preferences', 'app.preferences')
         util_section.append('Keyboard Shortcuts', 'win.show-help-overlay')
         menu.append_section(None, util_section)
-
         app_section = Gio.Menu()
         app_section.append('Sponsor Tusk', 'app.sponsor')
         app_section.append('About Tusk', 'app.about')
@@ -441,23 +462,79 @@ class TuskWindow(Adw.ApplicationWindow):
 
         main_box.append(self._main_header)
 
-        # Content: empty state or tab view
         self._main_stack = Gtk.Stack()
         self._main_stack.set_vexpand(True)
 
-        empty = Adw.StatusPage()
-        empty.set_title('Nothing Open')
-        empty.set_description('Select a table from the browser or open a .sql file')
-        empty.set_icon_name('xyz.shapemachine.tusk-gnome')
+        # ── Connection manager (replaces old 'welcome' and 'empty' pages) ───────
+        mgr_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
 
-        sponsor_btn = Gtk.Button(label='Sponsor Tusk')
-        sponsor_btn.set_action_name('app.sponsor')
-        sponsor_btn.add_css_class('flat')
-        sponsor_btn.set_halign(Gtk.Align.CENTER)
-        empty.set_child(sponsor_btn)
+        # Toolbar: sort button (left) + add button (right)
+        mgr_toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        mgr_toolbar.set_margin_top(MARGIN_SM)
+        mgr_toolbar.set_margin_bottom(MARGIN_XS)
+        mgr_toolbar.set_margin_start(MARGIN_MD)
+        mgr_toolbar.set_margin_end(MARGIN_MD)
 
-        self._main_stack.add_named(empty, 'empty')
+        sort_menu = Gio.Menu()
+        sort_menu.append('Name (A–Z)', 'win.conn-sort-name')
+        sort_menu.append('Last Connected', 'win.conn-sort-last-connected')
+        sort_menu.append('Manual', 'win.conn-sort-manual')
+        self._sort_btn = Gtk.MenuButton()
+        self._sort_btn.set_icon_name('view-sort-ascending-symbolic')
+        self._sort_btn.set_tooltip_text('Sort connections')
+        self._sort_btn.set_menu_model(sort_menu)
+        self._sort_btn.add_css_class('flat')
+        mgr_toolbar.append(self._sort_btn)
 
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        mgr_toolbar.append(spacer)
+
+        mgr_add_btn = Gtk.Button(label='Add Connection')
+        mgr_add_btn.add_css_class('suggested-action')
+        mgr_add_btn.add_css_class('pill')
+        mgr_add_btn.connect('clicked', self._on_add_connection)
+        mgr_toolbar.append(mgr_add_btn)
+
+        mgr_box.append(mgr_toolbar)
+
+        # Search entry (Ctrl+F focuses it)
+        self._mgr_search = Gtk.SearchEntry()
+        self._mgr_search.set_placeholder_text('Search by name, host, database, or tag:…')
+        self._mgr_search.set_margin_start(MARGIN_MD)
+        self._mgr_search.set_margin_end(MARGIN_MD)
+        self._mgr_search.set_margin_bottom(MARGIN_XS)
+        self._mgr_search.connect('search-changed', self._on_mgr_search_changed)
+        mgr_box.append(self._mgr_search)
+
+        # Tag filter chip strip (hidden until tags exist)
+        tag_scroll = Gtk.ScrolledWindow()
+        tag_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        tag_scroll.set_margin_start(MARGIN_MD)
+        tag_scroll.set_margin_end(MARGIN_MD)
+        tag_scroll.set_margin_bottom(MARGIN_XS)
+        self._mgr_tag_strip = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        tag_scroll.set_child(self._mgr_tag_strip)
+        self._mgr_tag_scroll = tag_scroll
+        tag_scroll.set_visible(False)
+        mgr_box.append(tag_scroll)
+
+        # Connection list
+        self._mgr_list = Gtk.ListBox()
+        self._mgr_list.add_css_class('navigation-sidebar')
+        self._mgr_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._mgr_list.connect('row-activated', self._on_connection_activated)
+        self._mgr_list.set_filter_func(self._mgr_filter_row)
+        self._mgr_list.set_sort_func(self._mgr_sort_rows)
+
+        mgr_scroll = Gtk.ScrolledWindow()
+        mgr_scroll.set_vexpand(True)
+        mgr_scroll.set_child(self._mgr_list)
+        mgr_box.append(mgr_scroll)
+
+        self._main_stack.add_named(mgr_box, 'manager')
+
+        # ── Tab view ─────────────────────────────────────────────────────────────
         tabs_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self._tab_bar = Adw.TabBar()
         self._tab_view = Adw.TabView()
@@ -469,50 +546,41 @@ class TuskWindow(Adw.ApplicationWindow):
         tabs_box.append(self._tab_view)
         self._main_stack.add_named(tabs_box, 'tabs')
 
-        # Welcome state: shown when no connections exist yet
-        welcome = Adw.StatusPage()
-        welcome.set_title('No connections yet')
-        welcome.set_description('Connect to a PostgreSQL database to get started.')
-        welcome.set_icon_name('xyz.shapemachine.tusk-gnome')
-
-        welcome_btn = Gtk.Button(label='Add Connection')
-        welcome_btn.add_css_class('suggested-action')
-        welcome_btn.add_css_class('pill')
-        welcome_btn.set_halign(Gtk.Align.CENTER)
-        welcome_btn.connect('clicked', self._on_add_connection)
-
-        welcome_hint = Gtk.Label(
-            label="You'll need: hostname, port (default 5432), database name, and credentials."
-        )
-        welcome_hint.add_css_class('dim-label')
-        welcome_hint.set_wrap(True)
-        welcome_hint.set_halign(Gtk.Align.CENTER)
-        welcome_hint.set_margin_top(8)
-
-        welcome_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        welcome_box.set_halign(Gtk.Align.CENTER)
-        welcome_box.append(welcome_btn)
-        welcome_box.append(welcome_hint)
-        welcome.set_child(welcome_box)
-
-        self._main_stack.add_named(welcome, 'welcome')
-
-        self._main_stack.set_visible_child_name('empty')
+        self._main_stack.set_visible_child_name('manager')
         main_box.append(self._main_stack)
         return main_box
 
     # ── Connections ───────────────────────────────────────────────────────────
 
     def _load_connections(self):
-        connections = list(self._store.list())
-        for conn in connections:
+        for conn in self._store.list():
             self._add_connection_row(conn)
-        if not connections:
-            self._main_stack.set_visible_child_name('welcome')
+        self._refresh_tag_strip()
 
     @staticmethod
     def _conn_subtitle(conn):
         return f"{conn['host']}:{conn['port']}/{conn['database']}"
+
+    @staticmethod
+    def _format_last_connected(ts):
+        if not ts:
+            return 'Never connected'
+        try:
+            dt = datetime.datetime.fromisoformat(ts.rstrip('Z'))
+            delta = datetime.datetime.utcnow() - dt
+            secs = int(delta.total_seconds())
+            if secs < 60:
+                return 'Just now'
+            if secs < 3600:
+                m = secs // 60
+                return f'{m} minute{"s" if m != 1 else ""} ago'
+            if secs < 86400:
+                h = secs // 3600
+                return f'{h} hour{"s" if h != 1 else ""} ago'
+            d = secs // 86400
+            return f'{d} day{"s" if d != 1 else ""} ago'
+        except (ValueError, TypeError):
+            return 'Never connected'
 
     def _add_connection_row(self, conn, position=-1):
         row = Adw.ActionRow()
@@ -580,6 +648,82 @@ class TuskWindow(Adw.ApplicationWindow):
             self._conn_list.append(row)
         else:
             self._conn_list.insert(row, position)
+        self._conn_popover_rows[conn['id']] = row
+        self._add_mgr_row(conn, position)
+        return row
+
+    def _add_mgr_row(self, conn, position=-1):
+        row = Adw.ActionRow()
+        row.set_title(conn['name'])
+        row.set_subtitle(self._conn_subtitle(conn))
+        row.set_icon_name('network-server-symbolic')
+        row.set_activatable(True)
+        row._conn = conn
+
+        # Last connected label
+        ts_text = self._format_last_connected(conn.get('last_connected'))
+        ts_lbl = Gtk.Label(label=ts_text)
+        ts_lbl.add_css_class('dim-label')
+        ts_lbl.set_valign(Gtk.Align.CENTER)
+        if conn.get('last_connected'):
+            try:
+                dt = datetime.datetime.fromisoformat(conn['last_connected'].rstrip('Z'))
+                ts_lbl.set_tooltip_text(dt.strftime('%Y-%m-%d %H:%M UTC'))
+            except (ValueError, TypeError):
+                pass
+        row.add_suffix(ts_lbl)
+        row._ts_label = ts_lbl
+
+        # Tag chips (colored text)
+        tags_registry = self._store.get_tags_registry()
+        for tag_name in conn.get('tags', []):
+            color = tags_registry.get(tag_name, {}).get('color', '#888888')
+            chip = Gtk.Label()
+            chip.set_markup(
+                f'<span foreground="{color}" size="small">'
+                f'{GLib.markup_escape_text(tag_name)}</span>'
+            )
+            chip.set_valign(Gtk.Align.CENTER)
+            row.add_suffix(chip)
+
+        if conn.get('read_only'):
+            lock = Gtk.Image.new_from_icon_name('changes-prevent-symbolic')
+            lock.set_tooltip_text('Read-only connection')
+            lock.set_valign(Gtk.Align.CENTER)
+            lock.add_css_class('dim-label')
+            row.add_suffix(lock)
+
+        # Context menu
+        menu = Gio.Menu()
+        menu.append('Edit', 'mgr.edit')
+        menu.append('Duplicate', 'mgr.duplicate')
+        menu.append('Copy as URI', 'mgr.copy-uri')
+        menu.append('Delete', 'mgr.delete')
+        menu_btn = Gtk.MenuButton()
+        menu_btn.set_icon_name('view-more-symbolic')
+        menu_btn.set_menu_model(menu)
+        menu_btn.add_css_class('flat')
+        menu_btn.set_valign(Gtk.Align.CENTER)
+        menu_btn.set_tooltip_text('Connection options')
+        row.add_suffix(menu_btn)
+
+        ag = Gio.SimpleActionGroup()
+        for name, cb in [
+            ('edit',      lambda _a, _p, r=row: self._on_edit_connection(r)),
+            ('duplicate', lambda _a, _p, r=row: self._on_duplicate_connection(r)),
+            ('copy-uri',  lambda _a, _p, r=row: self._on_copy_as_uri(r)),
+            ('delete',    lambda _a, _p, r=row: self._on_delete_connection(r)),
+        ]:
+            a = Gio.SimpleAction.new(name, None)
+            a.connect('activate', cb)
+            ag.add_action(a)
+        row.insert_action_group('mgr', ag)
+
+        if position == -1:
+            self._mgr_list.append(row)
+        else:
+            self._mgr_list.insert(row, position)
+        self._conn_mgr_rows[conn['id']] = row
         return row
 
     def _on_add_connection(self, _btn):
@@ -762,8 +906,6 @@ class TuskWindow(Adw.ApplicationWindow):
         dlg.present(self)
 
     def _on_pgpass_entries_selected(self, _dlg, entries):
-        if self._main_stack.get_visible_child_name() == 'welcome':
-            self._main_stack.set_visible_child_name('empty')
         for entry in entries:
             conn = {
                 'name': (
@@ -799,8 +941,6 @@ class TuskWindow(Adw.ApplicationWindow):
         except KeyringUnavailableError as e:
             self._show_keyring_error(str(e))
             return
-        if self._main_stack.get_visible_child_name() == 'welcome':
-            self._main_stack.set_visible_child_name('empty')
         self._add_connection_row(conn)
 
     def _on_edit_connection(self, row):
@@ -842,10 +982,24 @@ class TuskWindow(Adw.ApplicationWindow):
         except KeyringUnavailableError as e:
             self._show_keyring_error(str(e))
             return
-        old_row._conn = conn
-        old_row.set_title(conn['name'])
-        old_row.set_subtitle(self._conn_subtitle(conn))
-        if self._active_conn_id == conn['id']:
+        conn_id = conn['id']
+
+        # Update popover row
+        p_row = self._conn_popover_rows.get(conn_id)
+        if p_row:
+            p_row._conn = conn
+            p_row.set_title(conn['name'])
+            p_row.set_subtitle(self._conn_subtitle(conn))
+
+        # Update manager row
+        m_row = self._conn_mgr_rows.get(conn_id)
+        if m_row:
+            m_row._conn = conn
+            m_row.set_title(conn['name'])
+            m_row.set_subtitle(self._conn_subtitle(conn))
+            m_row._ts_label.set_label(self._format_last_connected(conn.get('last_connected')))
+
+        if self._active_conn_id == conn_id:
             self._set_active_conn(conn)
             self._browser.clear()
 
@@ -869,17 +1023,24 @@ class TuskWindow(Adw.ApplicationWindow):
         if response != 'delete':
             return
         conn = row._conn
+        conn_id = conn['id']
         try:
-            self._store.remove(conn['id'])
+            self._store.remove(conn_id)
         except KeyringUnavailableError as e:
             self._show_keyring_error(str(e))
             return
-        self._conn_list.remove(row)
-        if self._active_conn_id == conn['id']:
+
+        p_row = self._conn_popover_rows.pop(conn_id, None)
+        if p_row:
+            self._conn_list.remove(p_row)
+
+        m_row = self._conn_mgr_rows.pop(conn_id, None)
+        if m_row:
+            self._mgr_list.remove(m_row)
+
+        if self._active_conn_id == conn_id:
             self._set_active_conn(None)
             self._browser.clear()
-        if self._conn_list.get_first_child() is None:
-            self._main_stack.set_visible_child_name('welcome')
 
     def _conn_with_password(self, conn):
         return {
@@ -895,6 +1056,28 @@ class TuskWindow(Adw.ApplicationWindow):
         except KeyringUnavailableError as e:
             self._show_keyring_error(str(e))
             return
+
+        # Record last connected timestamp on both row copies
+        now_ts = datetime.datetime.utcnow().isoformat() + 'Z'
+        conn_id = row._conn['id']
+        row._conn['last_connected'] = now_ts
+        mgr_row = self._conn_mgr_rows.get(conn_id)
+        if mgr_row:
+            mgr_row._conn['last_connected'] = now_ts
+            mgr_row._ts_label.set_label(self._format_last_connected(now_ts))
+            try:
+                mgr_row._ts_label.set_tooltip_text(
+                    datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
+                )
+            except Exception:
+                pass
+        try:
+            self._store.update(row._conn)
+        except KeyringUnavailableError:
+            pass  # non-fatal — don't block the connection
+        if self._conn_sort == 'last-connected':
+            self._mgr_list.invalidate_sort()
+
         self._set_active_conn(conn)
         self._browser.load(conn)
 
@@ -1058,6 +1241,80 @@ class TuskWindow(Adw.ApplicationWindow):
             widget = pages.get_item(i).get_child()
             if isinstance(widget, SqlEditor):
                 widget.set_connection(conn)
+
+    # ── Connection manager helpers ────────────────────────────────────────────
+
+    def _show_connection_manager(self):
+        self._main_stack.set_visible_child_name('manager')
+        self._mgr_search.grab_focus()
+
+    def _on_mgr_search_changed(self, entry):
+        self._conn_search = entry.get_text()
+        self._mgr_list.invalidate_filter()
+
+    def _on_sort_changed(self, key):
+        self._conn_sort = key
+        prefs.put('conn_sort', key)
+        self._mgr_list.invalidate_sort()
+
+    def _mgr_filter_row(self, row):
+        if not hasattr(row, '_conn'):
+            return True
+        conn = row._conn
+        text = self._conn_search.lower().strip()
+        # Tag filter (AND with text search)
+        if self._active_tag_filters:
+            conn_tags = set(conn.get('tags', []))
+            if not (conn_tags & self._active_tag_filters):
+                return False
+        if not text:
+            return True
+        # tag: prefix syntax
+        if text.startswith('tag:'):
+            tag_name = text[4:].strip()
+            return tag_name in conn.get('tags', [])
+        haystack = ' '.join([
+            conn.get('name', ''),
+            conn.get('host', ''),
+            conn.get('database', ''),
+        ]).lower()
+        return text in haystack
+
+    def _mgr_sort_rows(self, a, b):
+        if not hasattr(a, '_conn') or not hasattr(b, '_conn'):
+            return 0
+        ca, cb = a._conn, b._conn
+        if self._conn_sort == 'name':
+            na, nb = ca.get('name', '').lower(), cb.get('name', '').lower()
+            return -1 if na < nb else (1 if na > nb else 0)
+        if self._conn_sort == 'last-connected':
+            ta = ca.get('last_connected') or ''
+            tb = cb.get('last_connected') or ''
+            return -1 if ta > tb else (1 if ta < tb else 0)
+        return 0  # manual: preserve insertion order
+
+    def _refresh_tag_strip(self):
+        while (child := self._mgr_tag_strip.get_first_child()):
+            self._mgr_tag_strip.remove(child)
+        tags = self._store.get_tags_registry()
+        if not tags:
+            self._mgr_tag_scroll.set_visible(False)
+            return
+        self._mgr_tag_scroll.set_visible(True)
+        for tag_name in sorted(tags):
+            btn = Gtk.ToggleButton(label=tag_name)
+            btn.add_css_class('flat')
+            btn.add_css_class('pill')
+            btn.set_active(tag_name in self._active_tag_filters)
+            btn.connect('toggled', self._on_tag_filter_toggled, tag_name)
+            self._mgr_tag_strip.append(btn)
+
+    def _on_tag_filter_toggled(self, btn, tag_name):
+        if btn.get_active():
+            self._active_tag_filters.add(tag_name)
+        else:
+            self._active_tag_filters.discard(tag_name)
+        self._mgr_list.invalidate_filter()
 
     # ── Table / file tabs ─────────────────────────────────────────────────────
 
@@ -1289,7 +1546,7 @@ class TuskWindow(Adw.ApplicationWindow):
     def _check_tabs_empty(self):
         if self._tab_view.get_n_pages() == 0:
             self._header_label.set_label('Tusk')
-            self._main_stack.set_visible_child_name('empty')
+            self._main_stack.set_visible_child_name('manager')
 
     def _on_ddl_executed(self):
         if self._active_conn:
