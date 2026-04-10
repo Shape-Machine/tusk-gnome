@@ -14,6 +14,7 @@ from gi.repository import Gtk, Adw, Gio, GLib, GObject, Gdk, Pango
 import prefs
 from connections import ConnectionStore, KeyringUnavailableError
 from connection_dialog import ConnectionDialog
+from gcp_discovery_dialog import GcpDiscoveryDialog
 from style import MARGIN_XS, MARGIN_SM, MARGIN_MD
 from db_browser import DbBrowser
 from file_explorer import FileExplorer
@@ -101,6 +102,7 @@ class TuskWindow(Adw.ApplicationWindow):
         add('export-pgpass-bulk',         lambda *_: self._on_export_pgpass_bulk())
         add('export-connections-json',    lambda *_: self._on_export_connections_json())
         add('import-connections-json',    lambda *_: self._on_import_connections_json())
+        add('import-from-gcp',           lambda *_: self._on_import_from_gcp())
         add('cleanup-stale',              lambda *_: self._on_cleanup_stale())
         for _key in ('name', 'last-connected', 'manual'):
             _a = Gio.SimpleAction.new(f'conn-sort-{_key}', None)
@@ -518,6 +520,7 @@ class TuskWindow(Adw.ApplicationWindow):
         overflow_menu.append('Export all to .pgpass…', 'win.export-pgpass-bulk')
         overflow_menu.append('Export connections…', 'win.export-connections-json')
         overflow_menu.append('Import connections…', 'win.import-connections-json')
+        overflow_menu.append('Import from GCP…', 'win.import-from-gcp')
         overflow_menu.append('Clean up stale…', 'win.cleanup-stale')
         overflow_btn = Gtk.MenuButton()
         overflow_btn.set_icon_name('view-more-symbolic')
@@ -1698,6 +1701,34 @@ class TuskWindow(Adw.ApplicationWindow):
         msg = f'{added} connection{"s" if added != 1 else ""} imported.'
         if skipped:
             msg += f' {skipped} skipped (already present).'
+        self._show_toast(msg)
+
+    def _on_import_from_gcp(self):
+        existing_instance_ids = {
+            c.get('cloud_instance_id')
+            for c in self._store.list()
+            if c.get('cloud_instance_id')
+        }
+        dlg = GcpDiscoveryDialog(existing_instance_ids=existing_instance_ids)
+        dlg.connect('import-confirmed', self._on_gcp_import_confirmed)
+        dlg.present(self)
+
+    def _on_gcp_import_confirmed(self, _dlg, conns):
+        # Build the tags registry for GCP tags that may not exist yet
+        tags_registry = {}
+        for conn in conns:
+            for tag in conn.get('tags', []):
+                tags_registry.setdefault(tag, {'color': '#4285F4', 'warn_on_connect': False})
+        added, skipped = self._store.bulk_import(conns, tags_registry)
+        existing_ids = set(self._conn_mgr_rows.keys())
+        tags_reg = self._store.get_tags_registry()
+        for conn in self._store.list():
+            if conn['id'] not in existing_ids:
+                self._add_connection_row(conn, tags_registry=tags_reg)
+        self._refresh_tag_strip()
+        msg = f'{added} connection{"s" if added != 1 else ""} imported from GCP.'
+        if skipped:
+            msg += f' {skipped} skipped.'
         self._show_toast(msg)
 
     def _on_cleanup_stale(self):

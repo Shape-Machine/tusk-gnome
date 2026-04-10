@@ -1,6 +1,9 @@
 import select
+import shutil
 import socket
+import subprocess
 import threading
+import time
 from contextlib import contextmanager
 
 
@@ -60,6 +63,25 @@ def apply_conn_settings(db, conn):
     db.commit()
 
 
+def _psycopg_kwargs(conn, host, port, password=None):
+    """Build psycopg.connect keyword arguments from a connection profile."""
+    kwargs = dict(
+        host=host,
+        port=port,
+        dbname=conn['database'],
+        user=conn['username'],
+        password=password if password is not None else conn.get('password', ''),
+        connect_timeout=10,
+    )
+    ssl_mode = conn.get('ssl_mode')
+    if ssl_mode and ssl_mode != 'prefer':
+        kwargs['sslmode'] = ssl_mode
+    ssl_root_cert = conn.get('ssl_root_cert')
+    if ssl_root_cert:
+        kwargs['sslrootcert'] = ssl_root_cert
+    return kwargs
+
+
 @contextmanager
 def open_db(conn, autocommit=False):
     """Open a psycopg connection via tunnel with session settings applied.
@@ -70,15 +92,20 @@ def open_db(conn, autocommit=False):
 
     Pass autocommit=True for DDL that must run outside a transaction block,
     e.g. CREATE/DROP INDEX CONCURRENTLY.
+
+    Handles cloud_auth_mode='iam': fetches a fresh gcloud access token and
+    uses it as the PostgreSQL password.
     """
     import psycopg
+
+    # Resolve password (IAM token or stored password)
+    password = conn.get('password', '')
+    if conn.get('cloud_auth_mode') == 'iam':
+        from gcp_discovery import get_iam_token
+        password = get_iam_token()
+
     with open_tunnel(conn) as (host, port), psycopg.connect(
-        host=host,
-        port=port,
-        dbname=conn['database'],
-        user=conn['username'],
-        password=conn['password'],
-        connect_timeout=10,
+        **_psycopg_kwargs(conn, host, port, password=password)
     ) as db:
         apply_conn_settings(db, conn)
         if autocommit:
@@ -87,12 +114,79 @@ def open_db(conn, autocommit=False):
 
 
 @contextmanager
+def _cloud_proxy_tunnel(conn):
+    """Launch cloud-sql-proxy or alloydb-auth-proxy and yield (host, local_port).
+
+    Selects the proxy binary based on cloud_provider:
+      - 'gcp-cloudsql'  → cloud-sql-proxy  <instance_id> --port <port>
+      - 'gcp-alloydb'   → alloydb-auth-proxy <instance_uri> --port <port>
+
+    Waits up to 10 s for the proxy to accept TCP connections, then yields.
+    Terminates the proxy subprocess on context exit.
+    """
+    provider = conn.get('cloud_provider', '')
+    instance_id = conn.get('cloud_instance_id', '')
+    if not instance_id:
+        raise RuntimeError('cloud_instance_id is required for cloud proxy connections.')
+
+    if provider == 'gcp-alloydb':
+        binary = 'alloydb-auth-proxy'
+    else:
+        binary = 'cloud-sql-proxy'
+
+    if not shutil.which(binary):
+        raise RuntimeError(
+            f'{binary} not found on $PATH. '
+            'Install it to connect to this instance.'
+        )
+
+    local_port = _free_port()
+    cmd = [binary, instance_id, '--port', str(local_port)]
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError as e:
+        raise RuntimeError(f'Could not start {binary}: {e}')
+
+    try:
+        # Wait for the proxy to begin listening (up to 10 s)
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            try:
+                with socket.create_connection(('127.0.0.1', local_port), timeout=0.5):
+                    break
+            except OSError:
+                if proc.poll() is not None:
+                    raise RuntimeError(f'{binary} exited unexpectedly during startup.')
+                time.sleep(0.2)
+        else:
+            proc.terminate()
+            raise RuntimeError(f'{binary} did not start listening within 10 seconds.')
+        yield '127.0.0.1', local_port
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
+@contextmanager
 def open_tunnel(conn):
     """
     Yields (host, port) to connect Postgres to.
-    Opens an SSH tunnel when conn['ssh_enabled'] is True,
-    otherwise passes the original host/port straight through.
+    - SSH tunnel when conn['ssh_enabled'] is True
+    - Cloud proxy when conn['cloud_proxy_enabled'] is True
+    - Direct otherwise
     """
+    if conn.get('cloud_proxy_enabled'):
+        with _cloud_proxy_tunnel(conn) as (host, port):
+            yield host, port
+        return
+
     if not conn.get('ssh_enabled'):
         yield conn['host'], conn['port']
         return
