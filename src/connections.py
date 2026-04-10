@@ -127,6 +127,8 @@ class ConnectionStore:
         """
         if old_name not in self._tags_registry or old_name == new_name:
             return
+        if new_name in self._tags_registry:
+            return
         meta = self._tags_registry.pop(old_name)
         self._tags_registry[new_name] = meta
         for i, c in enumerate(self._connections):
