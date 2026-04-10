@@ -18,6 +18,7 @@ import prefs
 from connections import ConnectionStore, KeyringUnavailableError
 from connection_dialog import ConnectionDialog
 from gcp_discovery_dialog import GcpDiscoveryDialog
+from aws_discovery_dialog import AwsDiscoveryDialog
 from style import MARGIN_XS, MARGIN_SM, MARGIN_MD
 from db_browser import DbBrowser
 from file_explorer import FileExplorer
@@ -108,6 +109,7 @@ class TuskWindow(Adw.ApplicationWindow):
         add('export-connections-json',    lambda *_: self._on_export_connections_json())
         add('import-connections-json',    lambda *_: self._on_import_connections_json())
         add('import-from-gcp',           lambda *_: self._on_import_from_gcp())
+        add('import-from-aws',           lambda *_: self._on_import_from_aws())
         add('cleanup-stale',              lambda *_: self._on_cleanup_stale())
         for _key in ('name', 'last-connected', 'manual'):
             _a = Gio.SimpleAction.new(f'conn-sort-{_key}', None)
@@ -355,6 +357,7 @@ class TuskWindow(Adw.ApplicationWindow):
         add_menu.append('Import from .pgpass…', 'win.import-pgpass')
         add_menu.append('Import connections…', 'win.import-connections-json')
         add_menu.append('Import from GCP…', 'win.import-from-gcp')
+        add_menu.append('Import from AWS…', 'win.import-from-aws')
         add_btn.set_menu_model(add_menu)
         header.pack_end(add_btn)
 
@@ -523,6 +526,7 @@ class TuskWindow(Adw.ApplicationWindow):
         mgr_add_menu.append('Import from .pgpass…', 'win.import-pgpass')
         mgr_add_menu.append('Import connections…', 'win.import-connections-json')
         mgr_add_menu.append('Import from GCP…', 'win.import-from-gcp')
+        mgr_add_menu.append('Import from AWS…', 'win.import-from-aws')
         mgr_add_btn.set_menu_model(mgr_add_menu)
         mgr_toolbar.append(mgr_add_btn)
 
@@ -753,6 +757,25 @@ class TuskWindow(Adw.ApplicationWindow):
         role_badge.set_valign(Gtk.Align.CENTER)
         row.add_suffix(role_badge)
         row._role_badge = role_badge
+
+        # Writer/reader toggle chip — shown only for Aurora multi-endpoint profiles
+        if conn.get('secondary_endpoint'):
+            ep_btn = Gtk.Button()
+            ep_btn.add_css_class('flat')
+            ep_btn.add_css_class('circular')
+            ep_btn.set_valign(Gtk.Align.CENTER)
+            ep_btn.set_tooltip_text(
+                'Toggle between Aurora writer (primary) and reader (replica) endpoint.\n'
+                'Reader connections are automatically set to read-only.'
+            )
+            ep_lbl = Gtk.Label(label='writer')
+            ep_lbl.add_css_class('dim-label')
+            ep_btn.set_child(ep_lbl)
+            ep_btn.connect('clicked', lambda _b, r=row, l=ep_lbl: self._on_toggle_endpoint(r, l))
+            row.add_suffix(ep_btn)
+            row._endpoint_label = ep_lbl
+        else:
+            row._endpoint_label = None
 
         # Context menu
         menu = Gio.Menu()
@@ -1848,6 +1871,46 @@ class TuskWindow(Adw.ApplicationWindow):
         if skipped:
             msg += f' {skipped} skipped.'
         self._show_toast(msg)
+
+    def _on_import_from_aws(self):
+        existing_instance_ids = {
+            c.get('cloud_instance_id')
+            for c in self._store.list()
+            if c.get('cloud_instance_id')
+        }
+        dlg = AwsDiscoveryDialog(existing_instance_ids=existing_instance_ids)
+        dlg.connect('import-confirmed', self._on_aws_import_confirmed)
+        dlg.present(self)
+
+    def _on_aws_import_confirmed(self, _dlg, conns):
+        # Build the tags registry for AWS tags that may not exist yet
+        tags_registry = {}
+        for conn in conns:
+            for tag in conn.get('tags', []):
+                tags_registry.setdefault(tag, {'color': '#FF9900', 'warn_on_connect': False})
+        added, skipped = self._store.bulk_import(conns, tags_registry)
+        existing_ids = set(self._conn_mgr_rows.keys())
+        tags_reg = self._store.get_tags_registry()
+        for conn in self._store.list():
+            if conn['id'] not in existing_ids:
+                self._add_connection_row(conn, tags_registry=tags_reg)
+        self._refresh_tag_strip()
+        msg = f'{added} connection{"s" if added != 1 else ""} imported from AWS.'
+        if skipped:
+            msg += f' {skipped} skipped.'
+        self._show_toast(msg)
+
+    def _on_toggle_endpoint(self, row, label):
+        """Flip between writer and reader Aurora endpoints and reconnect."""
+        conn = row._conn
+        current = conn.get('active_endpoint', 'primary')
+        new_endpoint = 'secondary' if current == 'primary' else 'primary'
+        conn['active_endpoint'] = new_endpoint
+        label.set_text('reader' if new_endpoint == 'secondary' else 'writer')
+        # Reconnect if this is the active connection
+        if self._active_conn and self._active_conn.get('id') == conn.get('id'):
+            self._disconnect()
+            self._connect(row)
 
     def _on_cleanup_stale(self):
         from stale_dialog import StaleConnectionsDialog

@@ -25,6 +25,7 @@ _NEW_FIELD_DEFAULTS = {
     'cloud_proxy_port': None,
     'secondary_endpoint': None,
     'secondary_port': None,
+    'active_endpoint': 'primary',
 }
 
 
@@ -36,13 +37,21 @@ def _ssh_key(conn_id):
     return f'{conn_id}:ssh'
 
 
+_RUNTIME_ONLY_FIELDS = {'active_endpoint'}
+
+
 def _write_connections_file(connections, tags_registry):
     tmp = CONNECTIONS_FILE + '.tmp'
+    # Strip runtime-only fields before persisting
+    serialisable = [
+        {k: v for k, v in c.items() if k not in _RUNTIME_ONLY_FIELDS}
+        for c in connections
+    ]
     with open(tmp, 'w') as f:
         json.dump(
             {
                 'schema_version': SCHEMA_VERSION,
-                'connections': connections,
+                'connections': serialisable,
                 'tags': tags_registry,
             },
             f,
