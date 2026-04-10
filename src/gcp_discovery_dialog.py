@@ -261,6 +261,7 @@ class GcpDiscoveryDialog(Adw.Dialog):
         check = Gtk.CheckButton()
         check.set_active(checked)
         check.set_valign(Gtk.Align.CENTER)
+        check.connect('toggled', self._on_project_check_toggled)
         row.add_suffix(check)
         row.set_activatable_widget(check)
         self._project_list_box.append(row)
@@ -272,7 +273,12 @@ class GcpDiscoveryDialog(Adw.Dialog):
             return True
         return text in row.get_title().lower() or text in row.get_subtitle().lower()
 
+    def _on_project_check_toggled(self, check):
+        if check.get_active():
+            self._project_list_box.remove_css_class('error')
+
     def _on_manual_add(self, _widget):
+        self._manual_entry.remove_css_class('error')
         project_id = self._manual_entry.get_text().strip()
         if not project_id:
             return
@@ -281,7 +287,6 @@ class GcpDiscoveryDialog(Adw.Dialog):
         if project_id in existing_ids:
             self._manual_entry.add_css_class('error')
             return
-        self._manual_entry.remove_css_class('error')
         self._project_search.set_visible(True)
         self._project_list_scroll.set_visible(True)
         self._project_fetch_error.set_visible(False)
