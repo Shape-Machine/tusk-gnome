@@ -379,9 +379,6 @@ class TuskWindow(Adw.ApplicationWindow):
         self._conn_dropdown.add_css_class('flat')
         self._conn_dropdown.connect('clicked', lambda _: self._show_connection_manager())
 
-        # Internal tracking list — not shown in UI but used for row state management
-        self._conn_list = Gtk.ListBox()
-        self._conn_list.set_selection_mode(Gtk.SelectionMode.NONE)
 
         conn_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         conn_bar.set_margin_top(MARGIN_XS)
@@ -708,10 +705,6 @@ class TuskWindow(Adw.ApplicationWindow):
         ag.add_action(delete_action)
         row.insert_action_group('row', ag)
 
-        if position == -1:
-            self._conn_list.append(row)
-        else:
-            self._conn_list.insert(row, position)
         self._conn_popover_rows[conn['id']] = row
         self._add_mgr_row(conn, position, tags_registry=tags_registry)
         return row
@@ -1050,15 +1043,7 @@ class TuskWindow(Adw.ApplicationWindow):
         except KeyringUnavailableError as e:
             self._show_keyring_error(str(e))
             return
-        # Find position of source_row in the listbox and insert after it
-        position = 0
-        child = self._conn_list.get_first_child()
-        while child:
-            position += 1
-            if child is source_row:
-                break
-            child = child.get_next_sibling()
-        self._add_connection_row(conn, position=position)
+        self._add_connection_row(conn)
 
     def _on_connection_updated(self, _dlg, conn, old_row):
         try:
@@ -1069,16 +1054,13 @@ class TuskWindow(Adw.ApplicationWindow):
         conn_id = conn['id']
 
         # Rebuild both rows so suffix widgets (lock icon, tag chips) stay in sync.
-        p_row = self._conn_popover_rows.pop(conn_id, None)
-        pos = p_row.get_index() if p_row else -1
-        if p_row:
-            self._conn_list.remove(p_row)
+        self._conn_popover_rows.pop(conn_id, None)
 
         m_row = self._conn_mgr_rows.pop(conn_id, None)
         if m_row:
             self._mgr_list.remove(m_row)
 
-        self._add_connection_row(conn, position=pos)
+        self._add_connection_row(conn)
 
         if self._active_conn_id == conn_id:
             self._set_active_conn(conn)
@@ -1110,9 +1092,7 @@ class TuskWindow(Adw.ApplicationWindow):
             self._show_keyring_error(str(e))
             return
 
-        p_row = self._conn_popover_rows.pop(conn_id, None)
-        if p_row:
-            self._conn_list.remove(p_row)
+        self._conn_popover_rows.pop(conn_id, None)
 
         m_row = self._conn_mgr_rows.pop(conn_id, None)
         if m_row:
@@ -1217,14 +1197,11 @@ class TuskWindow(Adw.ApplicationWindow):
         tooltip = '\n'.join(tooltip_parts) if tooltip_parts else ''
 
         # Update popover row badge
-        row = self._conn_list.get_first_child()
-        while row:
-            if hasattr(row, '_conn') and row._conn['id'] == conn['id']:
-                row._role_badge.set_visible(is_superuser)
-                if is_superuser:
-                    row._role_badge.set_tooltip_text(tooltip)
-                break
-            row = row.get_next_sibling()
+        p_row = self._conn_popover_rows.get(conn['id'])
+        if p_row:
+            p_row._role_badge.set_visible(is_superuser)
+            if is_superuser:
+                p_row._role_badge.set_tooltip_text(tooltip)
 
         # Update dropdown badge if this is the active connection
         if self._active_conn_id == conn['id']:
@@ -1328,13 +1305,10 @@ class TuskWindow(Adw.ApplicationWindow):
         self._active_conn = conn
 
         # Update per-row disconnect action enabled state (popover + manager)
-        row = self._conn_list.get_first_child()
-        while row:
-            if hasattr(row, '_conn'):
-                row._disconnect_action.set_enabled(
-                    bool(conn and row._conn['id'] == conn['id'])
-                )
-            row = row.get_next_sibling()
+        for p_row in self._conn_popover_rows.values():
+            p_row._disconnect_action.set_enabled(
+                bool(conn and p_row._conn['id'] == conn['id'])
+            )
 
         for conn_id, m_row in self._conn_mgr_rows.items():
             is_active = bool(conn and conn_id == conn['id'])
@@ -1399,6 +1373,8 @@ class TuskWindow(Adw.ApplicationWindow):
             self._conn_mgr_rows.pop(conn_id)
             self._mgr_list.remove(m_row)
             self._add_mgr_row(conn, position=pos, tags_registry=tags_registry)
+            if conn_id in self._conn_health:
+                self._update_health_subtitle(conn_id)
         self._refresh_tag_strip()
         self._set_active_conn(self._active_conn)
 
@@ -1484,7 +1460,6 @@ class TuskWindow(Adw.ApplicationWindow):
 
     # ── Health checks ─────────────────────────────────────────────────────────
 
-    @staticmethod
     def _check_health(self, conn):
         conn_id = conn['id']
         if conn.get('ssh_host') or conn.get('cloud_proxy_enabled'):
@@ -1542,10 +1517,12 @@ class TuskWindow(Adw.ApplicationWindow):
         if total == 0:
             return
         results = {}
+        fired = [False]
 
         def _on_done():
-            if len(results) < total:
+            if len(results) < total or fired[0]:
                 return
+            fired[0] = True
             ok = sum(1 for r in results.values() if r['status'] in ('ok', 'tunnel'))
             err = total - ok
             if err:
@@ -1848,9 +1825,7 @@ class TuskWindow(Adw.ApplicationWindow):
             mgr_row = self._conn_mgr_rows.pop(conn_id, None)
             if mgr_row:
                 self._mgr_list.remove(mgr_row)
-            pop_row = self._conn_popover_rows.pop(conn_id, None)
-            if pop_row:
-                self._conn_list.remove(pop_row)
+            self._conn_popover_rows.pop(conn_id, None)
             self._conn_health.pop(conn_id, None)
             if conn_id == self._active_conn_id:
                 self._set_active_conn(None)
@@ -2704,10 +2679,7 @@ class TuskWindow(Adw.ApplicationWindow):
         dlg.present(self)
 
     def _on_edit_connection_from_browser(self, _browser, conn):
-        row = self._conn_list.get_first_child()
-        while row:
-            if hasattr(row, '_conn') and row._conn.get('id') == conn.get('id'):
-                self._on_edit_connection(row)
-                return
-            row = row.get_next_sibling()
+        p_row = self._conn_popover_rows.get(conn.get('id'))
+        if p_row:
+            self._on_edit_connection(p_row)
 
