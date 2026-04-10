@@ -184,9 +184,17 @@ class GcpDiscoveryDialog(Adw.Dialog):
         return scroll
 
     def _build_error_page(self):
+        self._error_back_btn = Gtk.Button(label='Choose Different Projects')
+        self._error_back_btn.add_css_class('pill')
+        self._error_back_btn.set_halign(Gtk.Align.CENTER)
+        self._error_back_btn.set_visible(False)
+        self._error_back_btn.connect('clicked',
+                                     lambda _: self._stack.set_visible_child_name('project'))
+
         self._error_status = Adw.StatusPage(
             icon_name='dialog-error-symbolic',
             title='Discovery Failed',
+            child=self._error_back_btn,
         )
         return self._error_status
 
@@ -336,7 +344,7 @@ class GcpDiscoveryDialog(Adw.Dialog):
             msg = 'No PostgreSQL instances found in the selected project(s).'
             if errors:
                 msg += '\n\nErrors:\n' + '\n'.join(errors)
-            self._show_error('No instances found', msg)
+            self._show_error('No instances found', msg, show_back=True)
             return
 
         # Determine whether results span multiple projects
@@ -442,9 +450,10 @@ class GcpDiscoveryDialog(Adw.Dialog):
 
         self._stack.set_visible_child_name('results')
 
-    def _show_error(self, title, description):
+    def _show_error(self, title, description, show_back=False):
         self._error_status.set_title(title)
         self._error_status.set_description(description)
+        self._error_back_btn.set_visible(show_back)
         self._stack.set_visible_child_name('error')
 
     def _on_proxy_banner_clicked(self, _banner):
