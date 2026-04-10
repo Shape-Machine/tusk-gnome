@@ -33,6 +33,21 @@ _PALETTE_CSS = """
 }
 """
 
+_css_provider = None
+
+
+def _ensure_css():
+    global _css_provider
+    if _css_provider is not None:
+        return
+    _css_provider = Gtk.CssProvider()
+    _css_provider.load_from_string(_PALETTE_CSS)
+    Gtk.StyleContext.add_provider_for_display(
+        Gdk.Display.get_default(),
+        _css_provider,
+        Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+    )
+
 
 class TagsDialog(Adw.Dialog):
     __gsignals__ = {
@@ -42,13 +57,7 @@ class TagsDialog(Adw.Dialog):
     def __init__(self, store):
         super().__init__(title='Manage Tags', content_width=480, content_height=560)
         self._store = store
-        self._css_provider = Gtk.CssProvider()
-        self._css_provider.load_from_string(_PALETTE_CSS)
-        Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(),
-            self._css_provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
-        )
+        _ensure_css()
         self._build_ui()
         self._load_tags()
 
@@ -158,11 +167,6 @@ class TagsDialog(Adw.Dialog):
             expander._palette_btns[color] = btn
             flow.append(btn)
 
-        custom_btn = Gtk.Button(label='Custom…')
-        custom_btn.add_css_class('flat')
-        custom_btn.set_halign(Gtk.Align.START)
-        custom_btn.connect('clicked', self._on_custom_color, expander)
-
         inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         inner.set_margin_top(8)
         inner.set_margin_bottom(8)
@@ -170,7 +174,6 @@ class TagsDialog(Adw.Dialog):
         inner.set_margin_end(12)
         inner.append(caption)
         inner.append(flow)
-        inner.append(custom_btn)
 
         row = Gtk.ListBoxRow()
         row.set_selectable(False)
@@ -205,33 +208,6 @@ class TagsDialog(Adw.Dialog):
         expander._selected_color = color
         self._apply_swatch_markup(expander._swatch, color)
 
-    def _on_custom_color(self, _btn, expander):
-        dialog = Gtk.ColorDialog()
-        dialog.set_with_alpha(False)
-        # Parse current hex to RGBA
-        color = expander._selected_color
-        rgba = Gdk.RGBA()
-        rgba.parse(color if _COLOR_RE.match(color or '') else _DEFAULT_COLOR)
-        dialog.choose_rgba(self, rgba, None, self._on_custom_color_done, expander)
-
-    def _on_custom_color_done(self, dialog, result, expander):
-        try:
-            rgba = dialog.choose_rgba_finish(result)
-        except Exception:
-            return
-        if rgba is None:
-            return
-        # Convert RGBA to #rrggbb
-        r = int(rgba.red * 255)
-        g = int(rgba.green * 255)
-        b = int(rgba.blue * 255)
-        color = f'#{r:02x}{g:02x}{b:02x}'
-        # Deselect all preset swatches (custom color isn't in palette)
-        for btn in expander._palette_btns.values():
-            btn.remove_css_class('swatch-selected')
-        expander._selected_color = color
-        self._apply_swatch_markup(expander._swatch, color)
-
     def _on_save_tag(self, _row, expander):
         old_name = expander._tag_name
         new_name = expander._name_row.get_text().strip()
@@ -250,7 +226,7 @@ class TagsDialog(Adw.Dialog):
         color = expander._selected_color
 
         if new_name != old_name:
-            self._store.rename_tag(old_name, new_name)
+            self._store.rename_tag(old_name, new_name, _defer_save=True)
 
         self._store.set_tag(new_name, color, warn)
         expander.set_expanded(False)
@@ -339,6 +315,21 @@ class TagsDialog(Adw.Dialog):
         entries_box.append(palette_row)
 
         dialog.set_extra_child(entries_box)
+
+        # Disable Add until the user types a non-empty, non-duplicate name
+        dialog.set_response_enabled('add', False)
+
+        def on_name_changed(_entry, _param):
+            name = name_entry.get_text().strip()
+            duplicate = name in self._store.get_tags_registry()
+            dialog.set_response_enabled('add', bool(name) and not duplicate)
+            if name and duplicate:
+                name_entry.add_css_class('error')
+            else:
+                name_entry.remove_css_class('error')
+
+        name_entry.connect('notify::text', on_name_changed)
+
         dialog.connect('response', self._on_add_confirmed, name_entry, selected)
         dialog.present(self)
 
@@ -346,10 +337,9 @@ class TagsDialog(Adw.Dialog):
         if response != 'add':
             return
         name = name_entry.get_text().strip()
-        if not name:
-            return
+        if not name or name in self._store.get_tags_registry():
+            return  # guarded by button state, but defensive
         color = selected[0] if _COLOR_RE.match(selected[0] or '') else _DEFAULT_COLOR
-        if name not in self._store.get_tags_registry():
-            self._store.set_tag(name, color, False)
+        self._store.set_tag(name, color, False)
         self._load_tags()
         self.emit('tags-changed')

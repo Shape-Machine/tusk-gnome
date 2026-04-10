@@ -119,8 +119,12 @@ class ConnectionStore:
         self._tags_registry.pop(name, None)
         self._save()
 
-    def rename_tag(self, old_name, new_name):
-        """Rename a tag and cascade the change to all connections in one write."""
+    def rename_tag(self, old_name, new_name, *, _defer_save=False):
+        """Rename a tag and cascade the change to all connections.
+
+        Pass _defer_save=True when a subsequent store call (e.g. set_tag) will
+        write the file, to avoid a redundant intermediate save.
+        """
         if old_name not in self._tags_registry or old_name == new_name:
             return
         meta = self._tags_registry.pop(old_name)
@@ -132,7 +136,8 @@ class ConnectionStore:
                     **c,
                     'tags': [new_name if t == old_name else t for t in tags],
                 }
-        self._save()
+        if not _defer_save:
+            self._save()
 
     def list(self):
         return list(self._connections)
