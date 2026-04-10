@@ -1327,10 +1327,17 @@ class TuskWindow(Adw.ApplicationWindow):
         dlg.present(self)
 
     def _on_tags_changed(self, _dlg):
-        # Rebuild every manager row so tag chips and colors are current
+        # Rebuild every manager row using fresh store data so tag changes
+        # (including deletions) aren't overwritten when _do_connect() later
+        # calls store.update(row._conn).
         tags_registry = self._store.get_tags_registry()
+        fresh = {c['id']: c for c in self._store.list()}
+        # Refresh popover row _conn references (no visual rebuild needed)
+        for conn_id, p_row in self._conn_popover_rows.items():
+            if conn_id in fresh:
+                p_row._conn = fresh[conn_id]
         for conn_id, m_row in list(self._conn_mgr_rows.items()):
-            conn = m_row._conn
+            conn = fresh.get(conn_id, m_row._conn)
             pos = m_row.get_index()
             self._conn_mgr_rows.pop(conn_id)
             self._mgr_list.remove(m_row)
