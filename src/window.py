@@ -714,14 +714,6 @@ class TuskWindow(Adw.ApplicationWindow):
             lock.add_css_class('dim-label')
             row.add_suffix(lock)
 
-        # Dot prefix — hidden until active
-        dot = Gtk.Label(label='●')
-        dot.add_css_class('conn-active-dot')
-        dot.set_valign(Gtk.Align.CENTER)
-        dot.set_visible(False)
-        row.add_prefix(dot)
-        row._active_dot = dot
-
         # Icon — accent-coloured when active
         icon = Gtk.Image.new_from_icon_name('network-server-symbolic')
         icon.set_valign(Gtk.Align.CENTER)
@@ -1271,7 +1263,6 @@ class TuskWindow(Adw.ApplicationWindow):
         for conn_id, m_row in self._conn_mgr_rows.items():
             is_active = bool(conn and conn_id == conn['id'])
             m_row._disconnect_action.set_enabled(is_active)
-            m_row._active_dot.set_visible(is_active)
             m_row._active_pill.set_visible(is_active)
             if is_active:
                 m_row._active_icon.add_css_class('conn-active-icon')
