@@ -119,6 +119,21 @@ class ConnectionStore:
         self._tags_registry.pop(name, None)
         self._save()
 
+    def rename_tag(self, old_name, new_name):
+        """Rename a tag and cascade the change to all connections in one write."""
+        if old_name not in self._tags_registry or old_name == new_name:
+            return
+        meta = self._tags_registry.pop(old_name)
+        self._tags_registry[new_name] = meta
+        for i, c in enumerate(self._connections):
+            tags = c.get('tags', [])
+            if old_name in tags:
+                self._connections[i] = {
+                    **c,
+                    'tags': [new_name if t == old_name else t for t in tags],
+                }
+        self._save()
+
     def list(self):
         return list(self._connections)
 
