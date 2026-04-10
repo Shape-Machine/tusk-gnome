@@ -17,7 +17,7 @@ class TagsDialog(Adw.Dialog):
     }
 
     def __init__(self, store):
-        super().__init__(title='Manage Tags', content_width=480)
+        super().__init__(title='Manage Tags', content_width=480, content_height=560)
         self._store = store
         self._build_ui()
         self._load_tags()
@@ -67,9 +67,8 @@ class TagsDialog(Adw.Dialog):
         expander._tag_name = name
 
         # Colour swatch prefix
-        swatch = Gtk.Label(label='⬤')
+        swatch = Gtk.Label()
         swatch.set_valign(Gtk.Align.CENTER)
-        swatch.add_css_class('dim-label')
         self._apply_swatch_color(swatch, meta.get('color', _DEFAULT_COLOR))
         expander.add_prefix(swatch)
         expander._swatch = swatch
@@ -104,20 +103,10 @@ class TagsDialog(Adw.Dialog):
 
         return expander
 
-    def _apply_swatch_color(self, swatch, color):
-        # Remove old inline CSS and apply new one via a per-widget provider
-        if not hasattr(swatch, '_css_provider'):
-            provider = Gtk.CssProvider()
-            swatch._css_provider = provider
-            from gi.repository import Gdk
-            Gtk.StyleContext.add_provider_for_display(
-                Gdk.Display.get_default(), provider,
-                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
-            )
+    @staticmethod
+    def _apply_swatch_color(swatch, color):
         safe = color if _COLOR_RE.match(color or '') else _DEFAULT_COLOR
-        swatch._css_provider.load_from_string(
-            f'label {{ color: {safe}; }}'
-        )
+        swatch.set_markup(f'<span foreground="{safe}">⬤</span>')
 
     def _on_color_changed(self, row, _param, expander):
         color = row.get_text().strip()
