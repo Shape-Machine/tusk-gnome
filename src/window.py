@@ -1,6 +1,7 @@
 import datetime
 import os
 import re
+import socket
 import threading
 
 import gi
@@ -1472,8 +1473,6 @@ class TuskWindow(Adw.ApplicationWindow):
         dot.set_tooltip_text(tip)
 
     def _check_health(self, conn):
-        import socket
-        import threading as _threading
         conn_id = conn['id']
         # Tunnel/proxy connections can't be TCP-checked to the raw host
         if conn.get('ssh_host') or conn.get('cloud_proxy_enabled'):
@@ -1486,12 +1485,9 @@ class TuskWindow(Adw.ApplicationWindow):
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(3)
-                err = sock.connect_ex((conn['host'], int(conn['port'])))
+                sock.connect((conn['host'], int(conn['port'])))
                 sock.close()
-                if err == 0:
-                    result = {'status': 'ok', 'msg': 'Reachable', 'ts': ts}
-                else:
-                    result = {'status': 'error', 'msg': os.strerror(err), 'ts': ts}
+                result = {'status': 'ok', 'msg': 'Reachable', 'ts': ts}
             except socket.timeout:
                 result = {'status': 'error', 'msg': 'Timed out', 'ts': ts}
             except OSError as exc:
@@ -1499,7 +1495,7 @@ class TuskWindow(Adw.ApplicationWindow):
             self._conn_health[conn_id] = result
             GLib.idle_add(self._update_health_dot, conn_id)
 
-        _threading.Thread(target=_run, daemon=True).start()
+        threading.Thread(target=_run, daemon=True).start()
 
     def _update_health_dot(self, conn_id):
         row = self._conn_mgr_rows.get(conn_id)
@@ -1704,11 +1700,13 @@ class TuskWindow(Adw.ApplicationWindow):
         dlg.present(self)
 
     def _on_stale_connections_deleted(self, _dlg, conn_ids):
+        deleted = 0
         for conn_id in conn_ids:
             try:
                 self._store.remove(conn_id)
-            except Exception:
-                pass
+            except Exception as e:
+                self._show_toast(f'Could not delete connection: {e}')
+                continue
             mgr_row = self._conn_mgr_rows.pop(conn_id, None)
             if mgr_row:
                 self._mgr_list.remove(mgr_row)
@@ -1718,8 +1716,9 @@ class TuskWindow(Adw.ApplicationWindow):
             self._conn_health.pop(conn_id, None)
             if conn_id == self._active_conn_id:
                 self._set_active_conn(None)
-        n = len(conn_ids)
-        self._show_toast(f'{n} connection{"s" if n != 1 else ""} deleted.')
+            deleted += 1
+        if deleted:
+            self._show_toast(f'{deleted} connection{"s" if deleted != 1 else ""} deleted.')
 
     def _show_toast(self, msg, timeout=4):
         toast = Adw.Toast(title=msg)

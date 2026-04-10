@@ -32,7 +32,7 @@ class ConnectionsImportDialog(Adw.Dialog):
         list_box.set_selection_mode(Gtk.SelectionMode.NONE)
 
         conflict_count = 0
-        for conn in incoming_conns:
+        for idx, conn in enumerate(incoming_conns):
             resolved = dict(conn)
             clash = conn.get('name', '') in existing_names
             if clash:
@@ -49,7 +49,7 @@ class ConnectionsImportDialog(Adw.Dialog):
             row.add_suffix(check)
             row.set_activatable_widget(check)
             list_box.append(row)
-            self._checks[conn.get('id', '')] = (check, resolved)
+            self._checks[idx] = (check, resolved)
 
         n = len(incoming_conns)
         summary_parts = [f'{n} connection{"s" if n != 1 else ""} found.']
