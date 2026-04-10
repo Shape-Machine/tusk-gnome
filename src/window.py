@@ -355,7 +355,7 @@ class TuskWindow(Adw.ApplicationWindow):
 
         sidebar.append(header)
 
-        # Connection dropdown
+        # Active connection indicator — clicking navigates to connections tab
         dropdown_child = Gtk.Box(spacing=6)
         dropdown_child.set_margin_start(2)
         conn_icon = Gtk.Image.new_from_icon_name('network-server-symbolic')
@@ -367,36 +367,21 @@ class TuskWindow(Adw.ApplicationWindow):
         self._conn_dropdown_badge.add_css_class('dim-label')
         self._conn_dropdown_badge.add_css_class('connection-role-badge')
         self._conn_dropdown_badge.set_visible(False)
+        self._conn_dropdown_tags = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         dropdown_child.append(conn_icon)
         dropdown_child.append(self._conn_dropdown_label)
+        dropdown_child.append(self._conn_dropdown_tags)
         dropdown_child.append(self._conn_dropdown_badge)
 
-        self._conn_dropdown = Gtk.MenuButton()
+        self._conn_dropdown = Gtk.Button()
         self._conn_dropdown.set_child(dropdown_child)
         self._conn_dropdown.set_hexpand(True)
         self._conn_dropdown.add_css_class('flat')
+        self._conn_dropdown.connect('clicked', lambda _: self._show_connection_manager())
 
+        # Internal tracking list — not shown in UI but used for row state management
         self._conn_list = Gtk.ListBox()
-        self._conn_list.add_css_class('navigation-sidebar')
         self._conn_list.set_selection_mode(Gtk.SelectionMode.NONE)
-        self._conn_list.connect('row-activated', self._on_connection_activated)
-
-        self._conn_popover_scroll = Gtk.ScrolledWindow()
-        self._conn_popover_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        self._conn_popover_scroll.set_propagate_natural_height(True)
-        self._conn_popover_scroll.set_max_content_height(320)
-        self._conn_popover_scroll.set_child(self._conn_list)
-
-        self._conn_popover = Gtk.Popover()
-        self._conn_popover.set_child(self._conn_popover_scroll)
-        self._conn_popover.set_has_arrow(False)
-        self._conn_dropdown.set_popover(self._conn_popover)
-        self._conn_popover.connect(
-            'map',
-            lambda _: self._conn_popover_scroll.set_size_request(
-                self._conn_dropdown.get_width() - 20, -1
-            ),
-        )
 
         conn_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         conn_bar.set_margin_top(MARGIN_XS)
@@ -484,10 +469,7 @@ class TuskWindow(Adw.ApplicationWindow):
 
         main_box.append(self._main_header)
 
-        self._main_stack = Gtk.Stack()
-        self._main_stack.set_vexpand(True)
-
-        # ── Connection manager (replaces old 'welcome' and 'empty' pages) ───────
+        # ── Connection manager (pinned tab) ──────────────────────────────────────
         mgr_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
 
         # Toolbar: sort button (left) + add button (right)
@@ -576,22 +558,59 @@ class TuskWindow(Adw.ApplicationWindow):
         content_box.append(mgr_scroll)
         mgr_box.append(content_box)
 
-        self._main_stack.add_named(mgr_box, 'manager')
+        # ── Branding footer ───────────────────────────────────────────────────────
+        footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        footer.set_margin_top(MARGIN_XS)
+        footer.set_margin_bottom(MARGIN_SM)
+        footer.set_margin_start(MARGIN_MD)
+        footer.set_margin_end(MARGIN_MD)
 
-        # ── Tab view ─────────────────────────────────────────────────────────────
+        footer_icon = Gtk.Image.new_from_icon_name('xyz.shapemachine.tusk-gnome')
+        footer_icon.set_pixel_size(24)
+        footer.append(footer_icon)
+
+        footer_label = Gtk.Label(label='Tusk · free and open source')
+        footer_label.add_css_class('caption')
+        footer.append(footer_label)
+
+        footer_spacer = Gtk.Box()
+        footer_spacer.set_hexpand(True)
+        footer.append(footer_spacer)
+
+        for label, action in [
+            ('Keyboard Shortcuts', 'win.show-help-overlay'),
+            ('Preferences',        'app.preferences'),
+            ('Sponsor',            'app.sponsor'),
+        ]:
+            btn = Gtk.Button(label=label)
+            btn.add_css_class('flat')
+            btn.add_css_class('caption')
+            btn.connect('clicked', lambda _, a=action: self.activate_action(a))
+            footer.append(btn)
+
+        mgr_box.append(footer)
+
+        # ── Tab view (always visible) ─────────────────────────────────────────────
         tabs_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        tabs_box.set_vexpand(True)
         self._tab_bar = Adw.TabBar()
+        self._tab_bar.set_autohide(False)
         self._tab_view = Adw.TabView()
         self._tab_bar.set_view(self._tab_view)
         self._tab_view.set_vexpand(True)
         self._tab_view.connect('notify::selected-page', self._on_tab_changed)
+        self._tab_view.connect('notify::n-pages', self._on_n_pages_changed)
         self._tab_view.connect('close-page', self._on_close_page)
         tabs_box.append(self._tab_bar)
         tabs_box.append(self._tab_view)
-        self._main_stack.add_named(tabs_box, 'tabs')
 
-        self._main_stack.set_visible_child_name('manager')
-        main_box.append(self._main_stack)
+        self._mgr_tab_page = self._tab_view.prepend(mgr_box)
+        self._mgr_tab_page.set_title('Connections')
+        self._mgr_tab_page.set_icon(Gio.ThemedIcon.new('go-home-symbolic'))
+        self._tab_view.set_page_pinned(self._mgr_tab_page, True)
+        self._tab_bar.set_visible(False)
+
+        main_box.append(tabs_box)
         return main_box
 
     # ── Connections ───────────────────────────────────────────────────────────
@@ -753,13 +772,6 @@ class TuskWindow(Adw.ApplicationWindow):
         row.add_prefix(icon)
         row._active_icon = icon
 
-        # Health dot — grey until a check has run
-        health_dot = Gtk.Label()
-        health_dot.set_valign(Gtk.Align.CENTER)
-        self._apply_health_dot(health_dot, self._conn_health.get(conn['id'], {}))
-        row.add_prefix(health_dot)
-        row._health_dot = health_dot
-
         # Context menu
         menu = Gio.Menu()
         menu.append('Disconnect', 'mgr.disconnect')
@@ -804,13 +816,11 @@ class TuskWindow(Adw.ApplicationWindow):
         return row
 
     def _on_add_connection(self, _btn):
-        self._conn_popover.popdown()
         dlg = ConnectionDialog(parent=self, store=self._store)
         dlg.connect('connection-saved', self._on_connection_added)
         dlg.present(self)
 
     def _on_copy_as_uri(self, row):
-        self._conn_popover.popdown()
         from urllib.parse import quote
         conn = row._conn
         user = quote(conn['username'], safe='')
@@ -826,7 +836,6 @@ class TuskWindow(Adw.ApplicationWindow):
     def _on_export_pgpass(self, row):
         import os
         import stat
-        self._conn_popover.popdown()
         conn = row._conn
         try:
             password = self._store.get_password(conn['id'])
@@ -1021,13 +1030,11 @@ class TuskWindow(Adw.ApplicationWindow):
         self._add_connection_row(conn)
 
     def _on_edit_connection(self, row):
-        self._conn_popover.popdown()
         dlg = ConnectionDialog(parent=self, connection=row._conn, store=self._store)
         dlg.connect('connection-saved', self._on_connection_updated, row)
         dlg.present(self)
 
     def _on_duplicate_connection(self, row):
-        self._conn_popover.popdown()
         try:
             conn = self._conn_with_password(row._conn)
         except KeyringUnavailableError as e:
@@ -1078,7 +1085,6 @@ class TuskWindow(Adw.ApplicationWindow):
             self._browser.clear()
 
     def _on_delete_connection(self, row):
-        self._conn_popover.popdown()
         conn = row._conn
         dialog = Adw.MessageDialog(
             transient_for=self,
@@ -1124,7 +1130,6 @@ class TuskWindow(Adw.ApplicationWindow):
         }
 
     def _on_connection_activated(self, _listbox, row):
-        self._conn_popover.popdown()
         try:
             conn = self._conn_with_password(row._conn)
         except KeyringUnavailableError as e:
@@ -1340,12 +1345,25 @@ class TuskWindow(Adw.ApplicationWindow):
             else:
                 m_row._active_icon.remove_css_class('conn-active-icon')
 
-        # Update dropdown label
+        # Update dropdown label and tags
+        while (child := self._conn_dropdown_tags.get_first_child()):
+            self._conn_dropdown_tags.remove(child)
         if conn:
             label = conn['name']
             if conn.get('read_only'):
                 label += '  🔒'
             self._conn_dropdown_label.set_label(label)
+            tags_registry = self._store.get_tags_registry()
+            for tag_name in conn.get('tags', []):
+                raw_color = tags_registry.get(tag_name, {}).get('color', '#888888')
+                color = raw_color if _COLOR_RE.match(raw_color) else '#888888'
+                chip = Gtk.Label()
+                chip.set_markup(
+                    f'<span foreground="{color}" size="small">'
+                    f'{GLib.markup_escape_text(tag_name)}</span>'
+                )
+                chip.set_valign(Gtk.Align.CENTER)
+                self._conn_dropdown_tags.append(chip)
         else:
             self._conn_dropdown_label.set_label('Select connection…')
             self._conn_dropdown_badge.set_visible(False)
@@ -1385,7 +1403,7 @@ class TuskWindow(Adw.ApplicationWindow):
         self._set_active_conn(self._active_conn)
 
     def _show_connection_manager(self):
-        self._main_stack.set_visible_child_name('manager')
+        self._tab_view.set_selected_page(self._mgr_tab_page)
         self._mgr_search.grab_focus()
 
     def _on_mgr_search_changed(self, entry):
@@ -1467,27 +1485,11 @@ class TuskWindow(Adw.ApplicationWindow):
     # ── Health checks ─────────────────────────────────────────────────────────
 
     @staticmethod
-    def _apply_health_dot(dot, health):
-        status = health.get('status', 'unknown')
-        color = {'ok': '#33d17a', 'error': '#e01b24', 'tunnel': '#e5a50a'}.get(status, '#888888')
-        dot.set_markup(f'<span foreground="{color}">⬤</span>')
-        msg = health.get('msg', 'Not checked')
-        ts = health.get('ts')
-        tip = msg
-        if ts:
-            try:
-                dt = datetime.datetime.fromisoformat(ts.rstrip('Z')).replace(tzinfo=datetime.timezone.utc)
-                tip += f'\nChecked {dt.strftime("%H:%M:%S UTC")}'
-            except (ValueError, TypeError):
-                pass
-        dot.set_tooltip_text(tip)
-
     def _check_health(self, conn):
         conn_id = conn['id']
-        # Tunnel/proxy connections can't be TCP-checked to the raw host
         if conn.get('ssh_host') or conn.get('cloud_proxy_enabled'):
             self._conn_health[conn_id] = {'status': 'tunnel', 'msg': 'Requires tunnel/proxy', 'ts': None}
-            self._update_health_dot(conn_id)
+            GLib.idle_add(self._update_health_subtitle, conn_id)
             return
 
         def _run():
@@ -1501,18 +1503,84 @@ class TuskWindow(Adw.ApplicationWindow):
             except (OSError, ValueError) as exc:
                 result = {'status': 'error', 'msg': str(exc), 'ts': ts}
             self._conn_health[conn_id] = result
-            GLib.idle_add(self._update_health_dot, conn_id)
+            GLib.idle_add(self._update_health_subtitle, conn_id)
 
         threading.Thread(target=_run, daemon=True).start()
 
-    def _update_health_dot(self, conn_id):
+    def _update_health_subtitle(self, conn_id):
         row = self._conn_mgr_rows.get(conn_id)
-        if row and hasattr(row, '_health_dot'):
-            self._apply_health_dot(row._health_dot, self._conn_health.get(conn_id, {}))
+        if not row:
+            return
+        health = self._conn_health.get(conn_id, {})
+        status = health.get('status', 'unknown')
+        msg = health.get('msg', '')
+        ts = health.get('ts')
+        base = self._conn_subtitle(row._conn)
+        if status == 'ok':
+            suffix = 'Reachable'
+        elif status == 'tunnel':
+            suffix = 'Via tunnel'
+        elif status == 'error':
+            suffix = msg or 'Unreachable'
+        else:
+            suffix = None
+        if suffix:
+            time_str = ''
+            if ts:
+                try:
+                    dt = datetime.datetime.fromisoformat(ts.rstrip('Z')).replace(tzinfo=datetime.timezone.utc)
+                    time_str = f' · {dt.strftime("%H:%M")}'
+                except (ValueError, TypeError):
+                    pass
+            row.set_subtitle(f'{base} · {suffix}{time_str}')
+        else:
+            row.set_subtitle(base)
 
     def _on_check_all_health(self):
-        for conn in self._store.list():
-            self._check_health(conn)
+        conns = self._store.list()
+        total = len(conns)
+        if total == 0:
+            return
+        results = {}
+
+        def _on_done():
+            if len(results) < total:
+                return
+            ok = sum(1 for r in results.values() if r['status'] in ('ok', 'tunnel'))
+            err = total - ok
+            if err:
+                msg = f'{ok} reachable · {err} unreachable'
+            else:
+                msg = f'All {ok} connections reachable'
+            toast = Adw.Toast(title=msg)
+            toast.set_timeout(4)
+            self._toast_overlay.add_toast(toast)
+
+        for conn in conns:
+            conn_id = conn['id']
+            if conn.get('ssh_host') or conn.get('cloud_proxy_enabled'):
+                results[conn_id] = {'status': 'tunnel', 'msg': 'Requires tunnel/proxy', 'ts': None}
+                self._conn_health[conn_id] = results[conn_id]
+                GLib.idle_add(self._update_health_subtitle, conn_id)
+                GLib.idle_add(_on_done)
+                continue
+
+            def _run(c=conn, cid=conn_id):
+                ts = datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
+                try:
+                    with socket.create_connection((c['host'], int(c['port'])), timeout=3):
+                        pass
+                    result = {'status': 'ok', 'msg': 'Reachable', 'ts': ts}
+                except socket.timeout:
+                    result = {'status': 'error', 'msg': 'Timed out', 'ts': ts}
+                except (OSError, ValueError) as exc:
+                    result = {'status': 'error', 'msg': str(exc), 'ts': ts}
+                results[cid] = result
+                self._conn_health[cid] = result
+                GLib.idle_add(self._update_health_subtitle, cid)
+                GLib.idle_add(_on_done)
+
+            threading.Thread(target=_run, daemon=True).start()
 
     # ── Connection import / export ────────────────────────────────────────────
 
@@ -2000,7 +2068,7 @@ class TuskWindow(Adw.ApplicationWindow):
         return None
 
     def _show_tabs(self):
-        self._main_stack.set_visible_child_name('tabs')
+        pass  # tab view is always visible
 
     def _refresh_current_tab(self):
         page = self._tab_view.get_selected_page()
@@ -2009,23 +2077,26 @@ class TuskWindow(Adw.ApplicationWindow):
 
     def _on_tab_changed(self, tab_view, _param):
         page = tab_view.get_selected_page()
-        if page:
-            self._header_label.set_label(page.get_title())
-            self._refresh_action.set_enabled(isinstance(page.get_child(), TablePanel))
-        else:
+        mgr_page = getattr(self, '_mgr_tab_page', None)
+        refresh = getattr(self, '_refresh_action', None)
+        if page is None or page is mgr_page:
             self._header_label.set_label('Tusk')
-            self._refresh_action.set_enabled(False)
+            if refresh:
+                refresh.set_enabled(False)
+        else:
+            self._header_label.set_label(page.get_title())
+            if refresh:
+                refresh.set_enabled(isinstance(page.get_child(), TablePanel))
+
+    def _on_n_pages_changed(self, tab_view, _param):
+        self._tab_bar.set_visible(tab_view.get_n_pages() > 1)
 
     def _on_close_page(self, tab_view, page):
+        if page is self._mgr_tab_page:
+            tab_view.close_page_finish(page, False)
+            return True
         tab_view.close_page_finish(page, True)
-        # Switch back to empty if no tabs remain
-        GLib.idle_add(self._check_tabs_empty)
         return True
-
-    def _check_tabs_empty(self):
-        if self._tab_view.get_n_pages() == 0:
-            self._header_label.set_label('Tusk')
-            self._main_stack.set_visible_child_name('manager')
 
     def _on_ddl_executed(self):
         if self._active_conn:
