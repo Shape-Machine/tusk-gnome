@@ -95,6 +95,7 @@ class GcpDiscoveryDialog(Adw.Dialog):
 
         self._project_list_scroll = Gtk.ScrolledWindow()
         self._project_list_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self._project_list_scroll.set_min_content_height(240)
         self._project_list_scroll.set_max_content_height(360)
         self._project_list_scroll.set_propagate_natural_height(True)
         self._project_list_scroll.set_child(self._project_list_box)
@@ -263,12 +264,12 @@ class GcpDiscoveryDialog(Adw.Dialog):
         self._project_rows.append((check, project_id))
 
     def _project_filter_func(self, row):
+        # row is the Adw.ActionRow itself (it's a Gtk.ListBoxRow subclass)
         text = self._project_search.get_text().lower()
         if not text:
             return True
-        child = row.get_child()
-        title = (child.get_title() if hasattr(child, 'get_title') else '').lower()
-        subtitle = (child.get_subtitle() if hasattr(child, 'get_subtitle') else '').lower()
+        title = row.get_title().lower() if hasattr(row, 'get_title') else ''
+        subtitle = row.get_subtitle().lower() if hasattr(row, 'get_subtitle') else ''
         return text in title or text in subtitle
 
     def _on_manual_add(self, _widget):
