@@ -50,6 +50,20 @@ class TuskWindow(Adw.ApplicationWindow):
             .connection-role-badge {
                 font-size: 13px;
             }
+            .conn-active-dot {
+                color: @accent_color;
+                font-size: 10px;
+            }
+            .conn-active-icon {
+                color: @accent_color;
+            }
+            .conn-active-pill {
+                background-color: @accent_bg_color;
+                color: @accent_fg_color;
+                border-radius: 999px;
+                padding: 1px 8px;
+                font-size: 11px;
+            }
         """)
         display = Gdk.Display.get_default()
         Gtk.StyleContext.add_provider_for_display(
@@ -656,9 +670,16 @@ class TuskWindow(Adw.ApplicationWindow):
         row = Adw.ActionRow()
         row.set_title(conn['name'])
         row.set_subtitle(self._conn_subtitle(conn))
-        row.set_icon_name('network-server-symbolic')
         row.set_activatable(True)
         row._conn = conn
+
+        # "Connected" pill — hidden until active
+        pill = Gtk.Label(label='Connected')
+        pill.add_css_class('conn-active-pill')
+        pill.set_valign(Gtk.Align.CENTER)
+        pill.set_visible(False)
+        row.add_suffix(pill)
+        row._active_pill = pill
 
         # Last connected label
         ts_text = self._format_last_connected(conn.get('last_connected'))
@@ -693,14 +714,19 @@ class TuskWindow(Adw.ApplicationWindow):
             lock.add_css_class('dim-label')
             row.add_suffix(lock)
 
-        # Active indicator bar (shown when this connection is the active session)
-        active_bar = Gtk.Box()
-        active_bar.set_size_request(3, -1)
-        active_bar.set_valign(Gtk.Align.FILL)
-        active_bar.add_css_class('connection-active-bar')
-        active_bar.set_visible(False)
-        row.add_prefix(active_bar)
-        row._active_bar = active_bar
+        # Dot prefix — hidden until active
+        dot = Gtk.Label(label='●')
+        dot.add_css_class('conn-active-dot')
+        dot.set_valign(Gtk.Align.CENTER)
+        dot.set_visible(False)
+        row.add_prefix(dot)
+        row._active_dot = dot
+
+        # Icon — accent-coloured when active
+        icon = Gtk.Image.new_from_icon_name('network-server-symbolic')
+        icon.set_valign(Gtk.Align.CENTER)
+        row.add_prefix(icon)
+        row._active_icon = icon
 
         # Context menu
         menu = Gio.Menu()
@@ -1245,7 +1271,12 @@ class TuskWindow(Adw.ApplicationWindow):
         for conn_id, m_row in self._conn_mgr_rows.items():
             is_active = bool(conn and conn_id == conn['id'])
             m_row._disconnect_action.set_enabled(is_active)
-            m_row._active_bar.set_visible(is_active)
+            m_row._active_dot.set_visible(is_active)
+            m_row._active_pill.set_visible(is_active)
+            if is_active:
+                m_row._active_icon.add_css_class('conn-active-icon')
+            else:
+                m_row._active_icon.remove_css_class('conn-active-icon')
 
         # Update dropdown label
         if conn:
