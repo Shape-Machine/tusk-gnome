@@ -838,7 +838,7 @@ class TuskWindow(Adw.ApplicationWindow):
 
     def _on_connection_updated(self, _dlg, conn, old_row):
         try:
-            self._store.update(conn)
+            conn = self._store.update(conn)
         except KeyringUnavailableError as e:
             self._show_keyring_error(str(e))
             return

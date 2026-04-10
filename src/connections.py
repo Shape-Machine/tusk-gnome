@@ -60,16 +60,18 @@ def _apply_defaults(conn, tags_registry):
     # Convert legacy folder field to a tag
     if 'folder' in conn:
         folder = conn.pop('folder')
-        if folder and folder not in conn['tags']:
-            conn['tags'].append(folder)
+        if folder:
             tags_registry.setdefault(folder, {'color': '#aaaaaa', 'warn_on_connect': False})
+            if folder not in conn['tags']:
+                conn['tags'].append(folder)
     # Convert legacy environment/environment_color fields to a tag
     if 'environment' in conn:
         env = conn.pop('environment')
         color = conn.pop('environment_color', '#aaaaaa') or '#aaaaaa'
-        if env and env not in conn['tags']:
-            conn['tags'].append(env)
+        if env:
             tags_registry.setdefault(env, {'color': color, 'warn_on_connect': False})
+            if env not in conn['tags']:
+                conn['tags'].append(env)
     elif 'environment_color' in conn:
         conn.pop('environment_color')
 
@@ -190,9 +192,13 @@ class ConnectionStore:
             raise KeyringUnavailableError(str(e)) from e
         for i, c in enumerate(self._connections):
             if c['id'] == conn['id']:
-                self._connections[i] = conn
+                merged = {**c, **conn}
+                _apply_defaults(merged, self._tags_registry)
+                self._connections[i] = merged
+                conn = merged
                 break
         self._save()
+        return conn
 
 
 class FavouritesStore:
