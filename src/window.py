@@ -46,7 +46,6 @@ class TuskWindow(Adw.ApplicationWindow):
         self._warned_conn_ids = set()  # conn_ids warned this session (warn_on_connect)
         self._conn_health = {}         # conn_id → {status, msg, ts}
         self._conn_mgr_rows = {}       # conn_id → manager list row
-        self._conn_popover_rows = {}   # conn_id → popover list row
         self._sidebar_css = Gtk.CssProvider()
         self._main_css = Gtk.CssProvider()
         self._static_css = Gtk.CssProvider()
@@ -595,7 +594,7 @@ class TuskWindow(Adw.ApplicationWindow):
             btn = Gtk.Button(label=label)
             btn.add_css_class('flat')
             btn.add_css_class('caption')
-            btn.connect('clicked', lambda _, a=action: self.activate_action(a))
+            btn.connect('clicked', lambda _, a=action: self.activate_action(a, None))
             footer.append(btn)
 
         mgr_box.append(footer)
@@ -657,70 +656,7 @@ class TuskWindow(Adw.ApplicationWindow):
             return 'Never connected'
 
     def _add_connection_row(self, conn, position=-1, tags_registry=None):
-        row = Adw.ActionRow()
-        row.set_title(conn['name'])
-        row.set_subtitle(self._conn_subtitle(conn))
-        row.set_icon_name('network-server-symbolic')
-        row.set_activatable(True)
-        row._conn = conn
-
-        if conn.get('read_only'):
-            lock = Gtk.Image.new_from_icon_name('changes-prevent-symbolic')
-            lock.set_tooltip_text('Read-only connection')
-            lock.set_valign(Gtk.Align.CENTER)
-            lock.add_css_class('dim-label')
-            row.add_suffix(lock)
-
-        role_badge = Gtk.Label(label='🛡')
-        role_badge.add_css_class('dim-label')
-        role_badge.add_css_class('connection-role-badge')
-        role_badge.set_visible(False)
-        role_badge.set_valign(Gtk.Align.CENTER)
-        row.add_suffix(role_badge)
-        row._role_badge = role_badge
-
-        menu = Gio.Menu()
-        menu.append('Disconnect', 'row.disconnect')
-        menu.append('Edit', 'row.edit')
-        menu.append('Duplicate', 'row.duplicate')
-        menu.append('Copy as URI', 'row.copy-uri')
-        menu.append('Export to .pgpass…', 'row.export-pgpass')
-        menu.append('Delete', 'row.delete')
-
-        menu_btn = Gtk.MenuButton()
-        menu_btn.set_icon_name('view-more-symbolic')
-        menu_btn.set_menu_model(menu)
-        menu_btn.add_css_class('flat')
-        menu_btn.set_valign(Gtk.Align.CENTER)
-        menu_btn.set_tooltip_text('Connection options')
-        row.add_suffix(menu_btn)
-
-        ag = Gio.SimpleActionGroup()
-        disconnect_action = Gio.SimpleAction.new('disconnect', None)
-        disconnect_action.set_enabled(False)
-        disconnect_action.connect('activate', lambda a, p, r=row: self._on_disconnect(r))
-        ag.add_action(disconnect_action)
-        row._disconnect_action = disconnect_action
-        edit_action = Gio.SimpleAction.new('edit', None)
-        edit_action.connect('activate', lambda a, p, r=row: self._on_edit_connection(r))
-        ag.add_action(edit_action)
-        duplicate_action = Gio.SimpleAction.new('duplicate', None)
-        duplicate_action.connect('activate', lambda a, p, r=row: self._on_duplicate_connection(r))
-        ag.add_action(duplicate_action)
-        copy_uri_action = Gio.SimpleAction.new('copy-uri', None)
-        copy_uri_action.connect('activate', lambda a, p, r=row: self._on_copy_as_uri(r))
-        ag.add_action(copy_uri_action)
-        export_pgpass_action = Gio.SimpleAction.new('export-pgpass', None)
-        export_pgpass_action.connect('activate', lambda a, p, r=row: self._on_export_pgpass(r))
-        ag.add_action(export_pgpass_action)
-        delete_action = Gio.SimpleAction.new('delete', None)
-        delete_action.connect('activate', lambda a, p, r=row: self._on_delete_connection(r))
-        ag.add_action(delete_action)
-        row.insert_action_group('row', ag)
-
-        self._conn_popover_rows[conn['id']] = row
         self._add_mgr_row(conn, position, tags_registry=tags_registry)
-        return row
 
     def _add_mgr_row(self, conn, position=-1, tags_registry=None):
         row = Adw.ActionRow()
@@ -777,6 +713,14 @@ class TuskWindow(Adw.ApplicationWindow):
         icon.set_valign(Gtk.Align.CENTER)
         row.add_prefix(icon)
         row._active_icon = icon
+
+        role_badge = Gtk.Label(label='🛡')
+        role_badge.add_css_class('dim-label')
+        role_badge.add_css_class('connection-role-badge')
+        role_badge.set_visible(False)
+        role_badge.set_valign(Gtk.Align.CENTER)
+        row.add_suffix(role_badge)
+        row._role_badge = role_badge
 
         # Context menu
         menu = Gio.Menu()
@@ -1056,7 +1000,8 @@ class TuskWindow(Adw.ApplicationWindow):
         except KeyringUnavailableError as e:
             self._show_keyring_error(str(e))
             return
-        self._add_connection_row(conn)
+        pos = source_row.get_index()
+        self._add_connection_row(conn, position=pos + 1 if pos >= 0 else -1)
 
     def _on_connection_updated(self, _dlg, conn, old_row):
         try:
@@ -1066,14 +1011,13 @@ class TuskWindow(Adw.ApplicationWindow):
             return
         conn_id = conn['id']
 
-        # Rebuild both rows so suffix widgets (lock icon, tag chips) stay in sync.
-        self._conn_popover_rows.pop(conn_id, None)
-
+        # Rebuild manager row so suffix widgets (lock icon, tag chips) stay in sync.
         m_row = self._conn_mgr_rows.pop(conn_id, None)
+        pos = m_row.get_index() if m_row else -1
         if m_row:
             self._mgr_list.remove(m_row)
 
-        self._add_connection_row(conn)
+        self._add_connection_row(conn, position=pos)
 
         if self._active_conn_id == conn_id:
             self._set_active_conn(conn)
@@ -1104,8 +1048,6 @@ class TuskWindow(Adw.ApplicationWindow):
         except KeyringUnavailableError as e:
             self._show_keyring_error(str(e))
             return
-
-        self._conn_popover_rows.pop(conn_id, None)
 
         m_row = self._conn_mgr_rows.pop(conn_id, None)
         if m_row:
@@ -1209,12 +1151,12 @@ class TuskWindow(Adw.ApplicationWindow):
         tooltip_parts = [f'{k}: {"yes" if v else "no"}' for k, v in attrs.items()]
         tooltip = '\n'.join(tooltip_parts) if tooltip_parts else ''
 
-        # Update popover row badge
-        p_row = self._conn_popover_rows.get(conn['id'])
-        if p_row:
-            p_row._role_badge.set_visible(is_superuser)
+        # Update manager row badge
+        m_row = self._conn_mgr_rows.get(conn['id'])
+        if m_row:
+            m_row._role_badge.set_visible(is_superuser)
             if is_superuser:
-                p_row._role_badge.set_tooltip_text(tooltip)
+                m_row._role_badge.set_tooltip_text(tooltip)
 
         # Update dropdown badge if this is the active connection
         if self._active_conn_id == conn['id']:
@@ -1317,12 +1259,6 @@ class TuskWindow(Adw.ApplicationWindow):
         self._active_conn_id = conn['id'] if conn else None
         self._active_conn = conn
 
-        # Update per-row disconnect action enabled state (popover + manager)
-        for p_row in self._conn_popover_rows.values():
-            p_row._disconnect_action.set_enabled(
-                bool(conn and p_row._conn['id'] == conn['id'])
-            )
-
         for conn_id, m_row in self._conn_mgr_rows.items():
             is_active = bool(conn and conn_id == conn['id'])
             m_row._disconnect_action.set_enabled(is_active)
@@ -1376,10 +1312,6 @@ class TuskWindow(Adw.ApplicationWindow):
         # calls store.update(row._conn).
         tags_registry = self._store.get_tags_registry()
         fresh = {c['id']: c for c in self._store.list()}
-        # Refresh popover row _conn references (no visual rebuild needed)
-        for conn_id, p_row in self._conn_popover_rows.items():
-            if conn_id in fresh:
-                p_row._conn = fresh[conn_id]
         for conn_id, m_row in list(self._conn_mgr_rows.items()):
             conn = fresh.get(conn_id, m_row._conn)
             pos = m_row.get_index()
@@ -1838,7 +1770,6 @@ class TuskWindow(Adw.ApplicationWindow):
             mgr_row = self._conn_mgr_rows.pop(conn_id, None)
             if mgr_row:
                 self._mgr_list.remove(mgr_row)
-            self._conn_popover_rows.pop(conn_id, None)
             self._conn_health.pop(conn_id, None)
             if conn_id == self._active_conn_id:
                 self._set_active_conn(None)
@@ -2692,7 +2623,7 @@ class TuskWindow(Adw.ApplicationWindow):
         dlg.present(self)
 
     def _on_edit_connection_from_browser(self, _browser, conn):
-        p_row = self._conn_popover_rows.get(conn.get('id'))
-        if p_row:
-            self._on_edit_connection(p_row)
+        m_row = self._conn_mgr_rows.get(conn.get('id'))
+        if m_row:
+            self._on_edit_connection(m_row)
 
