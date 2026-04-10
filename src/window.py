@@ -521,17 +521,18 @@ class TuskWindow(Adw.ApplicationWindow):
         self._mgr_search.connect('search-changed', self._on_mgr_search_changed)
         mgr_box.append(self._mgr_search)
 
-        # Tag filter chip strip (hidden until tags exist)
+        # Tag filter column (vertical, hidden until tags exist)
+        self._mgr_tag_strip = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        self._mgr_tag_strip.set_margin_top(MARGIN_XS)
+        self._mgr_tag_strip.set_margin_start(MARGIN_XS)
+        self._mgr_tag_strip.set_margin_end(MARGIN_XS)
+
         tag_scroll = Gtk.ScrolledWindow()
-        tag_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
-        tag_scroll.set_margin_start(MARGIN_MD)
-        tag_scroll.set_margin_end(MARGIN_MD)
-        tag_scroll.set_margin_bottom(MARGIN_XS)
-        self._mgr_tag_strip = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        tag_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        tag_scroll.set_size_request(140, -1)
         tag_scroll.set_child(self._mgr_tag_strip)
         self._mgr_tag_scroll = tag_scroll
         tag_scroll.set_visible(False)
-        mgr_box.append(tag_scroll)
 
         # Connection list
         self._mgr_list = Gtk.ListBox()
@@ -543,8 +544,14 @@ class TuskWindow(Adw.ApplicationWindow):
 
         mgr_scroll = Gtk.ScrolledWindow()
         mgr_scroll.set_vexpand(True)
+        mgr_scroll.set_hexpand(True)
         mgr_scroll.set_child(self._mgr_list)
-        mgr_box.append(mgr_scroll)
+
+        content_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        content_box.set_vexpand(True)
+        content_box.append(tag_scroll)
+        content_box.append(mgr_scroll)
+        mgr_box.append(content_box)
 
         self._main_stack.add_named(mgr_box, 'manager')
 
@@ -1395,9 +1402,17 @@ class TuskWindow(Adw.ApplicationWindow):
             return
         self._mgr_tag_scroll.set_visible(True)
         for tag_name in sorted(tags):
-            btn = Gtk.ToggleButton(label=tag_name)
+            color = tags[tag_name].get('color', '#888888')
+            safe_color = color if _COLOR_RE.match(color) else '#888888'
+            lbl = Gtk.Label()
+            lbl.set_markup(
+                f'<span foreground="{safe_color}">⬤</span>'
+                f'  {GLib.markup_escape_text(tag_name)}'
+            )
+            lbl.set_xalign(0)
+            btn = Gtk.ToggleButton()
+            btn.set_child(lbl)
             btn.add_css_class('flat')
-            btn.add_css_class('pill')
             btn.set_active(tag_name in self._active_tag_filters)
             btn.connect('toggled', self._on_tag_filter_toggled, tag_name)
             self._mgr_tag_strip.append(btn)
