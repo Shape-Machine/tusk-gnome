@@ -1,3 +1,4 @@
+import re
 import threading
 import uuid
 from urllib.parse import urlparse, unquote, quote
@@ -218,7 +219,8 @@ class ConnectionDialog(Adw.Dialog):
                 # Colored swatch prefix
                 swatch = Gtk.Label()
                 swatch.set_valign(Gtk.Align.CENTER)
-                color = meta.get('color', '#aaaaaa')
+                raw_color = meta.get('color', '#aaaaaa')
+                color = raw_color if re.match(r'^#[0-9a-fA-F]{6}$', raw_color or '') else '#aaaaaa'
                 swatch.set_markup(f'<span foreground="{color}">⬤</span>')
                 row.add_prefix(swatch)
                 if meta.get('warn_on_connect'):
