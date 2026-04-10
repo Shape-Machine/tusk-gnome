@@ -29,10 +29,12 @@ class TagsDialog(Adw.Dialog):
         self._list_box.add_css_class('boxed-list')
         self._list_box.set_selection_mode(Gtk.SelectionMode.NONE)
 
-        add_row = Adw.ButtonRow(title='Add Tag')
-        add_row.set_start_icon_name('list-add-symbolic')
-        add_row.add_css_class('suggested-action')
-        add_row.connect('activated', self._on_add_tag)
+        add_btn = Gtk.Button(label='Add Tag')
+        add_btn.set_icon_name('list-add-symbolic')
+        add_btn.add_css_class('suggested-action')
+        add_btn.add_css_class('pill')
+        add_btn.set_halign(Gtk.Align.CENTER)
+        add_btn.connect('clicked', self._on_add_tag)
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
         box.set_margin_top(16)
@@ -40,7 +42,7 @@ class TagsDialog(Adw.Dialog):
         box.set_margin_start(20)
         box.set_margin_end(20)
         box.append(self._list_box)
-        box.append(add_row)
+        box.append(add_btn)
 
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
