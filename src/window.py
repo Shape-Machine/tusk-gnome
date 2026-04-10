@@ -41,6 +41,7 @@ class TuskWindow(Adw.ApplicationWindow):
         self._conn_search = ''
         self._conn_sort = prefs.get('conn_sort', 'manual')
         self._active_tag_filters = set()
+        self._warned_conn_ids = set()  # conn_ids warned this session (warn_on_connect)
         self._conn_mgr_rows = {}       # conn_id → manager list row
         self._conn_popover_rows = {}   # conn_id → popover list row
         self._sidebar_css = Gtk.CssProvider()
@@ -494,6 +495,11 @@ class TuskWindow(Adw.ApplicationWindow):
         self._sort_btn.add_css_class('flat')
         mgr_toolbar.append(self._sort_btn)
 
+        tags_btn = Gtk.Button(label='Manage Tags')
+        tags_btn.add_css_class('flat')
+        tags_btn.connect('clicked', self._on_manage_tags)
+        mgr_toolbar.append(tags_btn)
+
         spacer = Gtk.Box()
         spacer.set_hexpand(True)
         mgr_toolbar.append(spacer)
@@ -760,7 +766,7 @@ class TuskWindow(Adw.ApplicationWindow):
 
     def _on_add_connection(self, _btn):
         self._conn_popover.popdown()
-        dlg = ConnectionDialog(parent=self)
+        dlg = ConnectionDialog(parent=self, store=self._store)
         dlg.connect('connection-saved', self._on_connection_added)
         dlg.present(self)
 
@@ -977,7 +983,7 @@ class TuskWindow(Adw.ApplicationWindow):
 
     def _on_edit_connection(self, row):
         self._conn_popover.popdown()
-        dlg = ConnectionDialog(parent=self, connection=row._conn)
+        dlg = ConnectionDialog(parent=self, connection=row._conn, store=self._store)
         dlg.connect('connection-saved', self._on_connection_updated, row)
         dlg.present(self)
 
@@ -988,7 +994,7 @@ class TuskWindow(Adw.ApplicationWindow):
         except KeyringUnavailableError as e:
             self._show_keyring_error(str(e))
             return
-        dlg = ConnectionDialog(parent=self, connection=conn, duplicate=True)
+        dlg = ConnectionDialog(parent=self, connection=conn, duplicate=True, store=self._store)
         dlg.connect('connection-saved', self._on_connection_duplicated, row)
         dlg.present(self)
 
@@ -1086,6 +1092,41 @@ class TuskWindow(Adw.ApplicationWindow):
             self._show_keyring_error(str(e))
             return
 
+        # warn_on_connect: once per session per connection
+        conn_id = row._conn['id']
+        if conn_id not in self._warned_conn_ids:
+            registry = self._store.get_tags_registry()
+            warn_tags = [
+                t for t in conn.get('tags', [])
+                if registry.get(t, {}).get('warn_on_connect')
+            ]
+            if warn_tags:
+                tag_list = ', '.join(f'"{t}"' for t in warn_tags)
+                dialog = Adw.AlertDialog(
+                    heading='Production environment',
+                    body=f'This connection is tagged {tag_list}. Proceed with care.',
+                )
+                dialog.add_response('cancel', 'Cancel')
+                dialog.add_response('readonly', 'Connect as Read-Only')
+                dialog.add_response('connect', 'Connect')
+                dialog.set_response_appearance('readonly', Adw.ResponseAppearance.SUGGESTED)
+                dialog.set_default_response('readonly')
+                dialog.set_close_response('cancel')
+                self._warned_conn_ids.add(conn_id)
+                dialog.connect('response', self._on_warn_response, conn, row)
+                dialog.present(self)
+                return
+
+        self._do_connect(conn, row)
+
+    def _on_warn_response(self, _dialog, response, conn, row):
+        if response == 'cancel':
+            return
+        if response == 'readonly':
+            conn = {**conn, 'read_only': True}
+        self._do_connect(conn, row)
+
+    def _do_connect(self, conn, row):
         # Record last connected timestamp on both row copies
         now_ts = datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
         conn_id = row._conn['id']
@@ -1278,6 +1319,23 @@ class TuskWindow(Adw.ApplicationWindow):
                 widget.set_connection(conn)
 
     # ── Connection manager helpers ────────────────────────────────────────────
+
+    def _on_manage_tags(self, _btn):
+        from tags_dialog import TagsDialog
+        dlg = TagsDialog(self._store)
+        dlg.connect('tags-changed', self._on_tags_changed)
+        dlg.present(self)
+
+    def _on_tags_changed(self, _dlg):
+        # Rebuild every manager row so tag chips and colors are current
+        tags_registry = self._store.get_tags_registry()
+        for conn_id, m_row in list(self._conn_mgr_rows.items()):
+            conn = m_row._conn
+            pos = m_row.get_index()
+            self._conn_mgr_rows.pop(conn_id)
+            self._mgr_list.remove(m_row)
+            self._add_mgr_row(conn, position=pos, tags_registry=tags_registry)
+        self._refresh_tag_strip()
 
     def _show_connection_manager(self):
         self._main_stack.set_visible_child_name('manager')

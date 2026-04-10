@@ -18,7 +18,7 @@ class ConnectionDialog(Adw.Dialog):
         'connection-saved': (GObject.SignalFlags.RUN_FIRST, None, (GObject.TYPE_PYOBJECT,))
     }
 
-    def __init__(self, parent, connection=None, duplicate=False):
+    def __init__(self, parent, connection=None, duplicate=False, store=None):
         if duplicate:
             title = 'Duplicate Connection'
         elif connection is None:
@@ -29,6 +29,8 @@ class ConnectionDialog(Adw.Dialog):
         self._connection = connection
         self._duplicate = duplicate
         self._parent = parent
+        self._store = store
+        self._selected_tags = set(connection.get('tags', []) if connection else [])
         self._build_ui()
         if duplicate:
             self.connect('map', lambda _: self._name_row.grab_focus())
@@ -204,9 +206,35 @@ class ConnectionDialog(Adw.Dialog):
         left_col.append(details_group)
         left_col.append(auth_group)
 
+        # ── Tags ─────────────────────────────────────────────────────────────
+        tags_group = Adw.PreferencesGroup(title='Tags')
+        self._tag_rows = {}  # name → Adw.CheckRow
+        if self._store:
+            registry = self._store.get_tags_registry()
+            for tag_name in sorted(registry):
+                meta = registry[tag_name]
+                row = Adw.CheckRow(title=tag_name)
+                row.set_active(tag_name in self._selected_tags)
+                row.connect('notify::active', self._on_tag_toggled, tag_name)
+                # Colored swatch prefix
+                swatch = Gtk.Label(label='⬤')
+                swatch.set_valign(Gtk.Align.CENTER)
+                color = meta.get('color', '#aaaaaa')
+                swatch.set_markup(f'<span foreground="{color}">⬤</span>')
+                row.add_prefix(swatch)
+                if meta.get('warn_on_connect'):
+                    warn = Gtk.Label(label='⚠')
+                    warn.set_valign(Gtk.Align.CENTER)
+                    warn.set_tooltip_text('Warn on connect')
+                    warn.add_css_class('warning')
+                    row.add_suffix(warn)
+                tags_group.add(row)
+                self._tag_rows[tag_name] = row
+
         right_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
         right_col.set_hexpand(True)
         right_col.append(options_group)
+        right_col.append(tags_group)
         right_col.append(ssh_group)
 
         two_col = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=20)
@@ -265,6 +293,12 @@ class ConnectionDialog(Adw.Dialog):
         self._toast_overlay = Adw.ToastOverlay()
         self._toast_overlay.set_child(toolbar_view)
         self.set_child(self._toast_overlay)
+
+    def _on_tag_toggled(self, row, _param, tag_name):
+        if row.get_active():
+            self._selected_tags.add(tag_name)
+        else:
+            self._selected_tags.discard(tag_name)
 
     def _on_browse_key(self, _btn):
         dialog = Gtk.FileChooserNative(
@@ -451,6 +485,7 @@ class ConnectionDialog(Adw.Dialog):
             'ssh_user': self._ssh_user_row.get_text().strip(),
             'ssh_key_path': self._ssh_key_row.get_text().strip(),
             'ssh_passphrase': self._ssh_passphrase_row.get_text(),
+            'tags': sorted(self._selected_tags),
         }
         default_schema = self._default_schema_row.get_text().strip()
         if default_schema:
