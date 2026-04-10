@@ -97,6 +97,9 @@ class ConnectionDialog(Adw.Dialog):
             'Tusk will add a writer/reader toggle to the connection sidebar.'
         )
         self._aurora_reader_row.set_visible(False)
+        self._reader_autofilled = False
+        self._setting_reader_programmatically = False
+        self._aurora_reader_row.connect('notify::text', self._on_reader_text_changed)
 
         details_group.add(self._host_row)
         details_group.add(self._port_row)
@@ -329,11 +332,25 @@ class ConnectionDialog(Adw.Dialog):
             if not self._aurora_reader_row.get_text().strip():
                 reader = aurora_reader_from_writer(host)
                 if reader:
+                    self._setting_reader_programmatically = True
                     self._aurora_reader_row.set_text(reader)
+                    self._setting_reader_programmatically = False
+                    self._reader_autofilled = True
         else:
-            # Only hide if the user hasn't manually entered a reader endpoint
-            if not self._aurora_reader_row.get_text().strip():
+            if self._reader_autofilled:
+                # Clear the auto-filled value — it belongs to a different host
+                self._reader_autofilled = False
+                self._setting_reader_programmatically = True
+                self._aurora_reader_row.set_text('')
+                self._setting_reader_programmatically = False
                 self._aurora_reader_row.set_visible(False)
+            elif not self._aurora_reader_row.get_text().strip():
+                self._aurora_reader_row.set_visible(False)
+
+    def _on_reader_text_changed(self, *_):
+        # If the user edits the reader field directly, it's no longer auto-filled
+        if not self._setting_reader_programmatically:
+            self._reader_autofilled = False
 
     def _on_tag_toggled(self, check, tag_name):
         if check.get_active():

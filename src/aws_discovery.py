@@ -34,7 +34,8 @@ def _friendly_aws_error(stderr, fallback):
             'Permission denied. Your AWS credentials do not have the required permissions.\n\n'
             'Required IAM permissions:\n'
             '  rds:DescribeDBInstances\n'
-            '  rds:DescribeDBClusters\n\n'
+            '  rds:DescribeDBClusters\n'
+            '  ec2:DescribeRegions (for region auto-discovery)\n\n'
             'Ask your AWS administrator to attach these permissions to your IAM user or role.'
         )
     if 'unabletolocatecredentials' in low or 'no credentials' in low or 'expired' in low:
@@ -124,7 +125,9 @@ def get_rds_ca_bundle():
         return _RDS_CA_PATH
     try:
         os.makedirs(CERT_DIR, exist_ok=True)
-        urllib.request.urlretrieve(_RDS_CA_URL, _RDS_CA_PATH)
+        tmp = _RDS_CA_PATH + '.tmp'
+        urllib.request.urlretrieve(_RDS_CA_URL, tmp)
+        os.replace(tmp, _RDS_CA_PATH)
         return _RDS_CA_PATH
     except Exception:
         return None

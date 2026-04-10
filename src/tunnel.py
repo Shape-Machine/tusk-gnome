@@ -280,12 +280,16 @@ def open_tunnel(conn):
             yield host, port
         return
 
+    # Resolve effective DB endpoint (respects Aurora reader toggle)
+    if conn.get('active_endpoint') == 'secondary':
+        db_host = conn.get('secondary_endpoint') or conn['host']
+        db_port = conn.get('secondary_port') or conn['port']
+    else:
+        db_host = conn['host']
+        db_port = conn['port']
+
     if not conn.get('ssh_enabled'):
-        if conn.get('active_endpoint') == 'secondary':
-            yield conn.get('secondary_endpoint') or conn['host'], \
-                  conn.get('secondary_port') or conn['port']
-        else:
-            yield conn['host'], conn['port']
+        yield db_host, db_port
         return
 
     import paramiko
@@ -334,7 +338,7 @@ def open_tunnel(conn):
                 break
             threading.Thread(
                 target=_forward,
-                args=(local_sock, transport, conn['host'], conn['port']),
+                args=(local_sock, transport, db_host, db_port),
                 daemon=True,
             ).start()
 
