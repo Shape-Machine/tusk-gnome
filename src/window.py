@@ -693,11 +693,22 @@ class TuskWindow(Adw.ApplicationWindow):
             lock.add_css_class('dim-label')
             row.add_suffix(lock)
 
+        # Active indicator bar (shown when this connection is the active session)
+        active_bar = Gtk.Box()
+        active_bar.set_size_request(3, -1)
+        active_bar.set_valign(Gtk.Align.FILL)
+        active_bar.add_css_class('connection-active-bar')
+        active_bar.set_visible(False)
+        row.add_prefix(active_bar)
+        row._active_bar = active_bar
+
         # Context menu
         menu = Gio.Menu()
+        menu.append('Disconnect', 'mgr.disconnect')
         menu.append('Edit', 'mgr.edit')
         menu.append('Duplicate', 'mgr.duplicate')
         menu.append('Copy as URI', 'mgr.copy-uri')
+        menu.append('Export to .pgpass…', 'mgr.export-pgpass')
         menu.append('Delete', 'mgr.delete')
         menu_btn = Gtk.MenuButton()
         menu_btn.set_icon_name('view-more-symbolic')
@@ -708,11 +719,17 @@ class TuskWindow(Adw.ApplicationWindow):
         row.add_suffix(menu_btn)
 
         ag = Gio.SimpleActionGroup()
+        disconnect_action = Gio.SimpleAction.new('disconnect', None)
+        disconnect_action.set_enabled(False)
+        disconnect_action.connect('activate', lambda _a, _p, r=row: self._on_disconnect(r))
+        ag.add_action(disconnect_action)
+        row._disconnect_action = disconnect_action
         for name, cb in [
-            ('edit',      lambda _a, _p, r=row: self._on_edit_connection(r)),
-            ('duplicate', lambda _a, _p, r=row: self._on_duplicate_connection(r)),
-            ('copy-uri',  lambda _a, _p, r=row: self._on_copy_as_uri(r)),
-            ('delete',    lambda _a, _p, r=row: self._on_delete_connection(r)),
+            ('edit',          lambda _a, _p, r=row: self._on_edit_connection(r)),
+            ('duplicate',     lambda _a, _p, r=row: self._on_duplicate_connection(r)),
+            ('copy-uri',      lambda _a, _p, r=row: self._on_copy_as_uri(r)),
+            ('export-pgpass', lambda _a, _p, r=row: self._on_export_pgpass(r)),
+            ('delete',        lambda _a, _p, r=row: self._on_delete_connection(r)),
         ]:
             a = Gio.SimpleAction.new(name, None)
             a.connect('activate', cb)
@@ -1216,7 +1233,7 @@ class TuskWindow(Adw.ApplicationWindow):
         self._active_conn_id = conn['id'] if conn else None
         self._active_conn = conn
 
-        # Update per-row disconnect action enabled state
+        # Update per-row disconnect action enabled state (popover + manager)
         row = self._conn_list.get_first_child()
         while row:
             if hasattr(row, '_conn'):
@@ -1224,6 +1241,11 @@ class TuskWindow(Adw.ApplicationWindow):
                     bool(conn and row._conn['id'] == conn['id'])
                 )
             row = row.get_next_sibling()
+
+        for conn_id, m_row in self._conn_mgr_rows.items():
+            is_active = bool(conn and conn_id == conn['id'])
+            m_row._disconnect_action.set_enabled(is_active)
+            m_row._active_bar.set_visible(is_active)
 
         # Update dropdown label
         if conn:
