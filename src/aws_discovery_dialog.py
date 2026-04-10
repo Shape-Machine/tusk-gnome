@@ -203,15 +203,17 @@ class AwsDiscoveryDialog(Adw.Dialog):
         default_region = aws_discovery.get_default_region()
         try:
             regions = aws_discovery.list_regions()
-        except Exception:
+            fetch_error = None
+        except Exception as e:
             regions = []
-        GLib.idle_add(self._on_aws_checked, default_region, regions)
+            fetch_error = str(e)
+        GLib.idle_add(self._on_aws_checked, default_region, regions, fetch_error)
 
-    def _on_aws_checked(self, default_region, regions):
-        self._populate_region_list(regions, default_region)
+    def _on_aws_checked(self, default_region, regions, fetch_error=None):
+        self._populate_region_list(regions, default_region, fetch_error)
         self._stack.set_visible_child_name('region')
 
-    def _populate_region_list(self, regions, default_region):
+    def _populate_region_list(self, regions, default_region, fetch_error=None):
         self._region_rows = []
 
         while True:
@@ -223,6 +225,8 @@ class AwsDiscoveryDialog(Adw.Dialog):
         if not regions:
             self._region_search.set_visible(False)
             self._region_list_scroll.set_visible(False)
+            error_msg = f'Could not fetch region list: {fetch_error}' if fetch_error else 'Could not fetch region list'
+            self._region_fetch_error.set_text(error_msg)
             self._region_fetch_error.set_visible(True)
             # Still show a pre-checked default region if we have one
             if default_region:
