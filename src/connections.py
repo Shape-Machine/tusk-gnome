@@ -1,3 +1,4 @@
+import datetime
 import json
 import os
 import uuid
@@ -207,6 +208,69 @@ class ConnectionStore:
                 updated = {**c, 'tags': [t for t in c['tags'] if t != tag_name]}
                 self._connections[i] = updated
         self._save()
+
+    def export_json(self, include_passwords=False):
+        """Return a JSON-serialisable dict of all connections and the tags registry."""
+        conns = []
+        for c in self._connections:
+            entry = dict(c)
+            if include_passwords:
+                try:
+                    pwd = keyring.get_password(KEYRING_SERVICE, c['id']) or ''
+                    if pwd:
+                        entry['password'] = pwd
+                except Exception:
+                    pass
+                try:
+                    ssh_pp = keyring.get_password(KEYRING_SERVICE, _ssh_key(c['id'])) or ''
+                    if ssh_pp:
+                        entry['ssh_passphrase'] = ssh_pp
+                except Exception:
+                    pass
+            conns.append(entry)
+        return {
+            'schema_version': SCHEMA_VERSION,
+            'exported_at': datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z'),
+            'tags_registry': dict(self._tags_registry),
+            'connections': conns,
+        }
+
+    def bulk_import(self, conns, tags_registry=None):
+        """Import a list of connection dicts, skipping any whose id already exists.
+
+        Name collisions are resolved by appending ' (imported)' to the incoming name.
+        Returns (added, skipped) counts.
+        """
+        if tags_registry:
+            for name, meta in tags_registry.items():
+                self._tags_registry.setdefault(name, meta)
+        existing_ids = {c['id'] for c in self._connections}
+        existing_names = {c['name'] for c in self._connections}
+        added = 0
+        skipped = 0
+        for conn in conns:
+            if conn.get('id') in existing_ids:
+                skipped += 1
+                continue
+            conn = dict(conn)
+            conn['id'] = conn.get('id') or str(uuid.uuid4())
+            if conn.get('name', '') in existing_names:
+                conn['name'] = conn['name'] + ' (imported)'
+            pwd = conn.pop('password', '')
+            ssh_pp = conn.pop('ssh_passphrase', '')
+            _apply_defaults(conn, self._tags_registry)
+            try:
+                keyring.set_password(KEYRING_SERVICE, conn['id'], pwd)
+                keyring.set_password(KEYRING_SERVICE, _ssh_key(conn['id']), ssh_pp)
+            except Exception:
+                pass
+            self._connections.append(conn)
+            existing_ids.add(conn['id'])
+            existing_names.add(conn['name'])
+            added += 1
+        if added > 0 or tags_registry:
+            self._save()
+        return added, skipped
 
 
 class FavouritesStore:
