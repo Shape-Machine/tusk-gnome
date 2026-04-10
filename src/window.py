@@ -49,6 +49,9 @@ class TuskWindow(Adw.ApplicationWindow):
         self._warned_conn_ids = set()  # conn_ids warned this session (warn_on_connect)
         self._conn_health = {}         # conn_id → {status, msg, ts}
         self._conn_mgr_rows = {}       # conn_id → manager list row
+        self._alive = True
+        self._update_status_timeout_id = None
+        self.connect('destroy', lambda _: setattr(self, '_alive', False))
         self._sidebar_css = Gtk.CssProvider()
         self._main_css = Gtk.CssProvider()
         self._static_css = Gtk.CssProvider()
@@ -1349,6 +1352,8 @@ class TuskWindow(Adw.ApplicationWindow):
             GLib.idle_add(self._on_update_result, None, str(e))
 
     def _on_update_result(self, latest_tag, error):
+        if not self._alive:
+            return GLib.SOURCE_REMOVE
         self._update_btn_spinner.stop()
         self._update_btn_stack.set_visible_child_name('label')
         self._update_check_btn.set_sensitive(True)
@@ -1362,11 +1367,14 @@ class TuskWindow(Adw.ApplicationWindow):
             self._show_update_status(f'Up to date (v{latest_tag})')
 
     def _show_update_status(self, text):
+        if self._update_status_timeout_id is not None:
+            GLib.source_remove(self._update_status_timeout_id)
         self._update_status_label.set_text(text)
         self._update_status_label.set_visible(True)
-        GLib.timeout_add(5000, self._hide_update_status)
+        self._update_status_timeout_id = GLib.timeout_add(5000, self._hide_update_status)
 
     def _hide_update_status(self):
+        self._update_status_timeout_id = None
         self._update_status_label.set_visible(False)
         return GLib.SOURCE_REMOVE
 
