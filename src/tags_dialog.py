@@ -152,8 +152,8 @@ class TagsDialog(Adw.Dialog):
                 updated = {**conn, 'tags': [t for t in conn['tags'] if t != name]}
                 try:
                     self._store.update(updated)
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f'Warning: failed to remove tag "{name}" from connection {conn.get("id")}: {e}')
         self._load_tags()
         self.emit('tags-changed')
 

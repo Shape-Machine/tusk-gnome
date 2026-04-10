@@ -1112,16 +1112,16 @@ class TuskWindow(Adw.ApplicationWindow):
                 dialog.set_response_appearance('readonly', Adw.ResponseAppearance.SUGGESTED)
                 dialog.set_default_response('readonly')
                 dialog.set_close_response('cancel')
-                self._warned_conn_ids.add(conn_id)
-                dialog.connect('response', self._on_warn_response, conn, row)
+                dialog.connect('response', self._on_warn_response, conn, row, conn_id)
                 dialog.present(self)
                 return
 
         self._do_connect(conn, row)
 
-    def _on_warn_response(self, _dialog, response, conn, row):
+    def _on_warn_response(self, _dialog, response, conn, row, conn_id):
         if response == 'cancel':
             return
+        self._warned_conn_ids.add(conn_id)
         if response == 'readonly':
             conn = {**conn, 'read_only': True}
         self._do_connect(conn, row)
@@ -1336,6 +1336,7 @@ class TuskWindow(Adw.ApplicationWindow):
             self._mgr_list.remove(m_row)
             self._add_mgr_row(conn, position=pos, tags_registry=tags_registry)
         self._refresh_tag_strip()
+        self._set_active_conn(self._active_conn)
 
     def _show_connection_manager(self):
         self._main_stack.set_visible_child_name('manager')
