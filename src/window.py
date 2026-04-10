@@ -544,6 +544,19 @@ class TuskWindow(Adw.ApplicationWindow):
         self._mgr_list.set_filter_func(self._mgr_filter_row)
         self._mgr_list.set_sort_func(self._mgr_sort_rows)
 
+        # Empty state — shown automatically by ListBox when there are no rows
+        empty_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        empty_box.set_halign(Gtk.Align.CENTER)
+        empty_box.set_valign(Gtk.Align.CENTER)
+        empty_box.set_vexpand(True)
+        empty_icon = Gtk.Image.new_from_icon_name('xyz.shapemachine.tusk-gnome')
+        empty_icon.set_pixel_size(128)
+        empty_box.append(empty_icon)
+        empty_label = Gtk.Label(label='No connections yet')
+        empty_label.add_css_class('dim-label')
+        empty_box.append(empty_label)
+        self._mgr_list.set_placeholder(empty_box)
+
         mgr_scroll = Gtk.ScrolledWindow()
         mgr_scroll.set_vexpand(True)
         mgr_scroll.set_hexpand(True)
