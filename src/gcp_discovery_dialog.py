@@ -77,11 +77,6 @@ class GcpDiscoveryDialog(Adw.Dialog):
         box.append(label_widget)
         return box
 
-    def _build_loading_page(self, label_text):
-        label = Gtk.Label(label=label_text)
-        label.add_css_class('dim-label')
-        return self._build_loading_page_with_label(label)
-
     def _build_project_page(self):
         # ── Project list (checkbox rows) ──────────────────────────────────────
         self._project_list_box = Gtk.ListBox()
@@ -264,13 +259,10 @@ class GcpDiscoveryDialog(Adw.Dialog):
         self._project_rows.append((check, project_id))
 
     def _project_filter_func(self, row):
-        # row is the Adw.ActionRow itself (it's a Gtk.ListBoxRow subclass)
         text = self._project_search.get_text().lower()
         if not text:
             return True
-        title = row.get_title().lower() if hasattr(row, 'get_title') else ''
-        subtitle = row.get_subtitle().lower() if hasattr(row, 'get_subtitle') else ''
-        return text in title or text in subtitle
+        return text in row.get_title().lower() or text in row.get_subtitle().lower()
 
     def _on_manual_add(self, _widget):
         project_id = self._manual_entry.get_text().strip()
@@ -279,17 +271,21 @@ class GcpDiscoveryDialog(Adw.Dialog):
         # Avoid duplicates
         existing_ids = {pid for _, pid in self._project_rows}
         if project_id in existing_ids:
-            self._manual_entry.set_text('')
+            self._manual_entry.add_css_class('error')
             return
+        self._manual_entry.remove_css_class('error')
         self._project_search.set_visible(True)
         self._project_list_scroll.set_visible(True)
+        self._project_fetch_error.set_visible(False)
         self._add_project_row(project_id, checked=True)
         self._manual_entry.set_text('')
 
     def _on_project_confirm(self, _btn):
         selected = [pid for check, pid in self._project_rows if check.get_active()]
         if not selected:
+            self._project_list_box.add_css_class('error')
             return
+        self._project_list_box.remove_css_class('error')
         self._start_discovery(selected)
 
     def _start_discovery(self, projects):
