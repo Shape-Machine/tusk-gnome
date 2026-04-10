@@ -27,7 +27,7 @@ class GcpDiscoveryDialog(Adw.Dialog):
         self._existing_ids = set(existing_instance_ids or [])
         self._conns = []   # discovered connection dicts with internal _gcp_* keys
         self._checks = {}  # idx → (Gtk.CheckButton, conn_dict)
-        self._project = None
+        self._project_rows = []  # list of (check_button, project_id)
         self._missing_proxy_binaries = set()
         self._build_ui()
 
@@ -83,12 +83,40 @@ class GcpDiscoveryDialog(Adw.Dialog):
         return self._build_loading_page_with_label(label)
 
     def _build_project_page(self):
-        group = Adw.PreferencesGroup(
-            title='GCP Project',
-            description='No active project found. Enter the GCP project ID to discover databases in.',
+        # ── Project list (checkbox rows) ──────────────────────────────────────
+        self._project_list_box = Gtk.ListBox()
+        self._project_list_box.add_css_class('boxed-list')
+        self._project_list_box.set_selection_mode(Gtk.SelectionMode.NONE)
+
+        self._project_list_scroll = Gtk.ScrolledWindow()
+        self._project_list_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self._project_list_scroll.set_max_content_height(220)
+        self._project_list_scroll.set_propagate_natural_height(True)
+        self._project_list_scroll.set_child(self._project_list_box)
+
+        self._project_fetch_error = Gtk.Label(label='Could not fetch project list')
+        self._project_fetch_error.add_css_class('dim-label')
+        self._project_fetch_error.set_halign(Gtk.Align.START)
+        self._project_fetch_error.set_visible(False)
+
+        list_group = Adw.PreferencesGroup(
+            title='GCP Projects',
+            description='Select one or more projects to discover databases in.',
         )
-        self._project_entry = Adw.EntryRow(title='Project ID')
-        group.add(self._project_entry)
+
+        # ── Manual add row ────────────────────────────────────────────────────
+        manual_group = Adw.PreferencesGroup()
+        self._manual_entry = Adw.EntryRow(title='Add project ID manually')
+        self._manual_entry.connect('entry-activated', self._on_manual_add)
+
+        add_btn = Gtk.Button()
+        add_btn.set_icon_name('list-add-symbolic')
+        add_btn.set_tooltip_text('Add project')
+        add_btn.add_css_class('flat')
+        add_btn.set_valign(Gtk.Align.CENTER)
+        add_btn.connect('clicked', self._on_manual_add)
+        self._manual_entry.add_suffix(add_btn)
+        manual_group.add(self._manual_entry)
 
         discover_btn = Gtk.Button(label='Discover Databases')
         discover_btn.add_css_class('suggested-action')
@@ -101,11 +129,18 @@ class GcpDiscoveryDialog(Adw.Dialog):
         box.set_margin_bottom(20)
         box.set_margin_start(20)
         box.set_margin_end(20)
-        box.set_valign(Gtk.Align.CENTER)
         box.set_vexpand(True)
-        box.append(group)
+        box.append(list_group)
+        box.append(self._project_list_scroll)
+        box.append(self._project_fetch_error)
+        box.append(manual_group)
         box.append(discover_btn)
-        return box
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_propagate_natural_height(True)
+        scroll.set_child(box)
+        return scroll
 
     def _build_results_page(self):
         self._summary_label = Gtk.Label()
@@ -170,51 +205,100 @@ class GcpDiscoveryDialog(Adw.Dialog):
                 'No active gcloud credentials found.\n\nRun `gcloud auth login` in a terminal and try again.')
             return
 
-        project = gcp_discovery.get_active_project()
-        GLib.idle_add(self._on_gcloud_ready, project)
+        active_project = gcp_discovery.get_active_project()
+        try:
+            projects = gcp_discovery.list_projects()
+        except Exception:
+            projects = []
+        GLib.idle_add(self._on_gcloud_checked, active_project, projects)
 
-    def _on_gcloud_ready(self, project):
-        if project:
-            self._project = project
-            self._start_discovery(project)
-        else:
-            self._stack.set_visible_child_name('project')
+    def _on_gcloud_checked(self, active_project, projects):
+        self._populate_project_list(projects, active_project)
+        self._stack.set_visible_child_name('project')
+
+    def _populate_project_list(self, projects, active_project):
+        """Fill the project ListBox with checkbox rows. Pre-check active_project if found."""
+        self._project_rows = []
+
+        # Clear any existing rows
+        while True:
+            row = self._project_list_box.get_first_child()
+            if row is None:
+                break
+            self._project_list_box.remove(row)
+
+        if not projects:
+            self._project_list_scroll.set_visible(False)
+            self._project_fetch_error.set_visible(True)
+            return
+
+        self._project_list_scroll.set_visible(True)
+        self._project_fetch_error.set_visible(False)
+
+        for p in projects:
+            self._add_project_row(p['id'], p['name'],
+                                  checked=(p['id'] == active_project))
+
+    def _add_project_row(self, project_id, label=None, checked=False):
+        """Append a checkbox row for project_id to the project ListBox."""
+        row = Adw.ActionRow(title=label or project_id)
+        if label and label != project_id:
+            row.set_subtitle(project_id)
+        check = Gtk.CheckButton()
+        check.set_active(checked)
+        check.set_valign(Gtk.Align.CENTER)
+        row.add_suffix(check)
+        row.set_activatable_widget(check)
+        self._project_list_box.append(row)
+        self._project_rows.append((check, project_id))
+
+    def _on_manual_add(self, _widget):
+        project_id = self._manual_entry.get_text().strip()
+        if not project_id:
+            return
+        # Avoid duplicates
+        existing_ids = {pid for _, pid in self._project_rows}
+        if project_id in existing_ids:
+            self._manual_entry.set_text('')
+            return
+        self._project_list_scroll.set_visible(True)
+        self._add_project_row(project_id, checked=True)
+        self._manual_entry.set_text('')
 
     def _on_project_confirm(self, _btn):
-        project = self._project_entry.get_text().strip()
-        if not project:
-            self._project_entry.add_css_class('error')
+        selected = [pid for check, pid in self._project_rows if check.get_active()]
+        if not selected:
             return
-        self._project_entry.remove_css_class('error')
-        self._project = project
-        self._start_discovery(project)
+        self._start_discovery(selected)
 
-    def _start_discovery(self, project):
-        self._loading_label_widget.set_text(f'Discovering databases in {project}…')
+    def _start_discovery(self, projects):
+        label = projects[0] if len(projects) == 1 else f'{len(projects)} projects'
+        self._loading_label_widget.set_text(f'Discovering databases in {label}…')
         self._stack.set_visible_child_name('loading')
-        threading.Thread(target=self._run_discovery, args=(project,), daemon=True).start()
+        threading.Thread(target=self._run_discovery, args=(projects,), daemon=True).start()
 
-    def _run_discovery(self, project):
+    def _run_discovery(self, projects):
         conns = []
         errors = []
 
-        # Cloud SQL
-        try:
-            instances = gcp_discovery.discover_cloud_sql(project)
-            for inst in instances:
-                conn = gcp_discovery.build_cloud_sql_conn(inst, project, fetch_cert=True)
-                conns.append(conn)
-        except RuntimeError as e:
-            errors.append(f'Cloud SQL: {e}')
+        for project in projects:
+            # Cloud SQL
+            try:
+                instances = gcp_discovery.discover_cloud_sql(project)
+                for inst in instances:
+                    conn = gcp_discovery.build_cloud_sql_conn(inst, project, fetch_cert=True)
+                    conns.append(conn)
+            except RuntimeError as e:
+                errors.append(f'{project} / Cloud SQL: {e}')
 
-        # AlloyDB
-        try:
-            pairs = gcp_discovery.discover_alloydb(project)
-            for cluster, inst in pairs:
-                conn = gcp_discovery.build_alloydb_conn(cluster, inst, project, fetch_cert=True)
-                conns.append(conn)
-        except RuntimeError as e:
-            errors.append(f'AlloyDB: {e}')
+            # AlloyDB
+            try:
+                pairs = gcp_discovery.discover_alloydb(project)
+                for cluster, inst in pairs:
+                    conn = gcp_discovery.build_alloydb_conn(cluster, inst, project, fetch_cert=True)
+                    conns.append(conn)
+            except RuntimeError as e:
+                errors.append(f'{project} / AlloyDB: {e}')
 
         GLib.idle_add(self._show_results, conns, errors)
 
@@ -232,24 +316,32 @@ class GcpDiscoveryDialog(Adw.Dialog):
             self._results_list.remove(row)
 
         if not conns:
-            msg = 'No PostgreSQL instances found in this project.'
+            msg = 'No PostgreSQL instances found in the selected project(s).'
             if errors:
                 msg += '\n\nErrors:\n' + '\n'.join(errors)
             self._show_error('No instances found', msg)
             return
 
-        # Group by service then region
-        groups = {}  # (service, region) → [conn]
+        # Determine whether results span multiple projects
+        projects_in_results = {conn.get('_gcp_project', '') for conn in conns}
+        multi_project = len(projects_in_results) > 1
+
+        # Group by project, service, region
+        groups = {}  # (project, service, region) → [conn]
         for conn in conns:
-            key = (conn.get('_gcp_service', ''), conn.get('_gcp_region', ''))
+            key = (conn.get('_gcp_project', ''),
+                   conn.get('_gcp_service', ''),
+                   conn.get('_gcp_region', ''))
             groups.setdefault(key, []).append(conn)
 
         idx = 0
-        for (service, region), group_conns in sorted(groups.items()):
+        for (project, service, region), group_conns in sorted(groups.items()):
             # Section header row
-            header_row = Adw.ActionRow(
-                title=f'{service} — {region}' if region else service,
-            )
+            if multi_project and project:
+                title = f'{project} / {service} — {region}' if region else f'{project} / {service}'
+            else:
+                title = f'{service} — {region}' if region else service
+            header_row = Adw.ActionRow(title=title)
             header_row.set_activatable(False)
             header_row.add_css_class('dim-label')
             self._results_list.append(header_row)
@@ -264,7 +356,7 @@ class GcpDiscoveryDialog(Adw.Dialog):
                     subtitle_parts.append('IAM auth')
                 if already:
                     subtitle_parts.append('Already imported')
-                row.set_subtitle(' · '.join(p for p in subtitle_parts if p))
+                row.set_subtitle(' · '.join(part for part in subtitle_parts if part))
                 row.set_sensitive(not already)
 
                 check = Gtk.CheckButton()
