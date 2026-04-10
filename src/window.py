@@ -500,9 +500,11 @@ class TuskWindow(Adw.ApplicationWindow):
         tags_btn.connect('clicked', self._on_manage_tags)
         mgr_toolbar.append(tags_btn)
 
-        spacer = Gtk.Box()
-        spacer.set_hexpand(True)
-        mgr_toolbar.append(spacer)
+        self._mgr_search = Gtk.SearchEntry()
+        self._mgr_search.set_placeholder_text('Search…')
+        self._mgr_search.set_hexpand(True)
+        self._mgr_search.connect('search-changed', self._on_mgr_search_changed)
+        mgr_toolbar.append(self._mgr_search)
 
         mgr_add_btn = Gtk.Button(label='Add Connection')
         mgr_add_btn.add_css_class('suggested-action')
@@ -511,15 +513,6 @@ class TuskWindow(Adw.ApplicationWindow):
         mgr_toolbar.append(mgr_add_btn)
 
         mgr_box.append(mgr_toolbar)
-
-        # Search entry (Ctrl+F focuses it)
-        self._mgr_search = Gtk.SearchEntry()
-        self._mgr_search.set_placeholder_text('Search by name, host, database, or tag:…')
-        self._mgr_search.set_margin_start(MARGIN_MD)
-        self._mgr_search.set_margin_end(MARGIN_MD)
-        self._mgr_search.set_margin_bottom(MARGIN_XS)
-        self._mgr_search.connect('search-changed', self._on_mgr_search_changed)
-        mgr_box.append(self._mgr_search)
 
         # Tag filter column (vertical, hidden until tags exist)
         self._mgr_tag_strip = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
