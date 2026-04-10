@@ -9,6 +9,23 @@ CONNECTIONS_FILE = os.path.join(CONFIG_DIR, 'connections.json')
 FAVOURITES_FILE = os.path.join(CONFIG_DIR, 'favourites.json')
 KEYRING_SERVICE = 'xyz.shapemachine.tusk-gnome'
 
+SCHEMA_VERSION = 2
+
+_NEW_FIELD_DEFAULTS = {
+    'tags': list,
+    'last_connected': None,
+    'ssl_mode': 'prefer',
+    'ssl_root_cert': None,
+    'cloud_provider': None,
+    'cloud_region': None,
+    'cloud_auth_mode': 'password',
+    'cloud_instance_id': None,
+    'cloud_proxy_enabled': False,
+    'cloud_proxy_port': None,
+    'secondary_endpoint': None,
+    'secondary_port': None,
+}
+
 
 class KeyringUnavailableError(Exception):
     pass
@@ -18,22 +35,84 @@ def _ssh_key(conn_id):
     return f'{conn_id}:ssh'
 
 
+def _apply_defaults(conn, tags_registry):
+    """Add any missing new fields to a connection dict in-place."""
+    if 'id' not in conn:
+        conn['id'] = str(uuid.uuid4())
+    for field, default in _NEW_FIELD_DEFAULTS.items():
+        if field not in conn:
+            conn[field] = default() if callable(default) else default
+    # Convert legacy folder field to a tag
+    if 'folder' in conn:
+        folder = conn.pop('folder')
+        if folder and folder not in conn['tags']:
+            conn['tags'].append(folder)
+            tags_registry.setdefault(folder, {'color': '#aaaaaa', 'warn_on_connect': False})
+    # Convert legacy environment/environment_color fields to a tag
+    if 'environment' in conn:
+        env = conn.pop('environment')
+        color = conn.pop('environment_color', '#aaaaaa') or '#aaaaaa'
+        if env and env not in conn['tags']:
+            conn['tags'].append(env)
+            tags_registry.setdefault(env, {'color': color, 'warn_on_connect': False})
+    elif 'environment_color' in conn:
+        conn.pop('environment_color')
+
+
 class ConnectionStore:
     def __init__(self):
         os.makedirs(CONFIG_DIR, exist_ok=True)
-        self._connections = self._load()
+        self._connections, self._tags_registry = self._load()
 
     def _load(self):
-        if os.path.exists(CONNECTIONS_FILE):
-            with open(CONNECTIONS_FILE) as f:
-                return json.load(f)
-        return []
+        if not os.path.exists(CONNECTIONS_FILE):
+            return [], {}
+        with open(CONNECTIONS_FILE) as f:
+            raw = json.load(f)
+        if isinstance(raw, list):
+            # v1 format — bare array; migrate in-place and save
+            return self._migrate_v1(raw)
+        # v2+ format
+        connections = raw.get('connections', [])
+        tags_registry = raw.get('tags', {})
+        # Still apply defaults in case new fields were added since last write
+        for conn in connections:
+            _apply_defaults(conn, tags_registry)
+        return connections, tags_registry
+
+    def _migrate_v1(self, old_list):
+        tags_registry = {}
+        for conn in old_list:
+            _apply_defaults(conn, tags_registry)
+        self._connections = old_list
+        self._tags_registry = tags_registry
+        self._save()
+        return old_list, tags_registry
 
     def _save(self):
         tmp = CONNECTIONS_FILE + '.tmp'
         with open(tmp, 'w') as f:
-            json.dump(self._connections, f, indent=2)
+            json.dump(
+                {
+                    'schema_version': SCHEMA_VERSION,
+                    'connections': self._connections,
+                    'tags': self._tags_registry,
+                },
+                f,
+                indent=2,
+            )
         os.replace(tmp, CONNECTIONS_FILE)
+
+    def get_tags_registry(self):
+        return dict(self._tags_registry)
+
+    def set_tag(self, name, color, warn_on_connect):
+        self._tags_registry[name] = {'color': color, 'warn_on_connect': warn_on_connect}
+        self._save()
+
+    def remove_tag(self, name):
+        self._tags_registry.pop(name, None)
+        self._save()
 
     def list(self):
         return list(self._connections)
