@@ -208,16 +208,14 @@ class ConnectionDialog(Adw.Dialog):
 
         # ── Tags ─────────────────────────────────────────────────────────────
         tags_group = Adw.PreferencesGroup(title='Tags')
-        self._tag_rows = {}  # name → Adw.CheckRow
+        self._tag_checks = {}  # name → Gtk.CheckButton
         if self._store:
             registry = self._store.get_tags_registry()
             for tag_name in sorted(registry):
                 meta = registry[tag_name]
-                row = Adw.CheckRow(title=tag_name)
-                row.set_active(tag_name in self._selected_tags)
-                row.connect('notify::active', self._on_tag_toggled, tag_name)
+                row = Adw.ActionRow(title=tag_name)
                 # Colored swatch prefix
-                swatch = Gtk.Label(label='⬤')
+                swatch = Gtk.Label()
                 swatch.set_valign(Gtk.Align.CENTER)
                 color = meta.get('color', '#aaaaaa')
                 swatch.set_markup(f'<span foreground="{color}">⬤</span>')
@@ -228,8 +226,14 @@ class ConnectionDialog(Adw.Dialog):
                     warn.set_tooltip_text('Warn on connect')
                     warn.add_css_class('warning')
                     row.add_suffix(warn)
+                check = Gtk.CheckButton()
+                check.set_active(tag_name in self._selected_tags)
+                check.set_valign(Gtk.Align.CENTER)
+                check.connect('toggled', self._on_tag_toggled, tag_name)
+                row.add_suffix(check)
+                row.set_activatable_widget(check)
                 tags_group.add(row)
-                self._tag_rows[tag_name] = row
+                self._tag_checks[tag_name] = check
 
         right_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
         right_col.set_hexpand(True)
@@ -294,8 +298,8 @@ class ConnectionDialog(Adw.Dialog):
         self._toast_overlay.set_child(toolbar_view)
         self.set_child(self._toast_overlay)
 
-    def _on_tag_toggled(self, row, _param, tag_name):
-        if row.get_active():
+    def _on_tag_toggled(self, check, tag_name):
+        if check.get_active():
             self._selected_tags.add(tag_name)
         else:
             self._selected_tags.discard(tag_name)
