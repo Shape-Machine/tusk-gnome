@@ -35,6 +35,21 @@ def _ssh_key(conn_id):
     return f'{conn_id}:ssh'
 
 
+def _write_connections_file(connections, tags_registry):
+    tmp = CONNECTIONS_FILE + '.tmp'
+    with open(tmp, 'w') as f:
+        json.dump(
+            {
+                'schema_version': SCHEMA_VERSION,
+                'connections': connections,
+                'tags': tags_registry,
+            },
+            f,
+            indent=2,
+        )
+    os.replace(tmp, CONNECTIONS_FILE)
+
+
 def _apply_defaults(conn, tags_registry):
     """Add any missing new fields to a connection dict in-place."""
     if 'id' not in conn:
@@ -84,24 +99,11 @@ class ConnectionStore:
         tags_registry = {}
         for conn in old_list:
             _apply_defaults(conn, tags_registry)
-        self._connections = old_list
-        self._tags_registry = tags_registry
-        self._save()
+        _write_connections_file(old_list, tags_registry)
         return old_list, tags_registry
 
     def _save(self):
-        tmp = CONNECTIONS_FILE + '.tmp'
-        with open(tmp, 'w') as f:
-            json.dump(
-                {
-                    'schema_version': SCHEMA_VERSION,
-                    'connections': self._connections,
-                    'tags': self._tags_registry,
-                },
-                f,
-                indent=2,
-            )
-        os.replace(tmp, CONNECTIONS_FILE)
+        _write_connections_file(self._connections, self._tags_registry)
 
     def get_tags_registry(self):
         return dict(self._tags_registry)
@@ -130,8 +132,7 @@ class ConnectionStore:
             raise KeyringUnavailableError(str(e)) from e
 
     def add(self, conn):
-        if 'id' not in conn:
-            conn['id'] = str(uuid.uuid4())
+        _apply_defaults(conn, self._tags_registry)
         password = conn.pop('password', '')
         ssh_passphrase = conn.pop('ssh_passphrase', '')
         try:
@@ -145,8 +146,7 @@ class ConnectionStore:
 
     def add_after(self, after_id, conn):
         """Like add(), but inserts the new connection immediately after after_id."""
-        if 'id' not in conn:
-            conn['id'] = str(uuid.uuid4())
+        _apply_defaults(conn, self._tags_registry)
         password = conn.pop('password', '')
         ssh_passphrase = conn.pop('ssh_passphrase', '')
         try:
