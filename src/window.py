@@ -601,10 +601,18 @@ class TuskWindow(Adw.ApplicationWindow):
         self._update_status_label.set_visible(False)
         footer.append(self._update_status_label)
 
-        self._update_check_btn = Gtk.Button(label='Check for Updates')
+        self._update_check_btn = Gtk.Button()
         self._update_check_btn.add_css_class('flat')
         self._update_check_btn.add_css_class('caption')
         self._update_check_btn.connect('clicked', self._on_check_updates_clicked)
+        self._update_btn_stack = Gtk.Stack()
+        self._update_btn_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self._update_btn_stack.set_transition_duration(150)
+        self._update_btn_stack.add_named(Gtk.Label(label='Check for Updates'), 'label')
+        self._update_btn_spinner = Gtk.Spinner()
+        self._update_btn_spinner.set_size_request(16, 16)
+        self._update_btn_stack.add_named(self._update_btn_spinner, 'spinner')
+        self._update_check_btn.set_child(self._update_btn_stack)
         footer.append(self._update_check_btn)
 
         for label, action in [
@@ -1323,6 +1331,8 @@ class TuskWindow(Adw.ApplicationWindow):
 
     def _on_check_updates_clicked(self, _btn):
         self._update_check_btn.set_sensitive(False)
+        self._update_btn_stack.set_visible_child_name('spinner')
+        self._update_btn_spinner.start()
         self._update_status_label.set_visible(False)
         self._update_banner.set_revealed(False)
         threading.Thread(target=self._fetch_latest_version, daemon=True).start()
@@ -1339,6 +1349,8 @@ class TuskWindow(Adw.ApplicationWindow):
             GLib.idle_add(self._on_update_result, None, str(e))
 
     def _on_update_result(self, latest_tag, error):
+        self._update_btn_spinner.stop()
+        self._update_btn_stack.set_visible_child_name('label')
         self._update_check_btn.set_sensitive(True)
         if error or not latest_tag:
             self._show_update_status('Could not check for updates')
