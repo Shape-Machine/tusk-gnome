@@ -50,10 +50,6 @@ class TuskWindow(Adw.ApplicationWindow):
             .connection-role-badge {
                 font-size: 13px;
             }
-            .conn-active-dot {
-                color: @accent_color;
-                font-size: 10px;
-            }
             .conn-active-icon {
                 color: @accent_color;
             }
@@ -244,12 +240,6 @@ class TuskWindow(Adw.ApplicationWindow):
               <object class="GtkShortcutsShortcut">
                 <property name="title">Connection Manager</property>
                 <property name="accelerator">&lt;ctrl&gt;Home</property>
-              </object>
-            </child>
-            <child>
-              <object class="GtkShortcutsShortcut">
-                <property name="title">Search Connections</property>
-                <property name="accelerator">&lt;ctrl&gt;f</property>
               </object>
             </child>
             <child>
@@ -567,8 +557,9 @@ class TuskWindow(Adw.ApplicationWindow):
     # ── Connections ───────────────────────────────────────────────────────────
 
     def _load_connections(self):
+        tags_registry = self._store.get_tags_registry()
         for conn in self._store.list():
-            self._add_connection_row(conn)
+            self._add_connection_row(conn, tags_registry=tags_registry)
         self._refresh_tag_strip()
 
     @staticmethod
@@ -580,8 +571,8 @@ class TuskWindow(Adw.ApplicationWindow):
         if not ts:
             return 'Never connected'
         try:
-            dt = datetime.datetime.fromisoformat(ts.rstrip('Z'))
-            delta = datetime.datetime.utcnow() - dt
+            dt = datetime.datetime.fromisoformat(ts.rstrip('Z')).replace(tzinfo=datetime.timezone.utc)
+            delta = datetime.datetime.now(datetime.timezone.utc) - dt
             secs = int(delta.total_seconds())
             if secs < 60:
                 return 'Just now'
@@ -596,7 +587,7 @@ class TuskWindow(Adw.ApplicationWindow):
         except (ValueError, TypeError):
             return 'Never connected'
 
-    def _add_connection_row(self, conn, position=-1):
+    def _add_connection_row(self, conn, position=-1, tags_registry=None):
         row = Adw.ActionRow()
         row.set_title(conn['name'])
         row.set_subtitle(self._conn_subtitle(conn))
@@ -663,10 +654,10 @@ class TuskWindow(Adw.ApplicationWindow):
         else:
             self._conn_list.insert(row, position)
         self._conn_popover_rows[conn['id']] = row
-        self._add_mgr_row(conn, position)
+        self._add_mgr_row(conn, position, tags_registry=tags_registry)
         return row
 
-    def _add_mgr_row(self, conn, position=-1):
+    def _add_mgr_row(self, conn, position=-1, tags_registry=None):
         row = Adw.ActionRow()
         row.set_title(conn['name'])
         row.set_subtitle(self._conn_subtitle(conn))
@@ -696,7 +687,8 @@ class TuskWindow(Adw.ApplicationWindow):
         row._ts_label = ts_lbl
 
         # Tag chips (colored text)
-        tags_registry = self._store.get_tags_registry()
+        if tags_registry is None:
+            tags_registry = self._store.get_tags_registry()
         for tag_name in conn.get('tags', []):
             color = tags_registry.get(tag_name, {}).get('color', '#888888')
             chip = Gtk.Label()
@@ -1093,19 +1085,16 @@ class TuskWindow(Adw.ApplicationWindow):
             return
 
         # Record last connected timestamp on both row copies
-        now_ts = datetime.datetime.utcnow().isoformat() + 'Z'
+        now_ts = datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
         conn_id = row._conn['id']
         row._conn['last_connected'] = now_ts
         mgr_row = self._conn_mgr_rows.get(conn_id)
         if mgr_row:
             mgr_row._conn['last_connected'] = now_ts
             mgr_row._ts_label.set_label(self._format_last_connected(now_ts))
-            try:
-                mgr_row._ts_label.set_tooltip_text(
-                    datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
-                )
-            except Exception:
-                pass
+            mgr_row._ts_label.set_tooltip_text(
+                datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+            )
         try:
             self._store.update(row._conn)
         except KeyringUnavailableError:
