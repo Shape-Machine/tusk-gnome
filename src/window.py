@@ -1412,7 +1412,7 @@ class TuskWindow(Adw.ApplicationWindow):
             return False
         try:
             def parse(v):
-                return tuple(int(x) for x in v.lstrip('v').split('.'))
+                return tuple(int(x) for x in v.lstrip('v').replace('-', '.').split('.'))
             return parse(latest) > parse(current)
         except (ValueError, AttributeError):
             return False
