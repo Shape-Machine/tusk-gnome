@@ -123,13 +123,17 @@ def get_rds_ca_bundle():
     """
     if os.path.exists(_RDS_CA_PATH):
         return _RDS_CA_PATH
+    tmp = _RDS_CA_PATH + '.tmp'
     try:
         os.makedirs(CERT_DIR, exist_ok=True)
-        tmp = _RDS_CA_PATH + '.tmp'
-        urllib.request.urlretrieve(_RDS_CA_URL, tmp)
+        with urllib.request.urlopen(_RDS_CA_URL, timeout=15) as resp:
+            with open(tmp, 'wb') as f:
+                f.write(resp.read())
         os.replace(tmp, _RDS_CA_PATH)
         return _RDS_CA_PATH
     except Exception:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
         return None
 
 
