@@ -51,7 +51,6 @@ class TuskWindow(Adw.ApplicationWindow):
         self._conn_health = {}         # conn_id → {status, msg, ts}
         self._conn_mgr_rows = {}       # conn_id → manager list row
         self._alive = True
-        self._update_status_timeout_id = None
         self.connect('destroy', lambda _: setattr(self, '_alive', False))
         self._sidebar_css = Gtk.CssProvider()
         self._main_css = Gtk.CssProvider()
@@ -601,12 +600,6 @@ class TuskWindow(Adw.ApplicationWindow):
         footer_spacer = Gtk.Box()
         footer_spacer.set_hexpand(True)
         footer.append(footer_spacer)
-
-        self._update_status_label = Gtk.Label()
-        self._update_status_label.add_css_class('caption')
-        self._update_status_label.add_css_class('dim-label')
-        self._update_status_label.set_visible(False)
-        footer.append(self._update_status_label)
 
         self._update_check_btn = Gtk.Button()
         self._update_check_btn.add_css_class('flat')
@@ -1359,7 +1352,6 @@ class TuskWindow(Adw.ApplicationWindow):
         self._update_check_btn.set_sensitive(False)
         self._update_btn_stack.set_visible_child_name('spinner')
         self._update_btn_spinner.start()
-        self._update_status_label.set_visible(False)
         self._update_banner.set_revealed(False)
         threading.Thread(target=self._fetch_latest_version, daemon=True).start()
 
@@ -1381,25 +1373,13 @@ class TuskWindow(Adw.ApplicationWindow):
         self._update_btn_stack.set_visible_child_name('label')
         self._update_check_btn.set_sensitive(True)
         if error or not latest_tag:
-            self._show_update_status('Could not check for updates')
+            self.show_toast('Could not check for updates')
             return
         if self._version_newer(config.VERSION, latest_tag):
             self._update_banner.set_title(f'Tusk v{latest_tag} is available')
             self._update_banner.set_revealed(True)
         else:
-            self._show_update_status(f'Up to date (v{latest_tag})')
-
-    def _show_update_status(self, text):
-        if self._update_status_timeout_id is not None:
-            GLib.source_remove(self._update_status_timeout_id)
-        self._update_status_label.set_text(text)
-        self._update_status_label.set_visible(True)
-        self._update_status_timeout_id = GLib.timeout_add(5000, self._hide_update_status)
-
-    def _hide_update_status(self):
-        self._update_status_timeout_id = None
-        self._update_status_label.set_visible(False)
-        return GLib.SOURCE_REMOVE
+            self.show_toast(f'Up to date (v{latest_tag})')
 
     def _on_update_banner_clicked(self, _banner):
         Gtk.show_uri(self, 'https://github.com/Shape-Machine/tusk-gnome/releases/latest',
