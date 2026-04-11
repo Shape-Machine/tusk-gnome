@@ -20,6 +20,7 @@ class ConnectionsImportDialog(Adw.Dialog):
 
     def __init__(self, incoming_conns, incoming_tags, existing_names):
         super().__init__(title='Import Connections', content_width=520, content_height=560)
+        self.add_css_class('tusk-main')
         self._incoming_tags = incoming_tags
         self._checks = {}   # conn_id → (Gtk.CheckButton, resolved_conn)
         self._build_ui(incoming_conns, existing_names)

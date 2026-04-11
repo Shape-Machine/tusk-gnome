@@ -29,6 +29,7 @@ class StaleConnectionsDialog(Adw.Dialog):
 
     def __init__(self, store, conn_health=None):
         super().__init__(title='Clean Up Stale Connections', content_width=520, content_height=560)
+        self.add_css_class('tusk-main')
         self._store = store
         self._conn_health = conn_health or {}
         self._checks = {}  # conn_id → Gtk.CheckButton

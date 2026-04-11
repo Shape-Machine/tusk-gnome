@@ -314,6 +314,7 @@ class _GrantMembershipDialog(Adw.Dialog):
 
     def __init__(self, transient_for, conn, role_name):
         super().__init__(title='Grant Membership', content_width=360)
+        self.add_css_class('tusk-main')
         self._conn = conn
         self._role_name = role_name
 
@@ -765,6 +766,7 @@ class _NewRoleDialog(Adw.Dialog):
 
     def __init__(self, conn):
         super().__init__(title='New Role', content_width=400, content_height=560)
+        self.add_css_class('tusk-main')
         self._conn = conn
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -909,6 +911,7 @@ class _ChangePasswordDialog(Adw.Dialog):
 
     def __init__(self, conn, role_name):
         super().__init__(title=f'Change Password — {role_name}', content_width=380)
+        self.add_css_class('tusk-main')
         self._conn = conn
         self._role_name = role_name
 

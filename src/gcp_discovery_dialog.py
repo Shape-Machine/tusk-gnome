@@ -24,6 +24,7 @@ class GcpDiscoveryDialog(Adw.Dialog):
 
     def __init__(self, existing_instance_ids=None):
         super().__init__(title='Import from GCP', content_width=540)
+        self.add_css_class('tusk-main')
         self._existing_ids = set(existing_instance_ids or [])
         self._conns = []   # discovered connection dicts with internal _gcp_* keys
         self._checks = {}  # idx → (Gtk.CheckButton, conn_dict)

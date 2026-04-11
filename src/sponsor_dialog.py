@@ -11,6 +11,7 @@ _SPONSOR_URL = 'https://buy.stripe.com/14A28saQ95kI9q93qNes003'
 class SponsorDialog(Adw.Dialog):
     def __init__(self, win):
         super().__init__(title='Sponsor Tusk', content_width=380)
+        self.add_css_class('tusk-main')
         self._win = win
 
         toolbar_view = Adw.ToolbarView()

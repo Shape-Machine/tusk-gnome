@@ -1291,14 +1291,15 @@ class TuskWindow(Adw.ApplicationWindow):
             self._browser.clear()
 
     def _set_active_conn(self, conn):
-        # Close all table and function tabs belonging to the previous connection
+        # Close all connection-scoped tabs belonging to the previous connection
         if self._active_conn_id:
             pages = self._tab_view.get_pages()
             to_close = [
                 pages.get_item(i)
                 for i in range(pages.get_n_items())
                 if getattr(pages.get_item(i), '_tab_id', '').startswith(
-                    (f'table:{self._active_conn_id}:', f'fn:{self._active_conn_id}:')
+                    (f'table:{self._active_conn_id}:', f'fn:{self._active_conn_id}:',
+                     f'role:{self._active_conn_id}:', f'activity:{self._active_conn_id}')
                 )
             ]
             for page in to_close:
