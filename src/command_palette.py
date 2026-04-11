@@ -82,6 +82,7 @@ class CommandPalette(Adw.Dialog):
                label is what to display (e.g. 'schema.name' or 'name(args)')
         """
         super().__init__()
+        self.add_css_class('tusk-main')
         self._items = items
         self._search_debounce_id = None
         self._build_ui()

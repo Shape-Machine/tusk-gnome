@@ -29,6 +29,7 @@ class ConnectionDialog(Adw.Dialog):
         else:
             title = 'Edit Connection'
         super().__init__(title=title, content_width=820)
+        self.add_css_class('tusk-main')
         self._connection = connection
         self._duplicate = duplicate
         self._parent = parent

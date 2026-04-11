@@ -92,6 +92,7 @@ class PgpassImportDialog(Adw.Dialog):
 
     def __init__(self, parent, entries, warnings, existing_names=None):
         super().__init__(title='Import from .pgpass', content_width=460)
+        self.add_css_class('tusk-main')
         self._entries = entries
         self._switches = []
         self._existing_names = existing_names or set()

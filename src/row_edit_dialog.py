@@ -20,6 +20,7 @@ class RowEditDialog(Adw.Dialog):
     def __init__(self, mode, columns, schema_info, pk_cols, initial_values, on_save):
         title = 'Insert Row' if mode == 'insert' else 'Edit Row'
         super().__init__(title=title, content_width=460)
+        self.add_css_class('tusk-main')
 
         self._mode = mode
         self._on_save = on_save

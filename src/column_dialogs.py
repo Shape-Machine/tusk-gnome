@@ -236,6 +236,7 @@ class RenameDialog(Adw.Dialog):
 
     def __init__(self, current_name, on_rename, title='Rename'):
         super().__init__(title=title, content_width=380)
+        self.add_css_class('tusk-main')
         self._on_rename = on_rename
 
         header = Adw.HeaderBar()
@@ -287,6 +288,7 @@ class AddColumnDialog(Adw.Dialog):
 
     def __init__(self, existing_columns, on_save, schema=None, table=None):
         super().__init__(title='Add Column', content_width=420)
+        self.add_css_class('tusk-main')
         self._on_save = on_save
         self._preview_buf = None
 
@@ -485,6 +487,7 @@ class ChangeTypeDialog(Adw.Dialog):
 
     def __init__(self, col_name, current_type, on_save):
         super().__init__(title=f'Change Type: {col_name}', content_width=420)
+        self.add_css_class('tusk-main')
         self._on_save = on_save
 
         header = Adw.HeaderBar()
@@ -537,6 +540,7 @@ class SetDefaultDialog(Adw.Dialog):
 
     def __init__(self, col_name, current_default, on_save):
         super().__init__(title=f'Set Default: {col_name}', content_width=420)
+        self.add_css_class('tusk-main')
         self._on_save = on_save
 
         header = Adw.HeaderBar()
@@ -588,6 +592,7 @@ class ReorderColumnsDialog(Adw.Dialog):
 
     def __init__(self, schema, table, columns, on_execute=None):
         super().__init__(title='Reorder Columns', content_width=500)
+        self.add_css_class('tusk-main')
         self._schema = schema
         self._table = table
         self._original_order = list(columns)
@@ -785,6 +790,7 @@ class AddIndexDialog(Adw.Dialog):
 
     def __init__(self, table_name, col_names, on_save):
         super().__init__(title='Add Index', content_width=420)
+        self.add_css_class('tusk-main')
         self._on_save = on_save
         self._col_names = col_names
         self._table_name = table_name
@@ -886,6 +892,7 @@ class AddConstraintDialog(Adw.Dialog):
 
     def __init__(self, table_name, col_names, on_save):
         super().__init__(title='Add Constraint', content_width=440)
+        self.add_css_class('tusk-main')
         self._on_save = on_save
         self._table_name = table_name
         self._col_names = col_names
@@ -1066,6 +1073,7 @@ class CreateTableDialog(Adw.Dialog):
                           used by Clone Structure to pre-populate column rows
         """
         super().__init__(title='Create Table', content_width=600, content_height=520)
+        self.add_css_class('tusk-main')
         self._on_save = on_save
         self._schemas = schemas if schemas else ['public']
         self._store = Gio.ListStore(item_type=_ColDef)
@@ -1747,6 +1755,7 @@ class CreateSchemaDialog(Adw.Dialog):
 
     def __init__(self, on_save):
         super().__init__(title='New Schema', content_width=380)
+        self.add_css_class('tusk-main')
         self._on_save = on_save
 
         header = Adw.HeaderBar()
@@ -1803,6 +1812,7 @@ class CreateViewDialog(Adw.Dialog):
 
     def __init__(self, schema, on_save):
         super().__init__(title='New View', content_width=560, content_height=480)
+        self.add_css_class('tusk-main')
         self._on_save = on_save
         self._schema = schema
 

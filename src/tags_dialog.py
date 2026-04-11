@@ -56,6 +56,7 @@ class TagsDialog(Adw.Dialog):
 
     def __init__(self, store):
         super().__init__(title='Manage Tags', content_width=480, content_height=560)
+        self.add_css_class('tusk-main')
         self._store = store
         _ensure_css()
         self._build_ui()
