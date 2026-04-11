@@ -121,12 +121,12 @@ def open_db(conn, autocommit=False):
             from aws_discovery import get_iam_token as _aws_iam
             # Use the effective host/port (may be secondary endpoint for Aurora reader)
             effective_host = (
-                conn.get('secondary_endpoint', conn.get('host', ''))
+                (conn.get('secondary_endpoint') or conn.get('host', ''))
                 if conn.get('active_endpoint') == 'secondary'
                 else conn.get('host', '')
             )
             effective_port = (
-                conn.get('secondary_port', conn.get('port', 5432))
+                (conn.get('secondary_port') or conn.get('port', 5432))
                 if conn.get('active_endpoint') == 'secondary'
                 else conn.get('port', 5432)
             )

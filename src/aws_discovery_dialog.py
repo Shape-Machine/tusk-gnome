@@ -359,7 +359,10 @@ class AwsDiscoveryDialog(Adw.Dialog):
             for conn in group_conns:
                 already = conn.get('cloud_instance_id', '') in self._existing_ids
                 row = Adw.ActionRow(title=conn['name'])
-                subtitle_parts = [conn.get('_aws_version', '')]
+                host = conn.get('host', '')
+                port = conn.get('port', 5432)
+                endpoint_str = f'{host}:{port}' if host else ''
+                subtitle_parts = [conn.get('_aws_version', ''), endpoint_str]
                 if conn.get('cloud_auth_mode') == 'iam':
                     subtitle_parts.append('IAM auth')
                 if conn.get('secondary_endpoint'):
