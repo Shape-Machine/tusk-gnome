@@ -47,7 +47,8 @@ class TuskWindow(Adw.ApplicationWindow):
         self._conn_search = ''
         _saved = prefs.get('conn_sort', 'manual')
         _valid = {'name-asc', 'name-desc', 'last-connected-asc', 'last-connected-desc', 'manual'}
-        self._conn_sort_state = _saved if _saved in _valid else 'manual'
+        _migrate = {'name': 'name-asc', 'last-connected': 'last-connected-asc'}
+        self._conn_sort_state = _saved if _saved in _valid else _migrate.get(_saved, 'manual')
         self._active_tag_filters = set()
         self._warned_conn_ids = set()  # conn_ids warned this session (warn_on_connect)
         self._conn_health = {}         # conn_id → {status, msg, ts}
