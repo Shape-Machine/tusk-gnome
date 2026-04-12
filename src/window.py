@@ -545,7 +545,7 @@ class TuskWindow(Adw.ApplicationWindow):
 
         mgr_box.append(mgr_toolbar)
 
-        self._update_banner = Adw.Banner(button_label='Release notes')
+        self._update_banner = Adw.Banner(button_label='Download')
         self._update_banner.set_revealed(False)
         self._update_banner.connect('button-clicked', self._on_update_banner_clicked)
         mgr_box.append(self._update_banner)
