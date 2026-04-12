@@ -1294,13 +1294,13 @@ class TuskWindow(Adw.ApplicationWindow):
         # Close all connection-scoped tabs belonging to the previous connection
         if self._active_conn_id:
             pages = self._tab_view.get_pages()
+            cid = self._active_conn_id
             to_close = [
                 pages.get_item(i)
                 for i in range(pages.get_n_items())
-                if getattr(pages.get_item(i), '_tab_id', '').startswith(
-                    (f'table:{self._active_conn_id}:', f'fn:{self._active_conn_id}:',
-                     f'role:{self._active_conn_id}:', f'activity:{self._active_conn_id}')
-                )
+                if (tab_id := getattr(pages.get_item(i), '_tab_id', ''))
+                and (tab_id.startswith((f'table:{cid}:', f'fn:{cid}:', f'role:{cid}:'))
+                     or tab_id == f'activity:{cid}')
             ]
             for page in to_close:
                 self._tab_view.close_page(page)
