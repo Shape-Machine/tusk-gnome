@@ -1291,8 +1291,9 @@ class TuskWindow(Adw.ApplicationWindow):
             self._browser.clear()
 
     def _set_active_conn(self, conn):
-        # Close all connection-scoped tabs belonging to the previous connection
-        if self._active_conn_id:
+        # Close all connection-scoped tabs only when switching to a different connection
+        new_id = conn['id'] if conn else None
+        if self._active_conn_id and new_id != self._active_conn_id:
             pages = self._tab_view.get_pages()
             cid = self._active_conn_id
             to_close = [
