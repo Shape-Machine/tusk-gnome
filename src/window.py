@@ -590,8 +590,8 @@ class TuskWindow(Adw.ApplicationWindow):
 
         content_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         content_box.set_vexpand(True)
-        content_box.append(tag_scroll)
         content_box.append(mgr_scroll)
+        content_box.append(tag_scroll)
         mgr_box.append(content_box)
 
         # ── Branding footer ───────────────────────────────────────────────────────
