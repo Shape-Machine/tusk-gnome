@@ -61,6 +61,11 @@ class FileExplorer(Gtk.Box):
         self._path_label.set_ellipsize(3)
         self._path_label.add_css_class('caption')
         self._path_label.add_css_class('dim-label')
+        self._path_label.set_tooltip_text('Click to copy path')
+        self._path_label.set_cursor(Gdk.Cursor.new_from_name('pointer'))
+        _click = Gtk.GestureClick()
+        _click.connect('released', self._on_path_clicked)
+        self._path_label.add_controller(_click)
 
         new_folder_btn = Gtk.Button(icon_name='folder-new-symbolic')
         new_folder_btn.add_css_class('flat')
@@ -207,6 +212,12 @@ class FileExplorer(Gtk.Box):
         except OSError as e:
             self._error_status.set_description('Permission denied' if isinstance(e, PermissionError) else str(e))
             self._list_stack.set_visible_child_name('error')
+
+    def _on_path_clicked(self, _gesture, _n, _x, _y):
+        Gdk.Display.get_default().get_clipboard().set(self._current_dir)
+        root = self.get_root()
+        if hasattr(root, 'show_toast'):
+            root.show_toast('Path copied')
 
     def _navigate_to(self, path):
         self._current_dir = path
