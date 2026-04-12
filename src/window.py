@@ -45,8 +45,9 @@ class TuskWindow(Adw.ApplicationWindow):
         self._active_conn_id = None
         self._active_conn = None       # full conn dict with password
         self._conn_search = ''
-        self._conn_sort = prefs.get('conn_sort', 'manual')
-        self._conn_sort_asc = prefs.get('conn_sort_asc', True)
+        _saved = prefs.get('conn_sort', 'manual')
+        _valid = {'name-asc', 'name-desc', 'last-connected-asc', 'last-connected-desc', 'manual'}
+        self._conn_sort_state = _saved if _saved in _valid else 'manual'
         self._active_tag_filters = set()
         self._warned_conn_ids = set()  # conn_ids warned this session (warn_on_connect)
         self._conn_health = {}         # conn_id → {status, msg, ts}
@@ -112,7 +113,7 @@ class TuskWindow(Adw.ApplicationWindow):
         add('import-from-aws',           lambda *_: self._on_import_from_aws())
         add('cleanup-stale',              lambda *_: self._on_cleanup_stale())
         self._sort_action = Gio.SimpleAction.new_stateful(
-            'conn-sort', GLib.VariantType.new('s'), GLib.Variant('s', self._conn_sort)
+            'conn-sort', GLib.VariantType.new('s'), GLib.Variant('s', self._conn_sort_state)
         )
         self._sort_action.connect('activate', lambda a, v: (
             a.set_state(v), self._on_sort_changed(v.get_string())
@@ -488,12 +489,18 @@ class TuskWindow(Adw.ApplicationWindow):
         mgr_toolbar.set_margin_end(MARGIN_MD)
 
         sort_menu = Gio.Menu()
-        for _label, _val in [('Name (A–Z)', 'name'), ('Last Connected', 'last-connected'), ('Manual', 'manual')]:
+        for _label, _val in [
+            ('Name (A–Z)',              'name-asc'),
+            ('Name (Z–A)',              'name-desc'),
+            ('Last Connected (Newest)', 'last-connected-asc'),
+            ('Last Connected (Oldest)', 'last-connected-desc'),
+            ('Manual',                  'manual'),
+        ]:
             _item = Gio.MenuItem.new(_label, 'win.conn-sort')
             _item.set_attribute_value('target', GLib.Variant('s', _val))
             sort_menu.append_item(_item)
         self._sort_btn = Gtk.MenuButton()
-        _sort_icon = 'view-sort-ascending-symbolic' if self._conn_sort_asc else 'view-sort-descending-symbolic'
+        _sort_icon = 'view-sort-descending-symbolic' if self._conn_sort_state.endswith('-desc') else 'view-sort-ascending-symbolic'
         self._sort_btn.set_icon_name(_sort_icon)
         self._sort_btn.set_tooltip_text('Sort connections')
         self._sort_btn.set_menu_model(sort_menu)
@@ -1175,7 +1182,7 @@ class TuskWindow(Adw.ApplicationWindow):
             self._store.update(row._conn)
         except KeyringUnavailableError:
             pass  # non-fatal — don't block the connection
-        if self._conn_sort == 'last-connected':
+        if self._conn_sort_state in ('last-connected-asc', 'last-connected-desc'):
             self._mgr_list.invalidate_sort()
 
         self._set_active_conn(conn)
@@ -1438,18 +1445,10 @@ class TuskWindow(Adw.ApplicationWindow):
         self._conn_search = entry.get_text()
         self._mgr_list.invalidate_filter()
 
-    def _on_sort_changed(self, key):
-        if key == 'manual':
-            self._conn_sort = key
-            self._conn_sort_asc = True
-        elif key == self._conn_sort:
-            self._conn_sort_asc = not self._conn_sort_asc
-        else:
-            self._conn_sort = key
-            self._conn_sort_asc = True
-        prefs.put('conn_sort', self._conn_sort)
-        prefs.put('conn_sort_asc', self._conn_sort_asc)
-        icon = 'view-sort-ascending-symbolic' if self._conn_sort_asc else 'view-sort-descending-symbolic'
+    def _on_sort_changed(self, state):
+        self._conn_sort_state = state
+        prefs.put('conn_sort', state)
+        icon = 'view-sort-descending-symbolic' if state.endswith('-desc') else 'view-sort-ascending-symbolic'
         self._sort_btn.set_icon_name(icon)
         self._mgr_list.invalidate_sort()
 
@@ -1480,15 +1479,17 @@ class TuskWindow(Adw.ApplicationWindow):
         if not hasattr(a, '_conn') or not hasattr(b, '_conn'):
             return 0
         ca, cb = a._conn, b._conn
-        result = 0
-        if self._conn_sort == 'name':
+        state = self._conn_sort_state
+        if state in ('name-asc', 'name-desc'):
             na, nb = ca.get('name', '').lower(), cb.get('name', '').lower()
             result = -1 if na < nb else (1 if na > nb else 0)
-        elif self._conn_sort == 'last-connected':
+            return result if state == 'name-asc' else -result
+        if state in ('last-connected-asc', 'last-connected-desc'):
             ta = ca.get('last_connected') or ''
             tb = cb.get('last_connected') or ''
             result = -1 if ta > tb else (1 if ta < tb else 0)
-        return result if self._conn_sort_asc else -result
+            return result if state == 'last-connected-asc' else -result
+        return 0  # manual
 
     def _refresh_tag_strip(self):
         while (child := self._mgr_tag_strip.get_first_child()):
