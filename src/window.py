@@ -110,10 +110,13 @@ class TuskWindow(Adw.ApplicationWindow):
         add('import-from-gcp',           lambda *_: self._on_import_from_gcp())
         add('import-from-aws',           lambda *_: self._on_import_from_aws())
         add('cleanup-stale',              lambda *_: self._on_cleanup_stale())
-        for _key in ('name', 'last-connected', 'manual'):
-            _a = Gio.SimpleAction.new(f'conn-sort-{_key}', None)
-            _a.connect('activate', lambda _act, _par, k=_key: self._on_sort_changed(k))
-            self.add_action(_a)
+        self._sort_action = Gio.SimpleAction.new_stateful(
+            'conn-sort', GLib.VariantType.new('s'), GLib.Variant('s', self._conn_sort)
+        )
+        self._sort_action.connect('activate', lambda a, v: (
+            a.set_state(v), self._on_sort_changed(v.get_string())
+        ))
+        self.add_action(self._sort_action)
         self._refresh_action = Gio.SimpleAction.new('refresh-tab', None)
         self._refresh_action.connect('activate', lambda *_: self._refresh_current_tab())
         self._refresh_action.set_enabled(False)
@@ -484,9 +487,10 @@ class TuskWindow(Adw.ApplicationWindow):
         mgr_toolbar.set_margin_end(MARGIN_MD)
 
         sort_menu = Gio.Menu()
-        sort_menu.append('Name (A–Z)', 'win.conn-sort-name')
-        sort_menu.append('Last Connected', 'win.conn-sort-last-connected')
-        sort_menu.append('Manual', 'win.conn-sort-manual')
+        for _label, _val in [('Name (A–Z)', 'name'), ('Last Connected', 'last-connected'), ('Manual', 'manual')]:
+            _item = Gio.MenuItem.new(_label, 'win.conn-sort')
+            _item.set_attribute_value('target', GLib.Variant('s', _val))
+            sort_menu.append_item(_item)
         self._sort_btn = Gtk.MenuButton()
         self._sort_btn.set_icon_name('view-sort-ascending-symbolic')
         self._sort_btn.set_tooltip_text('Sort connections')
@@ -515,7 +519,6 @@ class TuskWindow(Adw.ApplicationWindow):
         overflow_btn.set_tooltip_text('More actions')
         overflow_btn.set_menu_model(overflow_menu)
         overflow_btn.add_css_class('flat')
-        mgr_toolbar.append(overflow_btn)
 
         mgr_add_btn = Adw.SplitButton(label='Add Connection')
         mgr_add_btn.add_css_class('suggested-action')
@@ -528,6 +531,7 @@ class TuskWindow(Adw.ApplicationWindow):
         mgr_add_menu.append('Import from AWS…', 'win.import-from-aws')
         mgr_add_btn.set_menu_model(mgr_add_menu)
         mgr_toolbar.append(mgr_add_btn)
+        mgr_toolbar.append(overflow_btn)
 
         mgr_box.append(mgr_toolbar)
 
