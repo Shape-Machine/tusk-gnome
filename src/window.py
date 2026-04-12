@@ -46,6 +46,7 @@ class TuskWindow(Adw.ApplicationWindow):
         self._active_conn = None       # full conn dict with password
         self._conn_search = ''
         self._conn_sort = prefs.get('conn_sort', 'manual')
+        self._conn_sort_asc = prefs.get('conn_sort_asc', True)
         self._active_tag_filters = set()
         self._warned_conn_ids = set()  # conn_ids warned this session (warn_on_connect)
         self._conn_health = {}         # conn_id → {status, msg, ts}
@@ -492,7 +493,8 @@ class TuskWindow(Adw.ApplicationWindow):
             _item.set_attribute_value('target', GLib.Variant('s', _val))
             sort_menu.append_item(_item)
         self._sort_btn = Gtk.MenuButton()
-        self._sort_btn.set_icon_name('view-sort-ascending-symbolic')
+        _sort_icon = 'view-sort-ascending-symbolic' if self._conn_sort_asc else 'view-sort-descending-symbolic'
+        self._sort_btn.set_icon_name(_sort_icon)
         self._sort_btn.set_tooltip_text('Sort connections')
         self._sort_btn.set_menu_model(sort_menu)
         self._sort_btn.add_css_class('flat')
@@ -1437,8 +1439,18 @@ class TuskWindow(Adw.ApplicationWindow):
         self._mgr_list.invalidate_filter()
 
     def _on_sort_changed(self, key):
-        self._conn_sort = key
-        prefs.put('conn_sort', key)
+        if key == 'manual':
+            self._conn_sort = key
+            self._conn_sort_asc = True
+        elif key == self._conn_sort:
+            self._conn_sort_asc = not self._conn_sort_asc
+        else:
+            self._conn_sort = key
+            self._conn_sort_asc = True
+        prefs.put('conn_sort', self._conn_sort)
+        prefs.put('conn_sort_asc', self._conn_sort_asc)
+        icon = 'view-sort-ascending-symbolic' if self._conn_sort_asc else 'view-sort-descending-symbolic'
+        self._sort_btn.set_icon_name(icon)
         self._mgr_list.invalidate_sort()
 
     def _mgr_filter_row(self, row):
@@ -1468,14 +1480,15 @@ class TuskWindow(Adw.ApplicationWindow):
         if not hasattr(a, '_conn') or not hasattr(b, '_conn'):
             return 0
         ca, cb = a._conn, b._conn
+        result = 0
         if self._conn_sort == 'name':
             na, nb = ca.get('name', '').lower(), cb.get('name', '').lower()
-            return -1 if na < nb else (1 if na > nb else 0)
-        if self._conn_sort == 'last-connected':
+            result = -1 if na < nb else (1 if na > nb else 0)
+        elif self._conn_sort == 'last-connected':
             ta = ca.get('last_connected') or ''
             tb = cb.get('last_connected') or ''
-            return -1 if ta > tb else (1 if ta < tb else 0)
-        return 0  # manual: preserve insertion order
+            result = -1 if ta > tb else (1 if ta < tb else 0)
+        return result if self._conn_sort_asc else -result
 
     def _refresh_tag_strip(self):
         while (child := self._mgr_tag_strip.get_first_child()):
