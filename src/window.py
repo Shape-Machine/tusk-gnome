@@ -494,7 +494,7 @@ class TuskWindow(Adw.ApplicationWindow):
             ('Name (Z–A)',              'name-desc'),
             ('Last Connected (Newest)', 'last-connected-asc'),
             ('Last Connected (Oldest)', 'last-connected-desc'),
-            ('Manual',                  'manual'),
+            ('Default',                  'manual'),
         ]:
             _item = Gio.MenuItem.new(_label, 'win.conn-sort')
             _item.set_attribute_value('target', GLib.Variant('s', _val))
