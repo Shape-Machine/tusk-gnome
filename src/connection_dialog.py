@@ -306,6 +306,7 @@ class ConnectionDialog(Adw.Dialog):
                 self._tag_checks[tag_name] = check
             # Collapse by default when there are more than 4 tags
             self._tags_expander.set_expanded(len(registry) <= 4)
+            self._tags_expander.connect('notify::expanded', self._on_tags_expander_changed)
             self._update_tags_subtitle()
 
         right_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
@@ -425,8 +426,14 @@ class ConnectionDialog(Adw.Dialog):
             self._selected_tags.discard(tag_name)
         self._update_tags_subtitle()
 
+    def _on_tags_expander_changed(self, *_):
+        if self._tags_expander.get_expanded():
+            self._tags_expander.set_subtitle('')
+        else:
+            self._update_tags_subtitle()
+
     def _update_tags_subtitle(self):
-        if self._tags_expander is None:
+        if self._tags_expander is None or self._tags_expander.get_expanded():
             return
         selected_sorted = [t for t in sorted(self._tags_registry) if t in self._selected_tags]
         if not selected_sorted:
