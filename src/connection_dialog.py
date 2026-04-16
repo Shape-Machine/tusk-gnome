@@ -28,7 +28,7 @@ class ConnectionDialog(Adw.Dialog):
             title = 'New Connection'
         else:
             title = 'Edit Connection'
-        super().__init__(title=title, content_width=820)
+        super().__init__(title=title, content_width=900)
         self.add_css_class('tusk-main')
         self._connection = connection
         self._duplicate = duplicate
@@ -168,6 +168,31 @@ class ConnectionDialog(Adw.Dialog):
 
         ssh_group.add(self._ssh_row)
 
+        # ── Cloud SQL Auth Proxy ──────────────────────────────────────────────
+        cloud_group = Adw.PreferencesGroup(title='Cloud SQL Auth Proxy')
+
+        self._proxy_row = Adw.ExpanderRow(title='Use Cloud SQL Auth Proxy')
+        self._proxy_row.set_show_enable_switch(True)
+        self._proxy_row.set_subtitle(
+            'Route connections through cloud-sql-proxy. Requires the '
+            'cloud-sql-proxy binary on your PATH.'
+        )
+
+        self._proxy_instance_row = Adw.EntryRow(title='Instance ID')
+        self._proxy_instance_row.set_tooltip_text(
+            'Cloud SQL instance connection name — found in the Google Cloud console.\n'
+            'Format: project-id:region:instance-name'
+        )
+
+        self._proxy_auth_row = Adw.ComboRow(title='Authentication')
+        self._proxy_auth_row.set_subtitle('How Tusk authenticates with the database')
+        auth_model = Gtk.StringList.new(['Password', 'IAM (Google Identity)'])
+        self._proxy_auth_row.set_model(auth_model)
+
+        self._proxy_row.add_row(self._proxy_instance_row)
+        self._proxy_row.add_row(self._proxy_auth_row)
+        cloud_group.add(self._proxy_row)
+
         # ── Populate values ───────────────────────────────────────────────────
         if conn and self._duplicate:
             self._name_row.set_text(conn['name'] + ' copy')
@@ -204,6 +229,20 @@ class ConnectionDialog(Adw.Dialog):
             keyring_failed = True
         self._ssh_passphrase_row.set_text(ssh_passphrase)
         self._default_schema_row.set_text(conn.get('default_schema', '') if conn else '')
+
+        proxy_enabled = conn.get('cloud_proxy_enabled', False) if conn else False
+        self._proxy_row.set_enable_expansion(proxy_enabled)
+        self._proxy_row.set_expanded(proxy_enabled)
+        self._proxy_instance_row.set_text(conn.get('cloud_instance_id', '') if conn else '')
+        self._proxy_auth_row.set_selected(
+            1 if (conn.get('cloud_auth_mode') == 'iam' if conn else False) else 0
+        )
+        self._pre_proxy_host = None
+        if proxy_enabled:
+            self._host_row.set_sensitive(False)
+        self._proxy_row.connect('notify::enable-expansion', self._on_proxy_toggled)
+        self._proxy_auth_row.connect('notify::selected', self._on_proxy_auth_changed)
+        self._on_proxy_auth_changed()  # apply initial state
 
         self._keyring_banner = Adw.Banner(
             title="Passwords can't be saved — the system password manager isn't available. Try logging out and back in."
@@ -266,7 +305,6 @@ class ConnectionDialog(Adw.Dialog):
         right_col.append(options_group)
         if tags_group:
             right_col.append(tags_group)
-        right_col.append(ssh_group)
 
         two_col = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=20)
         two_col.append(left_col)
@@ -281,6 +319,8 @@ class ConnectionDialog(Adw.Dialog):
         content.append(uri_group)
         content.append(self._uri_error_label)
         content.append(two_col)
+        content.append(ssh_group)
+        content.append(cloud_group)
         content.append(self._keyring_banner)
 
         # ── Test / Save ───────────────────────────────────────────────────────
@@ -347,6 +387,22 @@ class ConnectionDialog(Adw.Dialog):
                 self._aurora_reader_row.set_visible(False)
             elif not self._aurora_reader_row.get_text().strip():
                 self._aurora_reader_row.set_visible(False)
+
+    def _on_proxy_toggled(self, *_):
+        enabled = self._proxy_row.get_enable_expansion()
+        if enabled:
+            self._pre_proxy_host = self._host_row.get_text()
+            self._host_row.set_text('localhost')
+            self._host_row.set_sensitive(False)
+        else:
+            self._host_row.set_sensitive(True)
+            if self._pre_proxy_host is not None:
+                self._host_row.set_text(self._pre_proxy_host)
+                self._pre_proxy_host = None
+
+    def _on_proxy_auth_changed(self, *_):
+        iam = self._proxy_auth_row.get_selected() == 1
+        self._password_row.set_sensitive(not iam)
 
     def _on_reader_text_changed(self, *_):
         # If the user edits the reader field directly, it's no longer auto-filled
@@ -450,6 +506,20 @@ class ConnectionDialog(Adw.Dialog):
             'ssh_key_path': self._ssh_key_row.get_text().strip(),
             'ssh_passphrase': self._ssh_passphrase_row.get_text(),
         }
+        proxy_enabled = self._proxy_row.get_enable_expansion()
+        is_cloud = proxy_enabled or bool(
+            self._connection and self._connection.get('cloud_provider')
+        )
+        if is_cloud:
+            params.update({
+                'cloud_proxy_enabled': proxy_enabled,
+                'cloud_instance_id': self._proxy_instance_row.get_text().strip(),
+                'cloud_auth_mode': 'iam' if self._proxy_auth_row.get_selected() == 1 else 'password',
+                'cloud_provider': (
+                    self._connection.get('cloud_provider', 'gcp-cloudsql')
+                    if self._connection else 'gcp-cloudsql'
+                ),
+            })
         default_schema = self._default_schema_row.get_text().strip()
         if default_schema:
             params['default_schema'] = default_schema
@@ -503,6 +573,8 @@ class ConnectionDialog(Adw.Dialog):
         host = self._host_row.get_text().strip()
         username = self._username_row.get_text().strip()
 
+        proxy_instance = self._proxy_instance_row.get_text().strip()
+
         valid = True
         for row, value in (
             (self._name_row, name),
@@ -514,6 +586,12 @@ class ConnectionDialog(Adw.Dialog):
             else:
                 row.add_css_class('error')
                 valid = False
+
+        if self._proxy_row.get_enable_expansion() and not proxy_instance:
+            self._proxy_instance_row.add_css_class('error')
+            valid = False
+        else:
+            self._proxy_instance_row.remove_css_class('error')
 
         if not valid:
             return
@@ -527,6 +605,7 @@ class ConnectionDialog(Adw.Dialog):
         except ValueError:
             ssh_port = 22
 
+        proxy_enabled = self._proxy_row.get_enable_expansion()
         conn = {
             'id': str(uuid.uuid4()) if self._duplicate else (
                 self._connection['id'] if self._connection else str(uuid.uuid4())
@@ -546,6 +625,19 @@ class ConnectionDialog(Adw.Dialog):
             'ssh_passphrase': self._ssh_passphrase_row.get_text(),
             'tags': sorted(self._selected_tags),
         }
+        is_cloud = proxy_enabled or bool(
+            self._connection and self._connection.get('cloud_provider')
+        )
+        if is_cloud:
+            conn.update({
+                'cloud_proxy_enabled': proxy_enabled,
+                'cloud_instance_id': self._proxy_instance_row.get_text().strip(),
+                'cloud_auth_mode': 'iam' if self._proxy_auth_row.get_selected() == 1 else 'password',
+                'cloud_provider': (
+                    self._connection.get('cloud_provider', 'gcp-cloudsql')
+                    if self._connection else 'gcp-cloudsql'
+                ),
+            })
         default_schema = self._default_schema_row.get_text().strip()
         if default_schema:
             conn['default_schema'] = default_schema
