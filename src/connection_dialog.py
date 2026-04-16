@@ -233,12 +233,14 @@ class ConnectionDialog(Adw.Dialog):
         proxy_enabled = conn.get('cloud_proxy_enabled', False) if conn else False
         self._proxy_row.set_enable_expansion(proxy_enabled)
         self._proxy_row.set_expanded(proxy_enabled)
-        self._proxy_instance_row.set_text(conn.get('cloud_instance_id', '') if conn else '')
+        self._proxy_instance_row.set_text((conn.get('cloud_instance_id') or '') if conn else '')
         self._proxy_auth_row.set_selected(
             1 if (conn.get('cloud_auth_mode') == 'iam' if conn else False) else 0
         )
         self._pre_proxy_host = None
         if proxy_enabled:
+            self._pre_proxy_host = self._host_row.get_text()
+            self._host_row.set_text('localhost')
             self._host_row.set_sensitive(False)
         self._proxy_row.connect('notify::enable-expansion', self._on_proxy_toggled)
         self._proxy_auth_row.connect('notify::selected', self._on_proxy_auth_changed)
@@ -538,19 +540,9 @@ class ConnectionDialog(Adw.Dialog):
 
     def _run_test(self, params):
         try:
-            import psycopg
-            from tunnel import open_tunnel
-
-            with open_tunnel(params) as (host, port):
-                with psycopg.connect(
-                    host=host,
-                    port=port,
-                    dbname=params['database'],
-                    user=params['username'],
-                    password=params['password'],
-                    connect_timeout=10,
-                ):
-                    pass
+            from tunnel import open_db
+            with open_db(params):
+                pass
             GLib.idle_add(self._on_test_result, True, None)
         except Exception as e:
             GLib.idle_add(self._on_test_result, False, str(e))
