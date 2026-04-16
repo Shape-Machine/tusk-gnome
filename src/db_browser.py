@@ -464,11 +464,14 @@ class DbBrowser(Gtk.Box):
     def _expand_favourites(self):
         """Expand the Favourites group row in the tree."""
         it = self._store.get_iter_first()
-        if it and self._store.get_value(it, COL_TYPE) == 'favourites':
-            path = self._store.get_path(it)
-            fpath = self._filter.convert_child_path_to_path(path)
-            if fpath:
-                self._tree.expand_row(fpath, False)
+        while it:
+            if self._store.get_value(it, COL_TYPE) == 'favourites':
+                path = self._store.get_path(it)
+                fpath = self._filter.convert_child_path_to_path(path)
+                if fpath:
+                    self._tree.expand_row(fpath, False)
+                return
+            it = self._store.iter_next(it)
 
     def _on_db_selected(self, dropdown, _param):
         if self._db_switch_inhibit:
@@ -819,7 +822,7 @@ class DbBrowser(Gtk.Box):
             fav_it = self._store.append(None, [
                 'starred-symbolic', 'Favourites', 'favourites', conn, '', ''
             ])
-            for fav in pinned:
+            for fav in sorted(pinned, key=lambda f: (f['table'].lower(), f['schema'].lower())):
                 label = f'{fav["table"]} ({fav["schema"]})'
                 self._store.append(fav_it, [
                     'x-office-spreadsheet-symbolic', label, 'favourite',
@@ -1277,13 +1280,62 @@ class DbBrowser(Gtk.Box):
         if not conn:
             return
         self._favs.add(conn.get('id', ''), schema, table, item_type)
-        self.load(conn)
+        self._refresh_favourites_in_tree(conn)
 
     def _do_unpin(self, conn, schema, table):
         if not conn:
             return
         self._favs.remove(conn.get('id', ''), schema, table)
-        self.load(conn)
+        self._refresh_favourites_in_tree(conn)
+
+    def _refresh_favourites_in_tree(self, conn):
+        """Surgically update only the Favourites section without reloading the entire tree."""
+        conn_id = conn.get('id', '')
+        pinned = self._favs.get(conn_id)
+
+        # Find existing 'favourites' parent row in the store
+        fav_it = None
+        it = self._store.get_iter_first()
+        while it:
+            if self._store.get_value(it, COL_TYPE) == 'favourites':
+                fav_it = it
+                break
+            it = self._store.iter_next(it)
+
+        if not pinned:
+            if fav_it:
+                self._store.remove(fav_it)
+            return
+
+        if fav_it:
+            # Clear all existing children and repopulate
+            child = self._store.iter_children(fav_it)
+            while child:
+                self._store.remove(child)
+                child = self._store.iter_children(fav_it)
+        else:
+            # Insert favourites after Server Activity (index 1) to match load() ordering.
+            # Fall back to index 0 if the activity row isn't present yet.
+            insert_pos = 0
+            it = self._store.get_iter_first()
+            if it and self._store.get_value(it, COL_TYPE) == 'activity':
+                insert_pos = 1
+            fav_it = self._store.insert(None, insert_pos, [
+                'starred-symbolic', 'Favourites', 'favourites', conn, '', ''
+            ])
+
+        for fav in sorted(pinned, key=lambda f: (f['table'].lower(), f['schema'].lower())):
+            label = f'{fav["table"]} ({fav["schema"]})'
+            self._store.append(fav_it, [
+                'x-office-spreadsheet-symbolic', label, 'favourite',
+                conn, fav['schema'], fav['table'],
+            ])
+
+        # Ensure the favourites section stays expanded
+        fav_path = self._store.get_path(fav_it)
+        filter_path = self._filter.convert_child_path_to_path(fav_path)
+        if filter_path:
+            self._tree.expand_row(filter_path, False)
 
     def _on_row_activated(self, tree, path, _col):
         it = self._filter.get_iter(path)

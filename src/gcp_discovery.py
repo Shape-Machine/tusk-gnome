@@ -163,14 +163,6 @@ def save_cloud_sql_server_ca(instance, project):
         return None
 
 
-def _has_public_ip(instance):
-    """Return True if the Cloud SQL instance has a public IP address."""
-    for ip in instance.get('ipAddresses', []):
-        if ip.get('type') == 'PRIMARY':
-            return True
-    return False
-
-
 def _iam_auth_enabled(instance):
     """Return True if the Cloud SQL instance has IAM database authentication on."""
     for flag in instance.get('settings', {}).get('databaseFlags', []):
@@ -179,25 +171,22 @@ def _iam_auth_enabled(instance):
     return False
 
 
-def build_cloud_sql_conn(instance, project, fetch_cert=True):
+def build_cloud_sql_conn(instance, project):
     """Convert a Cloud SQL instance dict into a Tusk connection dict."""
     name = instance.get('name', '')
     region = instance.get('region', '')
     db_version = instance.get('databaseVersion', '')  # e.g. POSTGRES_15
     connection_name = instance.get('connectionName', f'{project}:{region}:{name}')
 
-    has_pub_ip = _has_public_ip(instance)
-    proxy_enabled = not has_pub_ip
+    proxy_enabled = True  # always use Cloud SQL Auth Proxy; direct public-IP connections require IP allowlisting which is fragile
     iam_enabled = _iam_auth_enabled(instance)
 
-    # Pick a reachable host: public IP if available, else localhost (proxy)
+    # Always connect via proxy — host must be localhost so the reachability
+    # check and connection subtitle reflect what is actually used.
     host = 'localhost'
-    for ip in instance.get('ipAddresses', []):
-        if ip.get('type') == 'PRIMARY':
-            host = ip['ipAddress']
-            break
 
-    cert_path = save_cloud_sql_server_ca(instance, project) if fetch_cert else None
+    # Proxy connections skip SSL in _psycopg_kwargs(), so no cert is needed.
+    cert_path = None
 
     tags = ['gcp']
     if region:
@@ -216,7 +205,7 @@ def build_cloud_sql_conn(instance, project, fetch_cert=True):
         'cloud_auth_mode': 'iam' if iam_enabled else 'password',
         'cloud_proxy_enabled': proxy_enabled,
         'cloud_proxy_port': None,
-        'ssl_mode': 'require',
+        'ssl_mode': 'require' if not proxy_enabled else None,
         'ssl_root_cert': cert_path,
         'tags': tags,
         '_gcp_service': 'Cloud SQL',

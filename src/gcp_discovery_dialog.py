@@ -319,7 +319,7 @@ class GcpDiscoveryDialog(Adw.Dialog):
             try:
                 instances = gcp_discovery.discover_cloud_sql(project)
                 for inst in instances:
-                    conn = gcp_discovery.build_cloud_sql_conn(inst, project, fetch_cert=True)
+                    conn = gcp_discovery.build_cloud_sql_conn(inst, project)
                     conns.append(conn)
             except RuntimeError as e:
                 errors.append(f'{project} / Cloud SQL: {e}')
