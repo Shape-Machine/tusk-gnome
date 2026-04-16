@@ -274,11 +274,16 @@ class ConnectionDialog(Adw.Dialog):
         self._tag_checks = {}  # name → Gtk.CheckButton
         self._tags_registry = self._store.get_tags_registry() if self._store else {}
         self._tags_expander = None
+        self._tags_summary_label = None
         registry = self._tags_registry
         tags_group = None
         if registry:
             tags_group = Adw.PreferencesGroup()
             self._tags_expander = Adw.ExpanderRow(title='Tags')
+            self._tags_summary_label = Gtk.Label()
+            self._tags_summary_label.set_valign(Gtk.Align.CENTER)
+            self._tags_summary_label.add_css_class('dim-label')
+            self._tags_expander.add_suffix(self._tags_summary_label)
             tags_group.add(self._tags_expander)
             for tag_name in sorted(registry):
                 meta = registry[tag_name]
@@ -428,7 +433,7 @@ class ConnectionDialog(Adw.Dialog):
 
     def _on_tags_expander_changed(self, *_):
         if self._tags_expander.get_expanded():
-            self._tags_expander.set_subtitle('')
+            self._tags_summary_label.set_visible(False)
         else:
             self._update_tags_subtitle()
 
@@ -437,16 +442,17 @@ class ConnectionDialog(Adw.Dialog):
             return
         selected_sorted = [t for t in sorted(self._tags_registry) if t in self._selected_tags]
         if not selected_sorted:
-            self._tags_expander.set_subtitle('None')
-            return
-        parts = []
-        for tag_name in selected_sorted:
-            meta = self._tags_registry.get(tag_name, {})
-            raw_color = meta.get('color', '#aaaaaa')
-            color = raw_color if re.match(r'^#[0-9a-fA-F]{6}$', raw_color or '') else '#aaaaaa'
-            escaped = GLib.markup_escape_text(tag_name)
-            parts.append(f'<span foreground="{color}">⬤</span> {escaped}')
-        self._tags_expander.set_subtitle(', '.join(parts))
+            self._tags_summary_label.set_markup('None')
+        else:
+            parts = []
+            for tag_name in selected_sorted:
+                meta = self._tags_registry.get(tag_name, {})
+                raw_color = meta.get('color', '#aaaaaa')
+                color = raw_color if re.match(r'^#[0-9a-fA-F]{6}$', raw_color or '') else '#aaaaaa'
+                escaped = GLib.markup_escape_text(tag_name)
+                parts.append(f'<span foreground="{color}">⬤</span> {escaped}')
+            self._tags_summary_label.set_markup(', '.join(parts))
+        self._tags_summary_label.set_visible(True)
 
     def _on_browse_key(self, _btn):
         dialog = Gtk.FileChooserNative(
