@@ -267,16 +267,19 @@ class ConnectionDialog(Adw.Dialog):
         # ── 2-column layout ───────────────────────────────────────────────────
         left_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
         left_col.set_hexpand(True)
-        left_col.append(name_group)
         left_col.append(details_group)
         left_col.append(auth_group)
 
         # ── Tags ─────────────────────────────────────────────────────────────
         self._tag_checks = {}  # name → Gtk.CheckButton
-        registry = self._store.get_tags_registry() if self._store else {}
+        self._tags_registry = self._store.get_tags_registry() if self._store else {}
+        self._tags_expander = None
+        registry = self._tags_registry
         tags_group = None
         if registry:
-            tags_group = Adw.PreferencesGroup(title='Tags')
+            tags_group = Adw.PreferencesGroup()
+            self._tags_expander = Adw.ExpanderRow(title='Tags')
+            tags_group.add(self._tags_expander)
             for tag_name in sorted(registry):
                 meta = registry[tag_name]
                 row = Adw.ActionRow(title=tag_name)
@@ -299,8 +302,11 @@ class ConnectionDialog(Adw.Dialog):
                 check.connect('toggled', self._on_tag_toggled, tag_name)
                 row.add_suffix(check)
                 row.set_activatable_widget(check)
-                tags_group.add(row)
+                self._tags_expander.add_row(row)
                 self._tag_checks[tag_name] = check
+            # Collapse by default when there are more than 4 tags
+            self._tags_expander.set_expanded(len(registry) <= 4)
+            self._update_tags_subtitle()
 
         right_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
         right_col.set_hexpand(True)
@@ -320,6 +326,7 @@ class ConnectionDialog(Adw.Dialog):
 
         content.append(uri_group)
         content.append(self._uri_error_label)
+        content.append(name_group)
         content.append(two_col)
         content.append(ssh_group)
         content.append(cloud_group)
@@ -416,6 +423,23 @@ class ConnectionDialog(Adw.Dialog):
             self._selected_tags.add(tag_name)
         else:
             self._selected_tags.discard(tag_name)
+        self._update_tags_subtitle()
+
+    def _update_tags_subtitle(self):
+        if self._tags_expander is None:
+            return
+        selected_sorted = [t for t in sorted(self._tags_registry) if t in self._selected_tags]
+        if not selected_sorted:
+            self._tags_expander.set_subtitle('None')
+            return
+        parts = []
+        for tag_name in selected_sorted:
+            meta = self._tags_registry.get(tag_name, {})
+            raw_color = meta.get('color', '#aaaaaa')
+            color = raw_color if re.match(r'^#[0-9a-fA-F]{6}$', raw_color or '') else '#aaaaaa'
+            escaped = GLib.markup_escape_text(tag_name)
+            parts.append(f'<span foreground="{color}">⬤</span> {escaped}')
+        self._tags_expander.set_subtitle(', '.join(parts))
 
     def _on_browse_key(self, _btn):
         dialog = Gtk.FileChooserNative(
