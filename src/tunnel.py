@@ -137,6 +137,24 @@ def open_db(conn, autocommit=False):
                 conn.get('username', ''),
                 conn.get('cloud_region', ''),
             )
+        elif provider.startswith('azure-'):
+            from azure_discovery import get_azure_ad_token, get_active_username
+            password = get_azure_ad_token()
+            # Azure AD auth requires the UPN as username, not the stored admin login.
+            # If UPN lookup fails and the stored username doesn't look like a UPN, fail
+            # loudly rather than attempting auth with the wrong username.
+            upn = get_active_username()
+            stored = conn.get('username', '')
+            if upn:
+                conn = {**conn, 'username': upn, 'ssl_mode': 'require'}
+            elif '@' in stored:
+                conn = {**conn, 'ssl_mode': 'require'}
+            else:
+                raise RuntimeError(
+                    'Could not determine your Azure AD UPN.\n\n'
+                    'Run `az login` to refresh your credentials, or set the connection '
+                    'username to your Azure AD email address (e.g. user@example.com).'
+                )
         else:
             from gcp_discovery import get_iam_token
             password = get_iam_token()
