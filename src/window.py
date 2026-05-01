@@ -19,6 +19,7 @@ from connections import ConnectionStore, KeyringUnavailableError
 from connection_dialog import ConnectionDialog
 from gcp_discovery_dialog import GcpDiscoveryDialog
 from aws_discovery_dialog import AwsDiscoveryDialog
+from azure_discovery_dialog import AzureDiscoveryDialog
 from style import MARGIN_XS, MARGIN_SM, MARGIN_MD
 from db_browser import DbBrowser
 from file_explorer import FileExplorer
@@ -112,6 +113,7 @@ class TuskWindow(Adw.ApplicationWindow):
         add('import-connections-json',    lambda *_: self._on_import_connections_json())
         add('import-from-gcp',           lambda *_: self._on_import_from_gcp())
         add('import-from-aws',           lambda *_: self._on_import_from_aws())
+        add('import-from-azure',         lambda *_: self._on_import_from_azure())
         add('cleanup-stale',              lambda *_: self._on_cleanup_stale())
         self._sort_action = Gio.SimpleAction.new_stateful(
             'conn-sort', GLib.VariantType.new('s'), GLib.Variant('s', self._conn_sort_state)
@@ -363,6 +365,7 @@ class TuskWindow(Adw.ApplicationWindow):
         add_menu.append('Import connections…', 'win.import-connections-json')
         add_menu.append('Import from GCP…', 'win.import-from-gcp')
         add_menu.append('Import from AWS…', 'win.import-from-aws')
+        add_menu.append('Import from Azure…', 'win.import-from-azure')
         add_btn.set_menu_model(add_menu)
         header.pack_end(add_btn)
 
@@ -524,6 +527,7 @@ class TuskWindow(Adw.ApplicationWindow):
         add_section.append('Import connections…', 'win.import-connections-json')
         add_section.append('Import from GCP…', 'win.import-from-gcp')
         add_section.append('Import from AWS…', 'win.import-from-aws')
+        add_section.append('Import from Azure…', 'win.import-from-azure')
 
         manage_section = Gio.Menu()
         manage_section.append('Check all connections', 'win.check-all-health')
@@ -1902,6 +1906,34 @@ class TuskWindow(Adw.ApplicationWindow):
                 self._add_connection_row(conn, tags_registry=tags_reg)
         self._refresh_tag_strip()
         msg = f'{added} connection{"s" if added != 1 else ""} imported from AWS.'
+        if skipped:
+            msg += f' {skipped} skipped.'
+        self._show_toast(msg)
+
+    def _on_import_from_azure(self):
+        existing_instance_ids = {
+            c.get('cloud_instance_id')
+            for c in self._store.list()
+            if c.get('cloud_instance_id')
+        }
+        dlg = AzureDiscoveryDialog(existing_instance_ids=existing_instance_ids)
+        dlg.connect('import-confirmed', self._on_azure_import_confirmed)
+        dlg.present(self)
+
+    def _on_azure_import_confirmed(self, _dlg, conns):
+        # Build the tags registry for Azure tags that may not exist yet
+        tags_registry = {}
+        for conn in conns:
+            for tag in conn.get('tags', []):
+                tags_registry.setdefault(tag, {'color': '#0078D4', 'warn_on_connect': False})
+        added, skipped = self._store.bulk_import(conns, tags_registry)
+        existing_ids = set(self._conn_mgr_rows.keys())
+        tags_reg = self._store.get_tags_registry()
+        for conn in self._store.list():
+            if conn['id'] not in existing_ids:
+                self._add_connection_row(conn, tags_registry=tags_reg)
+        self._refresh_tag_strip()
+        msg = f'{added} connection{"s" if added != 1 else ""} imported from Azure.'
         if skipped:
             msg += f' {skipped} skipped.'
         self._show_toast(msg)

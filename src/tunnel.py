@@ -137,6 +137,9 @@ def open_db(conn, autocommit=False):
                 conn.get('username', ''),
                 conn.get('cloud_region', ''),
             )
+        elif provider.startswith('azure-'):
+            from azure_discovery import get_azure_ad_token
+            password = get_azure_ad_token()
         else:
             from gcp_discovery import get_iam_token
             password = get_iam_token()

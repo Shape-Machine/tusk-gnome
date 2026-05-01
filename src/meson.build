@@ -57,6 +57,8 @@ tusk_sources = [
   'gcp_discovery_dialog.py',
   'aws_discovery.py',
   'aws_discovery_dialog.py',
+  'azure_discovery.py',
+  'azure_discovery_dialog.py',
 ]
 
 install_data(tusk_sources, install_dir: pkgdatadir)
