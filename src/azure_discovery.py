@@ -40,7 +40,7 @@ def _friendly_azure_error(stderr, fallback):
             'No Azure subscriptions found for your account.\n\n'
             'Make sure your account has access to at least one subscription.'
         )
-    if 'cloud not be found' in low or 'resourcenotfound' in low:
+    if 'could not be found' in low or 'resourcenotfound' in low:
         return (
             'The requested Azure resource could not be found.\n\n'
             'Check that your subscription ID is correct and that you have access.'
@@ -84,6 +84,19 @@ def get_active_account():
     The returned dict has at least: id, name, isDefault, tenantId, user.name
     """
     return _az('account', 'show')
+
+
+def get_active_username():
+    """Return the current Azure AD user's UPN (email), or '' on failure.
+
+    Used as the PostgreSQL username when cloud_auth_mode='iam', since Azure AD
+    auth requires the UPN rather than the admin login stored in the profile.
+    """
+    try:
+        account = get_active_account()
+        return account.get('user', {}).get('name', '')
+    except RuntimeError:
+        return ''
 
 
 def list_subscriptions():

@@ -253,10 +253,6 @@ class AzureDiscoveryDialog(Adw.Dialog):
 
     def _on_subscription_confirm(self, _btn):
         selected = [sub for check, sub in self._subscription_rows if check.get_active()]
-        if not selected:
-            self._sub_list_box.add_css_class('error')
-            return
-        self._sub_list_box.remove_css_class('error')
         self._start_discovery(selected[0])
 
     def _start_discovery(self, subscription):
@@ -273,7 +269,6 @@ class AzureDiscoveryDialog(Adw.Dialog):
         sub_id = subscription.get('id', '')
         conns = []
         errors = []
-        single_server_names = []
 
         cert_path = azure_discovery.get_azure_ca_cert()
         if cert_path is None:

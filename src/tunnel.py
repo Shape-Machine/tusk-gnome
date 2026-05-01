@@ -138,8 +138,12 @@ def open_db(conn, autocommit=False):
                 conn.get('cloud_region', ''),
             )
         elif provider.startswith('azure-'):
-            from azure_discovery import get_azure_ad_token
+            from azure_discovery import get_azure_ad_token, get_active_username
             password = get_azure_ad_token()
+            # Azure AD auth requires the UPN as username, not the stored admin login
+            upn = get_active_username()
+            if upn:
+                conn = {**conn, 'username': upn}
         else:
             from gcp_discovery import get_iam_token
             password = get_iam_token()
